@@ -86,39 +86,56 @@ jobs:
           checkpoint_title="$(jq -r '.title' <<< "$checkpoint_json")"
           checkpoint_url="$(jq -r '.url' <<< "$checkpoint_json")"
           checkpoint_body="$(jq -r '.body' <<< "$checkpoint_json")"
+          marker="Promoted from release checkpoint issue #$CHECKPOINT_ISSUE:"
+          existing_checkpoint_tag="$(
+            for tag in $(git tag --list 'v[0-9]*' --sort=-v:refname); do
+              if git tag -l --format='%(contents)' "$tag" | grep -Fq "$marker"; then
+                echo "$tag"
+                break
+              fi
+            done
+          )"
+
           latest_tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
           latest_tag="${latest_tag:-v0.0.0}"
-          version="${latest_tag#v}"
 
-          IFS=. read -r major minor patch_extra <<< "$version"
-          patch="${patch_extra%%[-+]*}"
-          major="${major:-0}"
-          minor="${minor:-0}"
-          patch="${patch:-0}"
+          if [[ -n "$existing_checkpoint_tag" ]]; then
+            next_tag="$existing_checkpoint_tag"
+            reused_tag=true
+          else
+            version="${latest_tag#v}"
 
-          case "$BUMP" in
-            major)
-              major=$((major + 1))
-              minor=0
-              patch=0
-              ;;
-            minor)
-              minor=$((minor + 1))
-              patch=0
-              ;;
-            patch)
-              patch=$((patch + 1))
-              ;;
-            *)
-              echo "Unsupported bump: $BUMP" >&2
+            IFS=. read -r major minor patch_extra <<< "$version"
+            patch="${patch_extra%%[-+]*}"
+            major="${major:-0}"
+            minor="${minor:-0}"
+            patch="${patch:-0}"
+
+            case "$BUMP" in
+              major)
+                major=$((major + 1))
+                minor=0
+                patch=0
+                ;;
+              minor)
+                minor=$((minor + 1))
+                patch=0
+                ;;
+              patch)
+                patch=$((patch + 1))
+                ;;
+              *)
+                echo "Unsupported bump: $BUMP" >&2
+                exit 1
+                ;;
+            esac
+
+            next_tag="v${major}.${minor}.${patch}"
+            reused_tag=false
+            if git rev-parse "$next_tag" >/dev/null 2>&1; then
+              echo "Tag $next_tag already exists." >&2
               exit 1
-              ;;
-          esac
-
-          next_tag="v${major}.${minor}.${patch}"
-          if git rev-parse "$next_tag" >/dev/null 2>&1; then
-            echo "Tag $next_tag already exists." >&2
-            exit 1
+            fi
           fi
 
           message_file="$(mktemp)"
@@ -137,6 +154,7 @@ jobs:
             echo "next_tag=$next_tag"
             echo "checkpoint_url=$checkpoint_url"
             echo "message_file=$message_file"
+            echo "reused_tag=$reused_tag"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -146,10 +164,12 @@ jobs:
             echo "- Latest tag: $latest_tag"
             echo "- Next tag: $next_tag"
             echo "- Bump: $BUMP"
+            echo "- Reused existing checkpoint tag: $reused_tag"
             echo "- Dry run: $DRY_RUN"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Create and push tag
+        id: publish_tag
         if: env.DRY_RUN != 'true'
         shell: bash
         run: |
@@ -157,21 +177,55 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.tag.outputs.next_tag }}" -F "${{ steps.tag.outputs.message_file }}"
-          git push origin "${{ steps.tag.outputs.next_tag }}"
+          if git rev-parse "${{ steps.tag.outputs.next_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.tag.outputs.next_tag }} already exists locally; not recreating it."
+          else
+            git tag -a "${{ steps.tag.outputs.next_tag }}" -F "${{ steps.tag.outputs.message_file }}"
+          fi
 
-          gh issue comment "$CHECKPOINT_ISSUE" \
-            --body "Promoted checkpoint to tag ${{ steps.tag.outputs.next_tag }}. The Release workflow will build from this tag."
+          if git ls-remote --exit-code --tags origin "refs/tags/${{ steps.tag.outputs.next_tag }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.tag.outputs.next_tag }} already exists on origin; not pushing it again."
+          else
+            git push origin "${{ steps.tag.outputs.next_tag }}"
+          fi
 
       - name: Dispatch factory cycle
-        if: env.DRY_RUN != 'true'
+        if: ${{ always() && env.DRY_RUN != 'true' && steps.publish_tag.outcome == 'success' }}
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
 
-          gh workflow run factory-cycle-dispatch.yml \
+          active_runs="$(gh run list --workflow factory-cycle-dispatch.yml --status queued --limit 1 --json databaseId --jq 'length' 2>/dev/null || echo 0)"
+          in_progress_runs="$(gh run list --workflow factory-cycle-dispatch.yml --status in_progress --limit 1 --json databaseId --jq 'length' 2>/dev/null || echo 0)"
+          if (( active_runs > 0 || in_progress_runs > 0 )); then
+            echo "Factory cycle is already queued or running; skipping dispatch." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if ! gh workflow run factory-cycle-dispatch.yml \
             --ref master \
-            -f context="Release tag ${{ steps.tag.outputs.next_tag }} was published from checkpoint issue #$CHECKPOINT_ISSUE. Evaluate the next software-factory cycle from master."
+            -f context="Release tag ${{ steps.tag.outputs.next_tag }} was published from checkpoint issue #$CHECKPOINT_ISSUE. Evaluate the next software-factory cycle from master."; then
+            echo "WARNING: failed to dispatch factory-cycle-dispatch.yml after publishing ${{ steps.tag.outputs.next_tag }}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Comment on checkpoint issue
+        if: ${{ always() && env.DRY_RUN != 'true' && steps.publish_tag.outcome == 'success' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -uo pipefail
+
+          comment_body="Promoted checkpoint to tag ${{ steps.tag.outputs.next_tag }}. The Release workflow will build from this tag."
+          existing_comment="$(gh issue view "$CHECKPOINT_ISSUE" --json comments --jq '.comments[]?.body' 2>/dev/null | grep -Fx "$comment_body" || true)"
+          if [[ -n "$existing_comment" ]]; then
+            echo "Checkpoint issue already has promotion comment for ${{ steps.tag.outputs.next_tag }}; skipping duplicate comment." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if ! gh issue comment "$CHECKPOINT_ISSUE" --body "$comment_body"; then
+            echo "WARNING: failed to comment on checkpoint issue #$CHECKPOINT_ISSUE after publishing ${{ steps.tag.outputs.next_tag }}." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Report dry run
         if: env.DRY_RUN == 'true'
