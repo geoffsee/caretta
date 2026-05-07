@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run freq-ai backlog curation
-        uses: geoffsee/freq-ai-action@v0.0.1
+        uses: geoffsee/freq-ai-action@v0.0.2
         with:
           task: backlog-curation
           preset: software-factory

@@ -34,7 +34,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run freq-ai autonomous sprint
-        uses: geoffsee/freq-ai-action@v0.0.1
+        uses: geoffsee/freq-ai-action@v0.0.2
         with:
           task: autonomous-sprint
           preset: software-factory
