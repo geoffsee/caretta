@@ -219,6 +219,21 @@ mod tests {
             .current_dir(root)
             .status()
             .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "test@example.com"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "Test"])
+            .current_dir(root)
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "commit.gpgsign", "false"])
+            .current_dir(root)
+            .status()
+            .unwrap();
         fs::write(root.join("README.md"), "# Initial\n").unwrap();
         fs::write(root.join("STATUS.md"), "# Status\n").unwrap();
         std::process::Command::new("git")
