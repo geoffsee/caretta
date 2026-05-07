@@ -83,7 +83,10 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             generate_codebase_snapshot(&cfg.root)
         }
     });
-    run_agent(
+    log(&format!(
+        "Launching agent for issue #{issue_num} on branch '{branch}'..."
+    ));
+    let agent_ok = run_agent(
         cfg,
         &build_prompt(
             &cfg.project_name,
@@ -95,6 +98,13 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             &tracker_body,
         ),
     );
+    if agent_ok {
+        log(&format!("Agent run completed for issue #{issue_num}."));
+    } else {
+        log(&format!(
+            "Agent run exited unsuccessfully for issue #{issue_num}; continuing to checks."
+        ));
+    }
     if stop_requested() {
         log("Stop requested; halting issue workflow before tests/commit.");
         return;
@@ -121,6 +131,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
         "commit",
         commit_with_retries(cfg, issue_num, &branch, &commit_msg)
     );
+    log(&format!("Issue #{issue_num} loop iteration complete."));
 }
 
 pub fn commit_with_retries(_cfg: &Config, _issue_num: u32, branch: &str, message: &str) -> bool {
@@ -180,17 +191,36 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
         cfg.project_name
     ));
 
+    let mut cycle = 0u64;
     loop {
         if stop_requested() {
             break;
         }
 
+        cycle += 1;
+        log(&format!(
+            "Loop heartbeat: cycle {cycle} reading tracker #{tracker_num}..."
+        ));
         let pending = parse_pending(&get_tracker_body(tracker_num));
+        if pending.is_empty() {
+            log(&format!(
+                "Loop heartbeat: cycle {cycle} found no pending issues; sleeping 30s."
+            ));
+        } else {
+            log(&format!(
+                "Loop heartbeat: cycle {cycle} found {} pending issue(s).",
+                pending.len()
+            ));
+        }
         for issue in pending {
             if stop_requested() {
                 break;
             }
             // Real implementation would handle dependencies/blockers.
+            log(&format!(
+                "Loop heartbeat: cycle {cycle} starting issue #{}.",
+                issue.number
+            ));
             work_on_issue(cfg, tracker_num, issue.number, &issue.blockers);
         }
 
