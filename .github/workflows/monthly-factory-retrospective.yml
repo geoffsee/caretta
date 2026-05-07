@@ -1,0 +1,43 @@
+name: Factory Retrospective
+
+on:
+  workflow_dispatch:
+    inputs:
+      context:
+        description: "Optional natural-language steering context"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      context:
+        description: "Optional natural-language steering context"
+        required: false
+        type: string
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: playground-v0-fast-factory-retrospective
+  cancel-in-progress: true
+
+jobs:
+  factory-retrospective:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run freq-ai factory retrospective
+        uses: geoffsee/freq-ai-action@v0.0.1
+        with:
+          task: factory-retrospective
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

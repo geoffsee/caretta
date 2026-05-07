@@ -1,0 +1,22 @@
+name: Factory Charter
+id: factory_charter
+description: Define guardrails and autonomy policy for a GitHub Actions software factory
+pattern: two_phase
+context: strategic
+
+ui:
+  category: discovery
+  order: 10
+  visible: true
+
+depends_on: []
+
+phases:
+  draft:
+    template: draft.md
+    log_start: "Drafting software factory charter..."
+    log_complete: "Factory charter draft complete — review guardrails and policy."
+  finalize:
+    template: finalize.md
+    log_start: "Finalising software factory charter..."
+    log_complete: "Factory charter complete."

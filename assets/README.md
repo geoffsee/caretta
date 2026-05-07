@@ -59,6 +59,7 @@ Built-in presets:
 - `business-development` — workflows for market research, partnership outreach, and sales prospecting
 - `quality-assurance` — bug triage, regression testing, and test-plan generation
 - `data-science` — dataset search, cleaning, EDA, feature engineering, model training, and model evaluation
+- `software-factory` — autonomous software factory loop for GitHub Actions with chartering, backlog curation, autonomous sprint execution, CI governance hardening, and factory retrospectives
 
 The preset selector is always shown in the sidebar when presets are available. If only one preset exists, the selector is disabled until another preset folder is added.
 
@@ -167,3 +168,6 @@ fragments:                            # reusable text blocks, included via {{> n
   engineering, model training, and model evaluation.
 - `deep-research` includes deep research plus the standard research, planning,
   review, and retrospective flow.
+- `software-factory` includes Factory Charter, Backlog Curation, Autonomous
+  Sprint, CI Governance, and Factory Retrospective workflows for long-running
+  autonomous software evolution.

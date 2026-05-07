@@ -12,7 +12,7 @@ COPY . .
 RUN --mount=type=cache,target=/root/.cargo/registry \
     --mount=type=cache,target=/root/.cargo/git \
     --mount=type=cache,target=/app/target \
-    cargo build --release \
+    cargo build --release --features bundle-runtime \
     && mkdir -p /app/bin \
     && cp target/release/freq-ai /app/bin/
 ENTRYPOINT ["/app/bin/freq-ai"]

@@ -16,6 +16,14 @@ path = "src/lib.rs"
 name = "freq-ai"
 path = "src/main.rs"
 
+[features]
+# Forwarded to `freq-ai-agent-runtime`. Off by default so `cargo build` /
+# `cargo test` are fast in development; pass `--features bundle-runtime` for
+# release / distribution builds that must ship a self-contained binary with
+# the agent runtime archive embedded.
+default = []
+bundle-runtime = ["agent-runtime/bundle-runtime"]
+
 [dependencies]
 agent-common = { path = "../agent-common" }
 cli-common = { path = "../cli-common" }

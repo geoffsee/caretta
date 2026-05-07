@@ -11,45 +11,67 @@ use tar::{Builder, EntryType, Header};
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=package.json");
+    // Cache key intentionally tracks ONLY `bun.lock`. We do not re-run when
+    // `package.json` changes on its own (a lockfile update will reflect any
+    // dependency change), and we do not invalidate on `BUN` binary path
+    // changes — switching Bun versions does not require re-archiving the
+    // agent runtime. This keeps incremental builds fast.
     println!("cargo:rerun-if-changed=bun.lock");
-    println!("cargo:rerun-if-env-changed=BUN");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS");
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH");
+    let bundle_runtime = env::var_os("CARGO_FEATURE_BUNDLE_RUNTIME").is_some();
     let bun_path = resolve_bun_path();
     let install_stamp = out_dir.join("bun_install.stamp");
 
-    let install_key = install_cache_key(&manifest_dir, &bun_path, &target_os, &target_arch)
-        .expect("compute bun install cache key");
+    let install_key =
+        install_cache_key(&manifest_dir, &target_os, &target_arch).expect("compute install key");
     run_bun_install_if_needed(&manifest_dir, &bun_path, &install_stamp, &install_key);
 
     let archive_name = format!("freq-ai-agents-{target_os}-{target_arch}.tar.gz");
-    let archive_path = out_dir.join(&archive_name);
-    let archive_stamp = out_dir.join("runtime_archive.stamp");
-    let archive_key = archive_cache_key(&install_key).expect("compute archive cache key");
-    let archive_sha_file = out_dir.join("runtime_archive.sha256");
-    let archive_sha256 = create_archive_if_needed(
-        &manifest_dir,
-        &archive_path,
-        &bun_path,
-        &archive_stamp,
-        &archive_key,
-        &archive_sha_file,
-    )
-    .expect("create/hash agent runtime archive");
+    let generated_path = out_dir.join("agent_runtime_generated.rs");
 
-    write_generated(
-        &out_dir.join("agent_runtime_generated.rs"),
-        &archive_name,
-        &archive_path,
-        &archive_sha256,
-        &target_os,
-        &target_arch,
-    )
-    .expect("write generated agent runtime metadata");
+    if bundle_runtime {
+        let archive_path = out_dir.join(&archive_name);
+        let archive_stamp = out_dir.join("runtime_archive.stamp");
+        let archive_sha_file = out_dir.join("runtime_archive.sha256");
+        let archive_key = archive_cache_key(&install_key).expect("compute archive cache key");
+        let archive_sha256 = create_archive_if_needed(
+            &manifest_dir,
+            &archive_path,
+            &bun_path,
+            &archive_stamp,
+            &archive_key,
+            &archive_sha_file,
+        )
+        .expect("create/hash agent runtime archive");
+
+        write_generated_bundled(
+            &generated_path,
+            &archive_name,
+            &archive_path,
+            &archive_sha256,
+            &target_os,
+            &target_arch,
+        )
+        .expect("write bundled agent runtime metadata");
+    } else {
+        // Dev / non-bundled build: skip the multi-hundred-MB archive. The
+        // runtime will mount `node_modules` directly from the crate source.
+        let install_short = &install_key[..12];
+        write_generated_unbundled(
+            &generated_path,
+            &archive_name,
+            &manifest_dir,
+            &bun_path,
+            install_short,
+            &target_os,
+            &target_arch,
+        )
+        .expect("write unbundled agent runtime metadata");
+    }
 }
 
 fn run_bun_install_if_needed(manifest_dir: &Path, bun_path: &Path, stamp_path: &Path, key: &str) {
@@ -108,7 +130,11 @@ fn create_archive(manifest_dir: &Path, archive_path: &Path, bun_path: &Path) -> 
     }
 
     let tar_gz = File::create(archive_path)?;
-    let encoder = GzEncoder::new(tar_gz, Compression::best());
+    let level = match env::var("PROFILE").as_deref() {
+        Ok("release") => Compression::default(),
+        _ => Compression::fast(),
+    };
+    let encoder = GzEncoder::new(tar_gz, level);
     let mut archive = Builder::new(encoder);
 
     append_file(&mut archive, manifest_dir, "package.json")?;
@@ -162,7 +188,7 @@ fn sha256_file(path: &Path) -> io::Result<String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn write_generated(
+fn write_generated_bundled(
     path: &Path,
     archive_name: &str,
     archive_path: &Path,
@@ -178,7 +204,41 @@ pub const TARGET_ARCH: &str = {target_arch:?};
 pub const ARCHIVE_NAME: &str = {archive_name:?};
 pub const ARCHIVE_SHA256: &str = {archive_sha256:?};
 pub const ARCHIVE_SHORT_SHA256: &str = {short_hash:?};
+
+#[cfg(feature = "bundle-runtime")]
 pub const ARCHIVE_BYTES: &[u8] = include_bytes!(r#"{archive_path}"#);
+"##
+    );
+    File::create(path)?.write_all(source.as_bytes())
+}
+
+fn write_generated_unbundled(
+    path: &Path,
+    archive_name: &str,
+    manifest_dir: &Path,
+    bun_path: &Path,
+    install_short: &str,
+    target_os: &str,
+    target_arch: &str,
+) -> io::Result<()> {
+    let manifest_dir_lit = manifest_dir.display().to_string().replace('\\', "\\\\");
+    let bun_path_lit = bun_path.display().to_string().replace('\\', "\\\\");
+    let source = format!(
+        r##"pub const TARGET_OS: &str = {target_os:?};
+pub const TARGET_ARCH: &str = {target_arch:?};
+pub const ARCHIVE_NAME: &str = {archive_name:?};
+// Without the `bundle-runtime` feature there is no embedded archive. We still
+// expose a stable identifier so consumers (e.g. `default_runtime_root`) can
+// scope their working directory; it is derived from the install cache key.
+pub const ARCHIVE_SHA256: &str = {install_short:?};
+pub const ARCHIVE_SHORT_SHA256: &str = {install_short:?};
+
+/// Absolute path to the `agent-runtime` crate source directory at build time.
+/// Used in non-bundled builds to reach the locally installed `node_modules`.
+pub const MANIFEST_DIR: &str = r#"{manifest_dir_lit}"#;
+/// Absolute path to the resolved Bun binary at build time. Used in non-bundled
+/// builds to expose `bun`/`node` without unpacking an embedded archive.
+pub const BUN_PATH: &str = r#"{bun_path_lit}"#;
 "##
     );
     File::create(path)?.write_all(source.as_bytes())
@@ -186,16 +246,15 @@ pub const ARCHIVE_BYTES: &[u8] = include_bytes!(r#"{archive_path}"#);
 
 fn install_cache_key(
     manifest_dir: &Path,
-    bun_path: &Path,
     target_os: &str,
     target_arch: &str,
 ) -> io::Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(target_os.as_bytes());
     hasher.update(target_arch.as_bytes());
-    hasher.update(file_sha256(manifest_dir.join("package.json"))?.as_bytes());
+    // Only the lockfile contributes to the cache key — package.json edits or
+    // Bun binary upgrades do not invalidate the bundled runtime on their own.
     hasher.update(file_sha256(manifest_dir.join("bun.lock"))?.as_bytes());
-    hasher.update(file_sha256(bun_path)?.as_bytes());
     Ok(format!("{:x}", hasher.finalize()))
 }
 

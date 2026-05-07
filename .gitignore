@@ -21,3 +21,5 @@ node_modules/
 .env.my-ci
 /docs/internal/
 /playground
+/.playground/
+/crates/agent-runtime/.grok/settings.json

@@ -1,0 +1,23 @@
+name: Factory Retrospective
+id: factory_retrospective
+description: Review autonomous cycle outcomes and improve the factory loop
+pattern: two_phase
+context: retro
+
+ui:
+  category: maintenance
+  order: 50
+  visible: true
+
+depends_on:
+  - ci_governance
+
+phases:
+  draft:
+    template: draft.md
+    log_start: "Drafting factory retrospective..."
+    log_complete: "Factory retrospective draft complete — review lessons and actions."
+  finalize:
+    template: finalize.md
+    log_start: "Finalising factory retrospective..."
+    log_complete: "Factory retrospective complete."

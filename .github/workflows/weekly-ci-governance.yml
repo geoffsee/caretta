@@ -1,0 +1,43 @@
+name: CI Governance
+
+on:
+  workflow_dispatch:
+    inputs:
+      context:
+        description: "Optional natural-language steering context"
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      context:
+        description: "Optional natural-language steering context"
+        required: false
+        type: string
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: playground-v0-fast-ci-governance
+  cancel-in-progress: true
+
+jobs:
+  ci-governance:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run freq-ai ci governance
+        uses: geoffsee/freq-ai-action@v0.0.1
+        with:
+          task: ci-governance
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

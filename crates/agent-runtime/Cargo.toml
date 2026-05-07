@@ -10,11 +10,21 @@ homepage.workspace = true
 [lib]
 name = "agent_runtime"
 
+[features]
+# When enabled, embeds the bundled agent runtime archive (`node_modules` + `bun`)
+# into the compiled binary via `include_bytes!`. This makes the resulting binary
+# self-contained, but is very slow to build (multi-hundred-MB archive embedded
+# into the rlib). Off by default so dev builds (`cargo build`, `cargo test`) are
+# fast and load `node_modules` directly from the crate's source directory.
+# Release / distribution builds should pass `--features bundle-runtime`.
+default = []
+bundle-runtime = ["dep:flate2", "dep:tar"]
+
 [dependencies]
 agent-common = { path = "../agent-common" }
 cli-common = { path = "../cli-common" }
-flate2 = "1"
-tar = "0.4"
+flate2 = { version = "1", optional = true }
+tar = { version = "0.4", optional = true }
 
 [build-dependencies]
 flate2 = "1"

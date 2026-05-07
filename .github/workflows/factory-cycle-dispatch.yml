@@ -1,0 +1,62 @@
+name: Factory Cycle Dispatch
+
+on:
+  push:
+    branches:
+      - ci
+  workflow_dispatch:
+    inputs:
+      context:
+        description: "Optional natural-language steering context for the entire cycle"
+        required: false
+        type: string
+        default: "Let the logic of this domain be manifold, presently and forthcoming."
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: playground-v0-fast-factory-cycle
+  cancel-in-progress: true
+
+jobs:
+  housekeeping:
+    uses: ./.github/workflows/nightly-housekeeping.yml
+    with:
+      context: ${{ inputs.context }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  backlog-curation:
+    needs: housekeeping
+    uses: ./.github/workflows/weekly-backlog-curation.yml
+    with:
+      context: ${{ inputs.context }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  autonomous-sprint:
+    needs: backlog-curation
+    uses: ./.github/workflows/autonomous-sprint.yml
+    with:
+      context: ${{ inputs.context }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  ci-governance:
+    needs: autonomous-sprint
+    uses: ./.github/workflows/weekly-ci-governance.yml
+    with:
+      context: ${{ inputs.context }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  factory-retrospective:
+    needs: ci-governance
+    uses: ./.github/workflows/monthly-factory-retrospective.yml
+    with:
+      context: ${{ inputs.context }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

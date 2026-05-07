@@ -1,12 +1,16 @@
 use agent_common::{AgentCliAdapter, AgentCliCommand, AgentInvocation};
 use cli_common::Agent;
+#[cfg(feature = "bundle-runtime")]
 use flate2::read::GzDecoder;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{self, Cursor};
+use std::io;
+#[cfg(feature = "bundle-runtime")]
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(feature = "bundle-runtime")]
 use tar::Archive;
 
 mod generated {
@@ -100,6 +104,7 @@ impl AgentRuntime {
         Self::prepare_at(default_runtime_root())
     }
 
+    #[cfg(feature = "bundle-runtime")]
     pub fn prepare_at(root: impl AsRef<Path>) -> io::Result<Self> {
         let root = root.as_ref().to_path_buf();
         let marker = root.join(".freq-ai-agent-runtime");
@@ -117,6 +122,18 @@ impl AgentRuntime {
         fs::write(marker, ARCHIVE_SHA256)?;
 
         Ok(Self { root })
+    }
+
+    /// Without the `bundle-runtime` feature there is no embedded archive to
+    /// unpack. We mount the runtime directly on the crate's source tree where
+    /// `node_modules` already lives, and resolve `bun`/`node` from the
+    /// build-time-resolved Bun binary. The `_root` argument is intentionally
+    /// ignored so callers (including tests using a tempdir) keep working.
+    #[cfg(not(feature = "bundle-runtime"))]
+    pub fn prepare_at(_root: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(Self {
+            root: PathBuf::from(generated::MANIFEST_DIR),
+        })
     }
 
     pub fn root(&self) -> &Path {
@@ -165,11 +182,28 @@ impl AgentRuntime {
     }
 
     pub fn runtime_binary_path(&self, binary: &str) -> Option<PathBuf> {
-        executable_candidates(binary)
+        if let Some(found) = executable_candidates(binary)
             .into_iter()
             .map(|candidate| self.runtime_bin_dir().join(candidate))
             .find(|path| path.is_file())
             .map(resolve_executable_path)
+        {
+            return Some(found);
+        }
+
+        // In non-bundled (dev) builds there is no `bin/` overlay because we
+        // never unpacked an archive. Fall back to the Bun binary that the
+        // build script resolved at compile time; both `bun` and `node` are
+        // served by the same executable (Bun ships a `node`-compatible mode).
+        #[cfg(not(feature = "bundle-runtime"))]
+        if matches!(binary, "bun" | "node") {
+            let bun = PathBuf::from(generated::BUN_PATH);
+            if bun.is_file() {
+                return Some(resolve_executable_path(bun));
+            }
+        }
+
+        None
     }
 
     pub fn command_for_agent(&self, agent: Agent) -> Command {
@@ -233,6 +267,7 @@ pub fn bundled_agent_by_binary(binary: &str) -> Option<BundledAgent> {
         .find(|a| !a.external && a.binary == binary)
 }
 
+#[cfg(feature = "bundle-runtime")]
 fn marker_contains_current_archive(path: &Path) -> bool {
     fs::read_to_string(path)
         .map(|contents| contents.trim() == ARCHIVE_SHA256)

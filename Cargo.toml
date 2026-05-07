@@ -9,3 +9,31 @@ license = "MIT OR Apache-2.0"
 description = "freq-ai agent"
 repository = "https://github.com/williamseemueller/freq-ai"
 homepage = "https://github.com/williamseemueller/freq-ai"
+
+[profile.release]
+opt-level = 'z'        # LLVM size optimization
+lto = true             # Big win for size and performance
+codegen-units = 1      # Better optimizations (moderate compile time increase)
+panic = "abort"        # Removes a lot of unwinding code
+strip = true
+
+
+[profile.dev]
+opt-level = 0
+debug = true
+strip = false
+overflow-checks = true
+
+# Profile for fast development builds with some optimization
+[profile.dev-opt]
+inherits = "dev"
+opt-level = 1
+debug = true
+overflow-checks = true
+
+
+# Profile for benchmarking and profiling
+[profile.bench]
+opt-level = 3
+debug = true
+lto = "thin"

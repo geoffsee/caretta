@@ -1,0 +1,23 @@
+name: Autonomous Sprint
+id: autonomous_sprint
+description: Prepare and execute an autonomous implementation cycle from the factory tracker
+pattern: two_phase
+context: sprint
+
+ui:
+  category: planning
+  order: 30
+  visible: true
+
+depends_on:
+  - backlog_curation
+
+phases:
+  draft:
+    template: draft.md
+    log_start: "Drafting autonomous sprint execution plan..."
+    log_complete: "Autonomous sprint draft complete — review execution ordering."
+  finalize:
+    template: finalize.md
+    log_start: "Finalising autonomous sprint execution plan..."
+    log_complete: "Autonomous sprint plan complete."
