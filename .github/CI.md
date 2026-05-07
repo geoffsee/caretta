@@ -1,60 +1,95 @@
-# GitHub Playground v0 Fast
+# GitHub Software Factory
 
-This directory is a safe sandbox for rapidly testing an end-to-end software
-factory flow before copying anything into `.github/workflows/`.
+This directory defines the GitHub Actions control plane for running `freq-ai`
+against issues, trackers, pull requests, and release checkpoints.
 
-These examples assume a `freq-ai` action invocation pattern:
+## Action contract
+
+Most agent workflows call the published action:
 
 ```yaml
-- uses: geoffsee/freq-ai-action@v0.0.1
+- uses: geoffsee/freq-ai-action@v0.0.2
   with:
-    task: housekeeping
+    task: loop
+    args: 123
     agent: claude
   env:
-    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
-## Workflows included
+For preset workflows that are not native top-level `freq-ai` commands, use:
 
-- `workflows/nightly-housekeeping.yml`
-- `workflows/weekly-backlog-curation.yml`
-- `workflows/autonomous-sprint.yml`
-- `workflows/weekly-ci-governance.yml`
-- `workflows/monthly-factory-retrospective.yml`
-- `workflows/factory-cycle-dispatch.yml` (chained end-to-end runner)
-- `workflows/tracker-loop-dispatch.yml` (manual tracker execution)
-- `workflows/autopilot.yml` (scheduled issue/PR evaluator and dispatcher)
+```yaml
+with:
+  task: run
+  args: backlog-curation
+  preset: software-factory
+```
 
-## Fast-mode behavior
+Native commands such as `housekeeping`, `loop`, `code-review`, and `fix-pr`
+should use their native `task` value directly.
 
-- All workflows are `workflow_dispatch` only (no schedules, no issue triggers).
-- Every workflow exposes one optional string input: `context`.
-- The orchestrator `factory-cycle-dispatch.yml` chains the full loop:
-  housekeeping -> backlog-curation -> autonomous-sprint -> ci-governance ->
-  factory-retrospective.
-- The same `context` input is passed into each action invocation so users can
-  steer outcomes with natural language for a single run.
+## Workflows
 
-## Starter context example
+- `nightly-housekeeping.yml`: manual/callable housekeeping pass.
+- `weekly-backlog-curation.yml`: manual/callable software-factory backlog curation.
+- `autonomous-sprint.yml`: manual/callable autonomous sprint planning/execution.
+- `weekly-ci-governance.yml`: manual/callable CI governance review.
+- `monthly-factory-retrospective.yml`: manual/callable retrospective.
+- `factory-cycle-dispatch.yml`: chained factory cycle.
+- `tracker-loop-dispatch.yml`: manual tracker execution, followed by code review and review-fix follow-up.
+- `autopilot.yml`: scheduled/manual controller that evaluates issues/PRs and dispatches tracker or backlog work.
+- `release-mediator.yml`: scheduled/manual neutral release checkpoint generator that promotes checkpoints to tags.
+- `release-tag-publisher.yml`: reusable/manual tag publisher for checkpoint issues.
+- `release.yml`: builds release artifacts when a `v*` tag is pushed.
 
-Paste something like this into the `context` input when dispatching
-`factory-cycle-dispatch.yml`:
+## Operating Flow
+
+1. `Autopilot` runs every 6 hours and evaluates open issues and PRs.
+2. If an open `tracker` issue exists, Autopilot dispatches `tracker-loop-dispatch.yml`.
+3. If work exists but no tracker exists, Autopilot dispatches backlog curation.
+4. Tracker loop work creates or updates PRs.
+5. After tracker work succeeds, `tracker-loop-dispatch.yml` runs `freq-ai code-review`.
+6. After code review succeeds, it runs `freq-ai fix-pr <PR>` for each open PR.
+7. `Release Mediator` creates a neutral, time-bounded checkpoint issue each Friday.
+8. `Release Mediator` calls `Release Tag Publisher` with the checkpoint issue number.
+9. `Release Tag Publisher` creates and pushes the next annotated `v*` tag.
+10. The pushed `v*` tag triggers `release.yml`.
+
+## Release Checkpoints
+
+Release checkpoints are intentionally unemotional. They are factual records of
+feature groups between two points in time, based on merged PRs, closed issues,
+and current open PR state. They are not release announcements, quality claims,
+or launch narratives.
+
+`release-mediator.yml` and `release-tag-publisher.yml` are implicitly bound:
+each published checkpoint is promoted to the next patch tag by default. The tag
+publisher validates the issue has the `release-checkpoint` label, computes the
+next semver tag from the requested bump, creates an annotated tag, and pushes it.
+
+Release automation is constrained to `master`. `release-mediator.yml` skips
+checkpoint creation and tag publishing unless the workflow ref is
+`refs/heads/master`, and `release-tag-publisher.yml` checks out `master`
+explicitly before creating any tag.
+
+## Manual Context
+
+Most manual workflows accept a `context` input. Use it to steer the run without
+changing workflow logic.
+
+Example:
 
 ```text
 Focus this run on reliability and CI speed.
 
 Priorities:
-1) Reduce flaky tests and improve deterministic test setup.
-2) Cut median CI time by at least 20 percent.
-3) Avoid schema or API breaking changes in this run.
+1. Reduce flaky tests and improve deterministic setup.
+2. Cut median CI time by at least 20 percent.
+3. Avoid schema or API breaking changes.
 
 Constraints:
-- No force-pushes.
 - Keep PRs small and reviewable.
 - Require green tests and lint before merge.
-
-Deliverables:
-- Open/update issues with clear acceptance criteria.
-- Link all work to a tracker.
-- End with a concise retrospective and next-run recommendations.
+- Surface ambiguous scope rather than guessing.
 ```

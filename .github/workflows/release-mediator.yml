@@ -1,0 +1,197 @@
+name: Release Mediator
+
+on:
+  schedule:
+    - cron: "43 14 * * 5"
+  workflow_dispatch:
+    inputs:
+      since:
+        description: "Start of the checkpoint window (ISO date or timestamp)"
+        required: false
+        type: string
+      until:
+        description: "End of the checkpoint window (ISO date or timestamp)"
+        required: false
+        type: string
+      dry_run:
+        description: "Write the checkpoint to the summary without creating/updating an issue"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: release-mediator
+  cancel-in-progress: false
+
+jobs:
+  checkpoint:
+    if: ${{ github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-latest
+    outputs:
+      checkpoint_issue: ${{ steps.publish.outputs.checkpoint_issue }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      INPUT_SINCE: ${{ inputs.since }}
+      INPUT_UNTIL: ${{ inputs.until }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - name: Build release checkpoint
+        id: checkpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          until_value="${INPUT_UNTIL:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
+          since_value="${INPUT_SINCE:-$(date -u -d "$until_value -7 days" +%Y-%m-%dT%H:%M:%SZ)}"
+          window_label="$(date -u -d "$since_value" +%Y-%m-%d)_to_$(date -u -d "$until_value" +%Y-%m-%d)"
+          title="Release checkpoint: $window_label"
+          body_file="$(mktemp)"
+
+          merged_prs="$(gh pr list \
+            --state merged \
+            --search "merged:${since_value}..${until_value}" \
+            --limit 100 \
+            --json number,title,labels,mergedAt,url)"
+          closed_issues="$(gh issue list \
+            --state closed \
+            --search "closed:${since_value}..${until_value}" \
+            --limit 100 \
+            --json number,title,labels,closedAt,url)"
+          open_prs="$(gh pr list \
+            --state open \
+            --limit 100 \
+            --json number,title,isDraft,reviewDecision,updatedAt,url)"
+
+          merged_count="$(jq 'length' <<< "$merged_prs")"
+          closed_count="$(jq 'length' <<< "$closed_issues")"
+          open_pr_count="$(jq 'length' <<< "$open_prs")"
+
+          {
+            echo "# $title"
+            echo
+            echo "Window: \`$since_value\` through \`$until_value\`."
+            echo
+            echo "This checkpoint is a neutral grouping of feature and maintenance changes between two points in time. It is not a release tag, launch claim, or quality judgment."
+            echo
+            echo "## Counts"
+            echo
+            echo "- Merged pull requests: $merged_count"
+            echo "- Closed issues: $closed_count"
+            echo "- Open pull requests at checkpoint: $open_pr_count"
+            echo
+            echo "## Feature Groups"
+            echo
+          } > "$body_file"
+
+          jq -r '
+            def group_label:
+              ([.labels[]?.name
+                | select(startswith("area:") or startswith("kind:") or startswith("priority:"))
+              ][0] // "unlabeled");
+            group_by(group_label)
+            | sort_by(.[0] | group_label)
+            | if length == 0 then
+                "- No merged pull requests in this window."
+              else
+                map(
+                  "### " + (.[0] | group_label) + "\n\n" +
+                  (map("- PR #" + (.number|tostring) + ": [" + .title + "](" + .url + ")") | join("\n"))
+                )
+                | join("\n\n")
+              end
+          ' <<< "$merged_prs" >> "$body_file"
+
+          {
+            echo
+            echo "## Closed Issues"
+            echo
+          } >> "$body_file"
+
+          jq -r '
+            if length == 0 then
+              "- No issues closed in this window."
+            else
+              map("- Issue #" + (.number|tostring) + ": [" + .title + "](" + .url + ")") | join("\n")
+            end
+          ' <<< "$closed_issues" >> "$body_file"
+
+          {
+            echo
+            echo "## Open PR State"
+            echo
+          } >> "$body_file"
+
+          jq -r '
+            if length == 0 then
+              "- No open pull requests at checkpoint."
+            else
+              map("- PR #" + (.number|tostring) + ": [" + .title + "](" + .url + ") — draft=" + (.isDraft|tostring) + ", reviewDecision=" + (.reviewDecision // "none")) | join("\n")
+            end
+          ' <<< "$open_prs" >> "$body_file"
+
+          {
+            echo
+            echo "## Release Mediator Notes"
+            echo
+            echo "- Uses merged PRs, closed issues, and open PR state as factual inputs."
+            echo "- Groups by the first available \`area:\`, \`kind:\`, or \`priority:\` label."
+            echo "- Avoids sentiment, launch language, and success/failure framing."
+            echo "- A human can convert this checkpoint into a release tag or changelog entry if desired."
+          } >> "$body_file"
+
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "body_file=$body_file" >> "$GITHUB_OUTPUT"
+          cat "$body_file" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish checkpoint issue
+        id: publish
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! gh label list --search release-checkpoint --json name --jq '.[].name' | grep -qx release-checkpoint; then
+            gh label create release-checkpoint \
+              --color "6f42c1" \
+              --description "Neutral time-bounded release checkpoint"
+          fi
+
+          existing="$(gh issue list \
+            --state open \
+            --label release-checkpoint \
+            --search "${{ steps.checkpoint.outputs.title }} in:title" \
+            --json number \
+            --jq '.[0].number // ""')"
+
+          if [[ -n "$existing" ]]; then
+            gh issue edit "$existing" --body-file "${{ steps.checkpoint.outputs.body_file }}"
+            echo "checkpoint_issue=$existing" >> "$GITHUB_OUTPUT"
+            echo "Updated release checkpoint issue #$existing." >> "$GITHUB_STEP_SUMMARY"
+          else
+            url="$(gh issue create \
+              --title "${{ steps.checkpoint.outputs.title }}" \
+              --body-file "${{ steps.checkpoint.outputs.body_file }}" \
+              --label "release-checkpoint")"
+            issue_number="${url##*/}"
+            echo "checkpoint_issue=$issue_number" >> "$GITHUB_OUTPUT"
+            echo "Created release checkpoint issue #$issue_number." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  publish-tag:
+    needs: checkpoint
+    if: ${{ github.ref == 'refs/heads/master' && needs.checkpoint.outputs.checkpoint_issue != '' }}
+    uses: ./.github/workflows/release-tag-publisher.yml
+    permissions:
+      actions: write
+      contents: write
+      issues: write
+    with:
+      checkpoint_issue: ${{ needs.checkpoint.outputs.checkpoint_issue }}
+      bump: patch
+      dry_run: false

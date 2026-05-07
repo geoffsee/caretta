@@ -1,0 +1,180 @@
+name: Release Tag Publisher
+
+on:
+  workflow_call:
+    inputs:
+      checkpoint_issue:
+        description: "Release checkpoint issue number to promote"
+        required: true
+        type: string
+      bump:
+        description: "Version bump to apply from the latest v* tag"
+        required: false
+        type: string
+        default: patch
+      dry_run:
+        description: "Compute and report the tag without pushing it"
+        required: false
+        type: boolean
+        default: false
+  workflow_dispatch:
+    inputs:
+      checkpoint_issue:
+        description: "Release checkpoint issue number to promote"
+        required: true
+        type: string
+      bump:
+        description: "Version bump to apply from the latest v* tag"
+        required: true
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: "Compute and report the tag without pushing it"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: write
+  issues: write
+
+concurrency:
+  group: release-tag-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish-tag:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CHECKPOINT_ISSUE: ${{ inputs.checkpoint_issue }}
+      BUMP: ${{ inputs.bump }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Resolve checkpoint and next tag
+        id: tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_branch="$(git branch --show-current)"
+          current_ref="$(git rev-parse --abbrev-ref HEAD)"
+          if [[ "$current_branch" != "master" && "$current_ref" != "master" ]]; then
+            echo "Release tags must be created from master; current ref is ${current_branch:-$current_ref}." >&2
+            exit 1
+          fi
+
+          checkpoint_json="$(gh issue view "$CHECKPOINT_ISSUE" --json number,title,body,labels,url)"
+          has_checkpoint_label="$(jq -r 'any(.labels[]?; .name == "release-checkpoint")' <<< "$checkpoint_json")"
+          if [[ "$has_checkpoint_label" != "true" ]]; then
+            echo "Issue #$CHECKPOINT_ISSUE is not labeled release-checkpoint." >&2
+            exit 1
+          fi
+
+          checkpoint_title="$(jq -r '.title' <<< "$checkpoint_json")"
+          checkpoint_url="$(jq -r '.url' <<< "$checkpoint_json")"
+          checkpoint_body="$(jq -r '.body' <<< "$checkpoint_json")"
+          latest_tag="$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n 1)"
+          latest_tag="${latest_tag:-v0.0.0}"
+          version="${latest_tag#v}"
+
+          IFS=. read -r major minor patch_extra <<< "$version"
+          patch="${patch_extra%%[-+]*}"
+          major="${major:-0}"
+          minor="${minor:-0}"
+          patch="${patch:-0}"
+
+          case "$BUMP" in
+            major)
+              major=$((major + 1))
+              minor=0
+              patch=0
+              ;;
+            minor)
+              minor=$((minor + 1))
+              patch=0
+              ;;
+            patch)
+              patch=$((patch + 1))
+              ;;
+            *)
+              echo "Unsupported bump: $BUMP" >&2
+              exit 1
+              ;;
+          esac
+
+          next_tag="v${major}.${minor}.${patch}"
+          if git rev-parse "$next_tag" >/dev/null 2>&1; then
+            echo "Tag $next_tag already exists." >&2
+            exit 1
+          fi
+
+          message_file="$(mktemp)"
+          {
+            echo "$next_tag"
+            echo
+            echo "Promoted from release checkpoint issue #$CHECKPOINT_ISSUE:"
+            echo "$checkpoint_title"
+            echo "$checkpoint_url"
+            echo
+            echo "$checkpoint_body"
+          } > "$message_file"
+
+          {
+            echo "latest_tag=$latest_tag"
+            echo "next_tag=$next_tag"
+            echo "checkpoint_url=$checkpoint_url"
+            echo "message_file=$message_file"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release tag publisher"
+            echo
+            echo "- Checkpoint: #$CHECKPOINT_ISSUE"
+            echo "- Latest tag: $latest_tag"
+            echo "- Next tag: $next_tag"
+            echo "- Bump: $BUMP"
+            echo "- Dry run: $DRY_RUN"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Create and push tag
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.tag.outputs.next_tag }}" -F "${{ steps.tag.outputs.message_file }}"
+          git push origin "${{ steps.tag.outputs.next_tag }}"
+
+          gh issue comment "$CHECKPOINT_ISSUE" \
+            --body "Promoted checkpoint to tag ${{ steps.tag.outputs.next_tag }}. The Release workflow will build from this tag."
+
+      - name: Dispatch factory cycle
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh workflow run factory-cycle-dispatch.yml \
+            --ref master \
+            -f context="Release tag ${{ steps.tag.outputs.next_tag }} was published from checkpoint issue #$CHECKPOINT_ISSUE. Evaluate the next software-factory cycle from master."
+
+      - name: Report dry run
+        if: env.DRY_RUN == 'true'
+        shell: bash
+        run: |
+          echo "Dry run enabled; would create and push ${{ steps.tag.outputs.next_tag }}." >> "$GITHUB_STEP_SUMMARY"
