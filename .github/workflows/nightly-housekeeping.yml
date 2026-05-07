@@ -29,7 +29,6 @@ concurrency:
 jobs:
   housekeeping:
     runs-on: ubuntu-latest
-    container: ghcr.io/geoffsee/freq-ai-ci:latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,6 +38,5 @@ jobs:
         with:
           task: housekeeping
           agent: claude
-          context: ${{ inputs.context }}
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
