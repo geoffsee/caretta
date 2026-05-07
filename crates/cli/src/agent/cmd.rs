@@ -246,6 +246,15 @@ pub fn list_all_files(root: &str) -> Vec<String> {
 mod tests {
     use super::{configure_log_redaction, sanitize_log_message};
     use cli_common::LogRedactionConfigFile;
+    use std::sync::{LazyLock, Mutex, MutexGuard};
+
+    static LOG_REDACTION_TEST_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn lock_redaction_tests() -> MutexGuard<'static, ()> {
+        LOG_REDACTION_TEST_LOCK
+            .lock()
+            .expect("log redaction test mutex poisoned")
+    }
 
     fn reset_redaction_config() {
         configure_log_redaction(&LogRedactionConfigFile::default());
@@ -253,6 +262,7 @@ mod tests {
 
     #[test]
     fn redacts_json_secret_fields() {
+        let _guard = lock_redaction_tests();
         reset_redaction_config();
         let input = r#"claude: {"api_key":"supersecret123","token":"abc123"}"#;
         let out = sanitize_log_message(input);
@@ -264,6 +274,7 @@ mod tests {
 
     #[test]
     fn redacts_bearer_auth() {
+        let _guard = lock_redaction_tests();
         reset_redaction_config();
         let input = "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9";
         let out = sanitize_log_message(input);
@@ -273,6 +284,7 @@ mod tests {
 
     #[test]
     fn redacts_provider_token_prefixes() {
+        let _guard = lock_redaction_tests();
         reset_redaction_config();
         let input = "tokens ghp_abcdefghijklmnopqrstuvwxyz123456 and sk-proj-abcDEF1234567890";
         let out = sanitize_log_message(input);
@@ -282,6 +294,7 @@ mod tests {
 
     #[test]
     fn redacts_private_key_blocks() {
+        let _guard = lock_redaction_tests();
         reset_redaction_config();
         let input = "BEGIN\n-----BEGIN PRIVATE KEY-----\nabc123\n-----END PRIVATE KEY-----\nEND";
         let out = sanitize_log_message(input);
@@ -291,6 +304,7 @@ mod tests {
 
     #[test]
     fn redacts_custom_denylist_patterns() {
+        let _guard = lock_redaction_tests();
         reset_redaction_config();
         configure_log_redaction(&LogRedactionConfigFile {
             denylist_patterns: vec![r#"orgsec_[A-Za-z0-9]{6,}"#.to_string()],
@@ -302,6 +316,7 @@ mod tests {
 
     #[test]
     fn honors_allowlist_keys() {
+        let _guard = lock_redaction_tests();
         reset_redaction_config();
         configure_log_redaction(&LogRedactionConfigFile {
             denylist_patterns: vec![],
