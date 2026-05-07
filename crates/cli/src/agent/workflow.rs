@@ -522,6 +522,7 @@ mod tests {
                 "deep-research".to_string(),
                 "pm".to_string(),
                 "quality-assurance".to_string(),
+                "software-factory".to_string(),
                 "ux".to_string(),
                 "xp".to_string(),
             ]
@@ -598,6 +599,22 @@ mod tests {
         );
         assert!(entries.iter().any(|entry| entry.id == "bug_report_triage"));
         assert!(entries.iter().any(|entry| entry.id == "regression_testing"));
+    }
+
+    #[test]
+    fn software_factory_preset_loads_sidebar_entries() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let entries = load_sidebar_entries(root, "software-factory");
+        assert_eq!(entries.len(), 5);
+        assert!(entries.iter().any(|entry| entry.id == "factory_charter"));
+        assert!(entries.iter().any(|entry| entry.id == "backlog_curation"));
+        assert!(entries.iter().any(|entry| entry.id == "autonomous_sprint"));
+        assert!(entries.iter().any(|entry| entry.id == "ci_governance"));
+        assert!(
+            entries
+                .iter()
+                .any(|entry| entry.id == "factory_retrospective")
+        );
     }
 
     #[test]

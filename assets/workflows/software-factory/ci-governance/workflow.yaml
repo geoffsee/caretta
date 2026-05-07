@@ -1,0 +1,23 @@
+name: CI Governance
+id: ci_governance
+description: Audit and harden GitHub Actions for autonomous factory safety
+pattern: two_phase
+context: housekeeping
+
+ui:
+  category: review
+  order: 40
+  visible: true
+
+depends_on:
+  - autonomous_sprint
+
+phases:
+  draft:
+    template: draft.md
+    log_start: "Drafting CI governance review..."
+    log_complete: "CI governance draft complete — review policy findings."
+  finalize:
+    template: finalize.md
+    log_start: "Finalising CI governance controls..."
+    log_complete: "CI governance controls complete."

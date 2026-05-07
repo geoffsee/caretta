@@ -1,0 +1,97 @@
+name: Factory Cycle Dispatch 
+
+on:
+  push:
+    branches:
+      - ci
+  workflow_dispatch:
+    inputs:
+      context:
+        description: "Optional natural-language steering context for the entire cycle"
+        required: false
+        type: string
+        default: "Let the logic of this domain be manifold, presently and forthcoming."
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: playground-v0-fast-factory-cycle
+  cancel-in-progress: true
+
+jobs:
+  housekeeping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run freq-ai housekeeping
+        uses: geoffsee/freq-ai-action@v1
+        with:
+          task: housekeeping
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  backlog-curation:
+    needs: housekeeping
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run freq-ai backlog curation
+        uses: geoffsee/freq-ai-action@v1
+        with:
+          task: backlog-curation
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  autonomous-sprint:
+    needs: backlog-curation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run freq-ai autonomous sprint
+        uses: geoffsee/freq-ai-action@v1
+        with:
+          task: autonomous-sprint
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  ci-governance:
+    needs: autonomous-sprint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run freq-ai ci governance
+        uses: geoffsee/freq-ai-action@v1
+        with:
+          task: ci-governance
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+
+  factory-retrospective:
+    needs: ci-governance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Run freq-ai factory retrospective
+        uses: geoffsee/freq-ai-action@v1
+        with:
+          task: factory-retrospective
+          agent: claude
+          context: ${{ inputs.context }}
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}

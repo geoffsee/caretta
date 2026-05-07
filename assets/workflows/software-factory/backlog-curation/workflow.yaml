@@ -1,0 +1,27 @@
+name: Backlog Curation
+id: backlog_curation
+description: Convert charter priorities into an autonomous execution backlog
+pattern: two_phase
+context: strategic
+
+ui:
+  category: planning
+  order: 20
+  visible: true
+
+depends_on:
+  - factory_charter
+
+extra_context:
+  - name: factory_charter
+    label: strategic-review
+
+phases:
+  draft:
+    template: draft.md
+    log_start: "Drafting software factory backlog curation..."
+    log_complete: "Backlog curation draft complete — review prioritization and ordering."
+  finalize:
+    template: finalize.md
+    log_start: "Finalising software factory backlog curation..."
+    log_complete: "Backlog curation complete."
