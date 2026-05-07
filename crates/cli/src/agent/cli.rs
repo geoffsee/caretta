@@ -1,5 +1,5 @@
 use crate::agent::bot::load_bot_settings;
-use crate::agent::cmd::{cmd_stdout, die};
+use crate::agent::cmd::{cmd_stdout, configure_log_redaction, die};
 use crate::agent::config_store::load_local_inference_api_key;
 use crate::agent::types::{Agent, Config};
 use std::env;
@@ -39,6 +39,7 @@ pub fn parse_args() -> Config {
         .unwrap_or_else(|| die("not inside a git repository"));
 
     let dev_cfg = crate::agent::types::load_dev_config(&root);
+    configure_log_redaction(&dev_cfg.log_redaction);
     let bot_settings = load_bot_settings(&root, &dev_cfg);
     let bot_credentials = bot_settings.to_credentials();
     let project_name = env::var("DEV_PROJECT_NAME")

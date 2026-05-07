@@ -80,9 +80,10 @@ pub fn load_dev_config(root: &str) -> DevConfig {
 
 pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
     let path = std::path::Path::new(root).join("freq-ai.toml");
+    let existing = load_dev_config(root);
 
     // Merge current model selection into the persisted per-agent map.
-    let mut agent_models = load_dev_config(root).agent_models;
+    let mut agent_models = existing.agent_models;
     if cfg.model.trim().is_empty() {
         agent_models.remove(&cfg.agent.to_string());
     } else {
@@ -139,6 +140,7 @@ pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
         bot,
         bootstrap_snapshot: Some(cfg.bootstrap_snapshot),
         use_subscription: Some(cfg.use_subscription),
+        log_redaction: existing.log_redaction,
         agent_models,
     };
 

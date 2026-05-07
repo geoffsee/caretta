@@ -684,8 +684,19 @@ pub struct DevConfig {
     pub bootstrap_snapshot: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub use_subscription: Option<bool>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub log_redaction: LogRedactionConfigFile,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub agent_models: HashMap<String, String>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LogRedactionConfigFile {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub denylist_patterns: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowlist_keys: Vec<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
