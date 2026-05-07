@@ -7,8 +7,8 @@ version = "0.9.11"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "freq-ai agent"
-repository = "https://github.com/williamseemueller/freq-ai"
-homepage = "https://github.com/williamseemueller/freq-ai"
+repository = "https://github.com/geoffsee/freq-ai"
+homepage = "https://github.com/geoffsee/freq-ai"
 
 [profile.release]
 opt-level = 'z'        # LLVM size optimization

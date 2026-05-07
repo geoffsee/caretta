@@ -5,10 +5,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/williamseemueller/freq-ai.git",
+    "url": "https://github.com/geoffsee/freq-ai.git",
     "directory": "packages/cli-compat-fixture"
   },
-  "homepage": "https://github.com/williamseemueller/freq-ai",
+  "homepage": "https://github.com/geoffsee/freq-ai",
   "type": "module",
   "engines": {
     "node": ">=18"
