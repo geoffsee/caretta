@@ -66,6 +66,14 @@ fn run_raw(args: &[&str]) -> std::process::Output {
     bin().args(args).output().expect("failed to launch freq-ai")
 }
 
+fn repo_root() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|path| path.parent())
+        .expect("crate should live under crates/cli")
+        .to_path_buf()
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. Basic CLI surface
 // ═══════════════════════════════════════════════════════════════════════════
@@ -597,6 +605,24 @@ fn housekeeping_audit_issue_is_not_tracker_labeled() {
 
     assert!(template.contains("Use only the `housekeeping` label"));
     assert!(!template.contains("--label \"housekeeping,tracker\""));
+}
+
+#[test]
+fn release_tag_publisher_dispatches_release_workflow_for_published_tag() {
+    let root = repo_root();
+    let release_workflow =
+        std::fs::read_to_string(root.join(".github/workflows/release.yml")).unwrap();
+    let publisher_workflow =
+        std::fs::read_to_string(root.join(".github/workflows/release-tag-publisher.yml")).unwrap();
+
+    assert!(release_workflow.contains("workflow_dispatch:"));
+    assert!(release_workflow.contains("RELEASE_TAG: ${{ inputs.tag || github.ref_name }}"));
+    assert!(release_workflow.contains("ref: ${{ env.RELEASE_TAG }}"));
+    assert!(release_workflow.contains("tag_name: ${{ env.RELEASE_TAG }}"));
+
+    assert!(publisher_workflow.contains("gh workflow run release.yml"));
+    assert!(publisher_workflow.contains("--ref master"));
+    assert!(publisher_workflow.contains("-f tag=\"${{ steps.tag.outputs.next_tag }}\""));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

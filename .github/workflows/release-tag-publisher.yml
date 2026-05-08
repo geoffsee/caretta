@@ -189,6 +189,19 @@ jobs:
             git push origin "${{ steps.tag.outputs.next_tag }}"
           fi
 
+      - name: Dispatch release workflow
+        id: dispatch_release
+        if: ${{ env.DRY_RUN != 'true' && steps.publish_tag.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh workflow run release.yml \
+            --ref master \
+            -f tag="${{ steps.tag.outputs.next_tag }}"
+
+          echo "Release workflow dispatched for ${{ steps.tag.outputs.next_tag }}." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Dispatch factory cycle
         if: ${{ always() && env.DRY_RUN != 'true' && steps.publish_tag.outcome == 'success' }}
         continue-on-error: true
@@ -210,13 +223,13 @@ jobs:
           fi
 
       - name: Comment on checkpoint issue
-        if: ${{ always() && env.DRY_RUN != 'true' && steps.publish_tag.outcome == 'success' }}
+        if: ${{ always() && env.DRY_RUN != 'true' && steps.publish_tag.outcome == 'success' && steps.dispatch_release.outcome == 'success' }}
         continue-on-error: true
         shell: bash
         run: |
           set -uo pipefail
 
-          comment_body="Promoted checkpoint to tag ${{ steps.tag.outputs.next_tag }}. The Release workflow will build from this tag."
+          comment_body="Promoted checkpoint to tag ${{ steps.tag.outputs.next_tag }}. The Release workflow was dispatched for this tag."
           existing_comment="$(gh issue view "$CHECKPOINT_ISSUE" --json comments --jq '.comments[]?.body' 2>/dev/null | grep -Fx "$comment_body" || true)"
           if [[ -n "$existing_comment" ]]; then
             echo "Checkpoint issue already has promotion comment for ${{ steps.tag.outputs.next_tag }}; skipping duplicate comment." >> "$GITHUB_STEP_SUMMARY"
