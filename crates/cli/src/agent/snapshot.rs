@@ -1,4 +1,4 @@
-use crate::agent::cmd::{cmd_stdout, count_tokens, log};
+use crate::agent::cmd::{count_tokens, log};
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use toak_rs::{MarkdownGenerator, MarkdownGeneratorOptions};
@@ -8,6 +8,41 @@ pub const MAX_SNAPSHOT_TOKENS: usize = 100_000;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn generate_codebase_snapshot(root: &str) -> String {
+    match tokio::runtime::Handle::try_current() {
+        Ok(handle) if handle.runtime_flavor() == tokio::runtime::RuntimeFlavor::MultiThread => {
+            tokio::task::block_in_place(|| handle.block_on(generate_codebase_snapshot_async(root)))
+        }
+        Ok(_) => {
+            let root = root.to_string();
+            std::thread::spawn(move || generate_codebase_snapshot_on_new_runtime(&root))
+                .join()
+                .unwrap_or_else(|_| {
+                    log("WARNING: toak-rs snapshot worker thread panicked");
+                    String::new()
+                })
+        }
+        Err(_) => generate_codebase_snapshot_on_new_runtime(root),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn generate_codebase_snapshot_on_new_runtime(root: &str) -> String {
+    match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime.block_on(generate_codebase_snapshot_async(root)),
+        Err(e) => {
+            log(&format!(
+                "WARNING: failed to create Tokio runtime for toak-rs snapshot: {e}"
+            ));
+            String::new()
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn generate_codebase_snapshot_async(root: &str) -> String {
     log("Generating codebase snapshot with toak-rs...");
 
     let snapshot_path = PathBuf::from(root).join("prompt.md");
@@ -20,12 +55,7 @@ pub fn generate_codebase_snapshot(root: &str) -> String {
 
     let mut generator = MarkdownGenerator::new(opts);
 
-    let result = tokio::task::block_in_place(|| {
-        tokio::runtime::Handle::current().block_on(generator.create_markdown_document())
-    });
-
-    // Revert toak side-effects on .gitignore if it was modified.
-    let _ = cmd_stdout("git", &["checkout", "--", ".gitignore"]);
+    let result = generator.create_markdown_document().await;
 
     let snapshot = match result {
         Ok(res) if res.success => std::fs::read_to_string(&snapshot_path).unwrap_or_default(),
@@ -65,6 +95,12 @@ pub fn generate_codebase_snapshot(_root: &str) -> String {
     String::new()
 }
 
+#[cfg(target_arch = "wasm32")]
+pub async fn generate_codebase_snapshot_async(_root: &str) -> String {
+    log("Skipping codebase snapshot on Wasm target.");
+    String::new()
+}
+
 /// Truncate a snapshot string to fit within a token budget.
 ///
 /// Uses a conservative 3-bytes-per-token estimate so the result never exceeds
@@ -90,10 +126,40 @@ mod tests {
     use super::*;
     use std::fs;
 
-    /// Exercises the full toak-rs pipeline (`MarkdownGenerator` + `count_tokens`)
-    /// inside a tokio runtime to verify `block_in_place` doesn't panic.
+    #[test]
+    fn generate_codebase_snapshot_works_without_tokio_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        fs::write(root.join("main.rs"), "fn main() { println!(\"hello\"); }\n").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "main.rs"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+
+        let root = root.to_string_lossy().into_owned();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&root).unwrap();
+        let result = std::panic::catch_unwind(|| generate_codebase_snapshot(&root));
+        std::env::set_current_dir(original_dir).unwrap();
+
+        let snapshot =
+            result.expect("snapshot generation should not panic during synchronous dispatch");
+        assert!(
+            snapshot.contains("main.rs") || snapshot.contains("main"),
+            "snapshot should contain the tracked source file"
+        );
+    }
+
+    /// Exercises the sync wrapper inside a tokio runtime, matching GUI dispatch.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn toak_generates_snapshot_inside_tokio_runtime() {
+    async fn generate_codebase_snapshot_works_inside_tokio_runtime() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
 
@@ -115,28 +181,8 @@ mod tests {
             .output()
             .unwrap();
 
-        let snapshot_path = root.join("prompt.md");
-        let opts = MarkdownGeneratorOptions {
-            dir: root.to_path_buf(),
-            output_file_path: snapshot_path.clone(),
-            verbose: false,
-            ..Default::default()
-        };
-
-        let mut generator = MarkdownGenerator::new(opts);
-
-        // This is the exact pattern from generate_codebase_snapshot — panics
-        // if block_in_place is missing when called from an async context.
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(generator.create_markdown_document())
-        });
-
-        assert!(result.is_ok(), "toak-rs generation failed: {result:?}");
-        let res = result.unwrap();
-        assert!(res.success, "toak-rs reported failure");
-
-        let content = fs::read_to_string(&snapshot_path).unwrap_or_default();
-        assert!(!content.is_empty(), "snapshot file should not be empty");
+        let root = root.to_string_lossy().into_owned();
+        let content = generate_codebase_snapshot(&root);
         assert!(
             content.contains("main"),
             "snapshot should contain our source"

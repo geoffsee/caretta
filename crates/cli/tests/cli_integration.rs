@@ -12,7 +12,12 @@
 //! cargo test --test cli_integration
 //! ```
 
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -21,7 +26,10 @@ use std::process::Command;
 /// Path to the `freq-ai` binary built by `cargo test`.
 fn bin() -> Command {
     let path = env!("CARGO_BIN_EXE_freq-ai");
-    Command::new(path)
+    let mut command = Command::new(path);
+    #[cfg(unix)]
+    command.process_group(0);
+    command
 }
 
 /// Run `freq-ai` with the given args and assert it exits successfully.
@@ -64,6 +72,80 @@ fn run_fail(args: &[&str]) -> String {
 /// Run `freq-ai` with the given args and just return the output (no success assertion).
 fn run_raw(args: &[&str]) -> std::process::Output {
     bin().args(args).output().expect("failed to launch freq-ai")
+}
+
+struct TimedOutput {
+    output: Output,
+    timed_out: bool,
+}
+
+fn run_with_timeout(args: &[&str], timeout: Duration) -> TimedOutput {
+    let mut command = bin();
+    command
+        .args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+
+    let mut child = command.spawn().expect("failed to launch freq-ai");
+    let deadline = Instant::now() + timeout;
+    let mut timed_out = false;
+
+    loop {
+        if child
+            .try_wait()
+            .expect("failed to poll freq-ai process")
+            .is_some()
+        {
+            break;
+        }
+
+        if Instant::now() >= deadline {
+            timed_out = true;
+            terminate_process(&mut child);
+            break;
+        }
+
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("failed to collect freq-ai output");
+    TimedOutput { output, timed_out }
+}
+
+fn terminate_process(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let process_group = format!("-{}", child.id());
+        let _ = Command::new("kill")
+            .args(["-TERM", &process_group])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = child.kill();
+        thread::sleep(Duration::from_millis(250));
+        let _ = Command::new("kill")
+            .args(["-KILL", &process_group])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = child.kill();
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = child.kill();
+    }
+}
+
+fn combined_output(output: &Output) -> String {
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    )
 }
 
 fn repo_root() -> std::path::PathBuf {
@@ -257,25 +339,29 @@ fn dry_run_workflows_exit_cleanly() {
     }
 }
 
-/// security-review --dry-run needs a tokio runtime for snapshot generation.
-/// Verify that arg parsing succeeds (no clap errors) even if the runtime panics.
+/// security-review --dry-run launches the configured agent adapter. Bound the
+/// process lifetime so the test owns and terminates any external child process.
 #[test]
 fn security_review_dry_run_parses_args() {
-    let out = bin()
-        .args(["--dry-run", "security-review"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .output()
-        .expect("failed to launch freq-ai");
-    let combined = format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr),
-    );
+    let out = run_with_timeout(&["--dry-run", "security-review"], Duration::from_secs(15));
+    let combined = combined_output(&out.output);
     // Should get past clap parsing — the security-review log line confirms dispatch worked
     assert!(
-        combined.contains("security") || !combined.contains("error: invalid value"),
+        !combined.contains("error: invalid value"),
         "security-review should parse without clap errors:\n{combined}"
     );
+    assert!(
+        combined.contains("Starting security code review")
+            || combined.contains("Generating codebase snapshot"),
+        "security-review dispatch should be observable:\n{combined}"
+    );
+    if out.timed_out {
+        assert!(
+            combined.contains("Starting security code review")
+                || combined.contains("Generating codebase snapshot"),
+            "timed out before security-review dispatch was observable:\n{combined}"
+        );
+    }
 }
 
 #[test]
