@@ -145,6 +145,7 @@ pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
         pricing: cfg.pricing.clone(),
         log_redaction: existing.log_redaction,
         agent_models,
+        test: cfg.test.clone(),
     };
 
     let toml = toml::to_string_pretty(&file_cfg).map_err(|e| e.to_string())?;
