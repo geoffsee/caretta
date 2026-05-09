@@ -31,6 +31,7 @@ pub fn parse_args() -> Config {
         pricing: Default::default(),
         bot_settings: Default::default(),
         bot_credentials: None,
+        test: Default::default(),
     }
 }
 
@@ -57,6 +58,7 @@ pub fn parse_args() -> Config {
     let bootstrap_snapshot = dev_cfg.bootstrap_snapshot.unwrap_or(false);
     let use_subscription = dev_cfg.use_subscription.unwrap_or(false);
     let pricing = dev_cfg.pricing;
+    let test = dev_cfg.test;
 
     Config {
         agent: Agent::Claude, // Default, will be overridden by CLI
@@ -77,5 +79,6 @@ pub fn parse_args() -> Config {
             .unwrap_or_else(|| "default".to_string()),
         bot_settings,
         bot_credentials,
+        test,
     }
 }
