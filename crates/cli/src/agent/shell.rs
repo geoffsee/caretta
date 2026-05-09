@@ -10,7 +10,7 @@ pub use crate::agent::cmd::{
 };
 pub use crate::agent::interview::{run_interview_draft, run_interview_respond};
 pub use crate::agent::issue::{
-    commit_with_retries, preflight, run_loop, run_single_issue, work_on_issue,
+    commit_with_retries, preflight, run_loop, run_single_issue, run_tracker_matrix, work_on_issue,
 };
 pub use crate::agent::launch::log_resolved_agent_launch;
 pub use crate::agent::process::{

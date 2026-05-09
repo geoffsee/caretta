@@ -5,10 +5,12 @@ use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
 use crate::agent::tracker::{
     build_prompt, build_test_fix_prompt, fetch_issue, find_upstream_branch, get_tracker_body,
-    parse_pending,
+    parse_pending, pending_issues_execution_order,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config, MAX_COMMIT_ATTEMPTS, MAX_PUSH_ATTEMPTS};
 use crate::timed;
+use cli_common::PendingIssue;
+use std::collections::HashMap;
 use std::env;
 use std::path::Path;
 use std::time::Instant;
@@ -184,6 +186,34 @@ pub fn preflight(cfg: &Config) {
     }
 }
 
+/// Emit pending issue numbers for `tracker` as JSON (`json_fmt`) or one per line.
+/// Uses [`pending_issues_execution_order`] so dependents follow pending blockers.
+pub fn run_tracker_matrix(cfg: &Config, tracker_num: u32, json_fmt: bool) {
+    let nums = if cfg.dry_run {
+        if !json_fmt {
+            log("[dry-run] tracker-matrix: skipping tracker fetch; emitting empty list");
+        }
+        Vec::new()
+    } else {
+        if !has_command("gh") {
+            die("`gh` CLI not found. Please install GitHub CLI.");
+        }
+        let body = get_tracker_body(tracker_num);
+        pending_issues_execution_order(&body)
+    };
+
+    if json_fmt {
+        println!(
+            "{}",
+            serde_json::to_string(&nums).unwrap_or_else(|_| "[]".to_string())
+        );
+    } else {
+        for n in nums {
+            println!("{n}");
+        }
+    }
+}
+
 pub fn run_loop(cfg: &Config, tracker_num: u32) {
     preflight(cfg);
     log(&format!(
@@ -201,25 +231,31 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
         log(&format!(
             "Loop heartbeat: cycle {cycle} reading tracker #{tracker_num}..."
         ));
-        let pending = parse_pending(&get_tracker_body(tracker_num));
-        if pending.is_empty() {
+        let body = get_tracker_body(tracker_num);
+        let order = pending_issues_execution_order(&body);
+        let pending_by_num: HashMap<u32, PendingIssue> = parse_pending(&body)
+            .into_iter()
+            .map(|p| (p.number, p))
+            .collect();
+        if order.is_empty() {
             log(&format!(
                 "Loop heartbeat: cycle {cycle} found no pending issues; sleeping 30s."
             ));
         } else {
             log(&format!(
                 "Loop heartbeat: cycle {cycle} found {} pending issue(s).",
-                pending.len()
+                order.len()
             ));
         }
-        for issue in pending {
+        for issue_num in order {
             if stop_requested() {
                 break;
             }
-            // Real implementation would handle dependencies/blockers.
+            let Some(issue) = pending_by_num.get(&issue_num) else {
+                continue;
+            };
             log(&format!(
-                "Loop heartbeat: cycle {cycle} starting issue #{}.",
-                issue.number
+                "Loop heartbeat: cycle {cycle} starting issue #{issue_num}."
             ));
             work_on_issue(cfg, tracker_num, issue.number, &issue.blockers);
         }
@@ -232,7 +268,7 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
     }
 }
 
-pub fn run_single_issue(cfg: &Config, tracker_num: u32, issue_num: u32) {
+pub fn run_single_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &[u32]) {
     preflight(cfg);
-    work_on_issue(cfg, tracker_num, issue_num, &[]);
+    work_on_issue(cfg, tracker_num, issue_num, blockers);
 }

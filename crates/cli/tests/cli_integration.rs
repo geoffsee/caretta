@@ -258,6 +258,11 @@ fn subcommand_help_loop() {
 }
 
 #[test]
+fn subcommand_help_tracker_matrix() {
+    run_ok(&["tracker-matrix", "--help"]);
+}
+
+#[test]
 fn subcommand_help_fix_pr() {
     run_ok(&["fix-pr", "--help"]);
 }
@@ -408,6 +413,38 @@ fn loop_requires_tracker_argument() {
 }
 
 #[test]
+fn tracker_matrix_requires_tracker_argument() {
+    let out = run_fail(&["tracker-matrix"]);
+    assert!(
+        out.contains("required") || out.contains("error") || out.contains("argument"),
+        "expected missing-argument error for 'tracker-matrix'"
+    );
+}
+
+#[test]
+fn tracker_matrix_dry_run_json_emits_empty_array() {
+    let out = bin()
+        .args(["--dry-run", "tracker-matrix", "7", "--json"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("failed to launch freq-ai");
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    assert!(
+        out.status.success(),
+        "--dry-run tracker-matrix 7 --json failed:\n{combined}"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim(),
+        "[]",
+        "expected empty JSON array on stdout:\n{combined}"
+    );
+}
+
+#[test]
 fn fix_pr_requires_number_argument() {
     let out = run_fail(&["fix-pr"]);
     assert!(
@@ -436,6 +473,15 @@ fn issue_dry_run_parses_number_argument() {
         !combined.contains("error: invalid value")
             && !combined.contains("error: unexpected argument"),
         "issue 42 should parse without clap errors:\n{combined}"
+    );
+}
+
+#[test]
+fn issue_help_documents_tracker_flag() {
+    let out = run_ok(&["issue", "--help"]);
+    assert!(
+        out.contains("--tracker"),
+        "issue --help should document --tracker:\n{out}"
     );
 }
 

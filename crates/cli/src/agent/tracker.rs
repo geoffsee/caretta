@@ -1,6 +1,6 @@
 use crate::agent::shell::{cmd_capture, cmd_run, cmd_stdout, cmd_stdout_or_die, log};
 pub use cli_common::{PendingIssue, PrAuthor, PrSummary, TrackerInfo};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// Standardized label taxonomy — single source of truth for all label strings.
 ///
@@ -226,6 +226,78 @@ pub fn parse_pending(body: &str) -> Vec<PendingIssue> {
 
 pub fn is_ready(issue: &PendingIssue, completed: &HashSet<u32>) -> bool {
     issue.blockers.iter().all(|b| completed.contains(b))
+}
+
+/// Pending tracker issue numbers ordered for execution. Dependents are queued after any
+/// **pending** blockers listed on their tracker rows (edges inferred only among pending rows).
+/// Rows marked completed in the tracker body satisfy blocker constraints without reordering.
+/// Stable tie-break: earliest tracker-body occurrence wins (`parse_pending` order).
+///
+/// If constraints among pending rows are cyclic or ambiguous, remaining issues are appended in
+/// document order (same net effect as the previous loop worker visiting rows sequentially).
+pub fn pending_issues_execution_order(body: &str) -> Vec<u32> {
+    let completed = parse_completed(body);
+    let pending = parse_pending(body);
+    if pending.is_empty() {
+        return Vec::new();
+    }
+
+    let pending_set: HashSet<u32> = pending.iter().map(|p| p.number).collect();
+    let doc_rank: HashMap<u32, usize> = pending
+        .iter()
+        .enumerate()
+        .map(|(idx, p)| (p.number, idx))
+        .collect();
+
+    fn blockers_satisfied_for_pick(
+        blockers: &[u32],
+        pending_set: &HashSet<u32>,
+        completed: &HashSet<u32>,
+        picked: &HashSet<u32>,
+    ) -> bool {
+        blockers.iter().all(|b| {
+            if completed.contains(b) {
+                return true;
+            }
+            if !pending_set.contains(b) {
+                return true;
+            }
+            picked.contains(b)
+        })
+    }
+
+    let mut ordered = Vec::with_capacity(pending.len());
+    let mut picked: HashSet<u32> = HashSet::new();
+
+    while picked.len() < pending.len() {
+        let mut ready: Vec<u32> = pending
+            .iter()
+            .filter(|p| !picked.contains(&p.number))
+            .filter(|p| blockers_satisfied_for_pick(&p.blockers, &pending_set, &completed, &picked))
+            .map(|p| p.number)
+            .collect();
+
+        if ready.is_empty() {
+            let mut rest: Vec<u32> = pending
+                .iter()
+                .filter(|p| !picked.contains(&p.number))
+                .map(|p| p.number)
+                .collect();
+            rest.sort_by_key(|n| doc_rank[n]);
+            for n in rest {
+                ordered.push(n);
+                picked.insert(n);
+            }
+            break;
+        }
+
+        ready.sort_by_key(|n| doc_rank[n]);
+        let next = ready[0];
+        ordered.push(next);
+        picked.insert(next);
+    }
+
+    ordered
 }
 
 /// Return body with `- [ ] #N` (or `- [ ] **#N**`) replaced by `- [x] ...`.
@@ -3283,6 +3355,39 @@ mod tests {
     #[test]
     fn completed_empty() {
         assert_eq!(parse_completed(""), HashSet::new());
+    }
+
+    #[test]
+    fn execution_order_single_issue() {
+        let body = "- [ ] #10 New task";
+        assert_eq!(pending_issues_execution_order(body), vec![10]);
+    }
+
+    #[test]
+    fn execution_order_respects_pending_blockers_before_dependents() {
+        let body = "\
+- [ ] #49 Child blocked by #48
+- [ ] #48 Parent
+";
+        assert_eq!(pending_issues_execution_order(body), vec![48, 49]);
+    }
+
+    #[test]
+    fn execution_order_completed_blocker_skips_reordering() {
+        let body = "\
+- [x] #48 Parent done
+- [ ] #49 Child blocked by #48
+";
+        assert_eq!(pending_issues_execution_order(body), vec![49]);
+    }
+
+    #[test]
+    fn execution_order_fallback_document_order_on_cycle() {
+        let body = "\
+- [ ] #1 Alpha blocked by #2
+- [ ] #2 Beta blocked by #1
+";
+        assert_eq!(pending_issues_execution_order(body), vec![1, 2]);
     }
 
     #[test]
