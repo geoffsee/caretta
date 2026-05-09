@@ -151,18 +151,27 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
         return;
     }
 
-    timed!("tests", {
-        log("Running tests...");
-        if !cmd_run("./scripts/test-examples.sh", &[]) {
-            log(&format!(
-                "Tests failed for #{issue_num} — invoking agent to fix..."
-            ));
-            let (_, test_out) = cmd_capture("cargo", &["test", "--workspace"]);
-            let fix_prompt = build_test_fix_prompt(issue_num, &test_out);
-            run_agent(cfg, &fix_prompt);
-            cmd_run("cargo", &["fmt", "--all"]);
-        }
-    });
+    if cfg.test.command.is_empty() {
+        log("Skipping test step (no `[test] command` configured in freq-ai.toml).");
+    } else {
+        timed!("tests", {
+            log(&format!("Running tests: {}", cfg.test.command.join(" ")));
+            let (program, args) = cfg.test.command.split_first().expect("non-empty");
+            let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            let (ok, out) = cmd_capture(program, &arg_refs);
+            if !ok {
+                log(&format!(
+                    "Tests failed for #{issue_num} — invoking agent to fix..."
+                ));
+                let fix_prompt = build_test_fix_prompt(issue_num, &out);
+                run_agent(cfg, &fix_prompt);
+                if let Some((fmt_program, fmt_args)) = cfg.test.format_command.split_first() {
+                    let fmt_arg_refs: Vec<&str> = fmt_args.iter().map(String::as_str).collect();
+                    cmd_run(fmt_program, &fmt_arg_refs);
+                }
+            }
+        });
+    }
 
     let commit_msg = format!(
         "implement #{issue_num}: {title}\n\nCloses #{issue_num}\n\n{}",

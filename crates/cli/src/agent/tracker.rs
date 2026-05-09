@@ -537,7 +537,7 @@ reference — avoid re-reading files that are already included below.
 ## Instructions
 - Read AGENTS.md and the relevant skills/ for project conventions before starting.
 - Implement the changes described above.
-- Run ./scripts/test-examples.sh to verify nothing is broken.
+- Validate your changes using the test/build/format commands documented in AGENTS.md.
 - Keep idle memory under 10MB — no unnecessary allocations.
 - After implementing, update ISSUES.md: set the status of #{issue_num} to ✅ Done in the Task Dependency Hierarchy table.
 - Update STATUS.md if this issue changes the status of any tracked feature (e.g., from 🟡 to ✅).
@@ -579,13 +579,13 @@ Do NOT commit — the calling script handles commits."#
 
 pub fn build_test_fix_prompt(issue_num: u32, test_output: &str) -> String {
     format!(
-        r#"The pre-push hook for issue #{issue_num} failed because `cargo test` reported failures.
+        r#"The configured test command for issue #{issue_num} reported failures.
 
 Here is the test output:
 
 {test_output}
 
-Fix ALL test failures above. Common fixes:
+Fix ALL test failures above. Common guidance:
 - If a test assertion fails, fix the code under test (not the test) unless the test expectation is clearly wrong.
 - If a test times out, look for deadlocks, missing signals, or infinite loops in the code being tested.
 - If a compilation error prevents tests from running, fix the compilation error.
@@ -1105,7 +1105,7 @@ Address each thread below. The author of each thread is the project's review bot
 
 - For each thread, edit the file at the indicated path to address the finding. The line numbers refer to the **new** version of the file (the RIGHT side of the diff above).
 - Stay focused: only fix what the threads call out. Do NOT refactor neighbouring code or rename unrelated symbols. The smaller the diff, the easier the next review.
-- Do NOT run `cargo test`, `./scripts/test-examples.sh`, or any other workspace-wide validation inside this worktree. The worktree is throwaway, builds inside it are slow, and CI will validate the push. If you want to sanity-check your edit, re-`Read` the file to confirm the change applied — that is enough.
+- Do NOT run any workspace-wide validation (tests, lints, builds, formatters) inside this worktree. The worktree is throwaway, builds inside it are slow, and CI will validate the push. If you want to sanity-check your edit, re-`Read` the file to confirm the change applied — that is enough.
 - Do NOT commit. Do NOT push. The calling script handles commit and push so it can clean up the worktree atomically.
 - Do NOT post comments or reviews back to GitHub. The calling script handles that.
 

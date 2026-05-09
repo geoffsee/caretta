@@ -652,6 +652,21 @@ pub struct Config {
     pub pricing: PricingConfig,
     pub bot_settings: BotSettings,
     pub bot_credentials: Option<BotCredentials>,
+    pub test: TestCommands,
+}
+
+/// Project-specific test/format commands run after an agent edit.
+///
+/// Both fields are argv-style (program followed by args). An empty
+/// `command` skips the test step entirely; an empty `format_command`
+/// skips post-fix formatting. Configured via the `[test]` section of
+/// `freq-ai.toml`.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TestCommands {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub format_command: Vec<String>,
 }
 
 impl Config {
@@ -817,6 +832,8 @@ pub struct DevConfig {
     pub log_redaction: LogRedactionConfigFile,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub agent_models: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub test: TestCommands,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
