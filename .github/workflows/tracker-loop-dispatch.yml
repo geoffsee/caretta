@@ -70,6 +70,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FREQ_AI_CONTEXT: ${{ inputs.context }}
           FREQ_AI_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
 
   code-review:
     needs: [tracker-matrix-plan, tracker-issue]
@@ -92,6 +93,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FREQ_AI_CONTEXT: ${{ inputs.context }}
           FREQ_AI_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: List open PRs for follow-up
         id: open-prs
@@ -126,3 +128,4 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FREQ_AI_CONTEXT: ${{ inputs.context }}
           FREQ_AI_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
