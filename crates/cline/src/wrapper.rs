@@ -102,4 +102,25 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn cline_launch_path_propagates_not_found_for_absent_binary() {
+        use std::process::Command;
+
+        let wrapper = ClineWrapper;
+        let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
+        argv.extend(wrapper.launch_auto_mode());
+
+        assert_eq!(wrapper.binary(), "cline");
+        assert!(!argv.is_empty(), "launch argv must be non-empty");
+        assert_eq!(argv[0], "chat");
+        assert!(argv.iter().any(|a| a == "--yolo"));
+
+        let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
+        let err = Command::new(&absent_binary)
+            .args(&argv)
+            .spawn()
+            .expect_err("spawn must fail when binary is absent");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }

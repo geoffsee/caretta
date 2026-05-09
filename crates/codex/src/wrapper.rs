@@ -118,4 +118,40 @@ mod tests {
             Some(vec!["resume".to_string(), "thread_123".to_string()])
         );
     }
+
+    #[test]
+    fn codex_launch_path_propagates_not_found_for_absent_binary() {
+        use std::process::Command;
+
+        let wrapper = CodexWrapper;
+        let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
+        argv.extend(wrapper.launch_auto_mode());
+        let (model_args, model_env) = wrapper.launch_model_selection("smoke-model");
+        argv.extend(model_args);
+        let (local_args, local_env) =
+            wrapper.launch_local_inference("http://127.0.0.1:0", "", "smoke-local");
+        argv.extend(local_args);
+
+        assert_eq!(wrapper.binary(), "codex");
+        assert!(!argv.is_empty(), "launch argv must be non-empty");
+        assert_eq!(argv[0], "exec");
+        assert!(
+            argv.iter()
+                .any(|a| a == "--dangerously-bypass-approvals-and-sandbox")
+        );
+        assert!(model_env.is_empty());
+        assert!(
+            local_env
+                .iter()
+                .any(|(k, _)| k == "OPENAI_BASE_URL" || k == "OPENAI_API_KEY")
+        );
+
+        let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
+        let err = Command::new(&absent_binary)
+            .args(&argv)
+            .envs(local_env)
+            .spawn()
+            .expect_err("spawn must fail when binary is absent");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }

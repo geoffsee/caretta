@@ -182,4 +182,59 @@ mod tests {
             ])
         );
     }
+
+    #[test]
+    fn claude_launch_path_propagates_not_found_for_absent_binary() {
+        use std::process::Command;
+
+        let wrapper = ClaudeWrapper;
+        let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
+        argv.extend(wrapper.launch_auto_mode());
+        let (model_args, model_env) = wrapper.launch_model_selection("smoke-model");
+        argv.extend(model_args);
+        let (local_args, local_env) =
+            wrapper.launch_local_inference("http://127.0.0.1:0", "", "smoke-local");
+        argv.extend(local_args);
+
+        assert_eq!(wrapper.binary(), "claude");
+        assert!(!argv.is_empty(), "launch argv must be non-empty");
+        assert!(argv.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert!(model_env.is_empty());
+        assert!(
+            local_env
+                .iter()
+                .any(|(k, _)| k == "ANTHROPIC_BASE_URL" || k == "ANTHROPIC_API_KEY")
+        );
+
+        let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
+        let err = Command::new(&absent_binary)
+            .args(&argv)
+            .envs(local_env)
+            .spawn()
+            .expect_err("spawn must fail when binary is absent");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn cursor_launch_path_propagates_not_found_for_absent_binary() {
+        use std::process::Command;
+
+        let wrapper = CursorWrapper;
+        let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
+        argv.extend(wrapper.launch_auto_mode());
+        let (model_args, model_env) = wrapper.launch_model_selection("smoke-model");
+        argv.extend(model_args);
+
+        assert_eq!(wrapper.binary(), "cursor");
+        assert!(!argv.is_empty(), "launch argv must be non-empty");
+        assert!(argv.iter().any(|a| a == "--yolo"));
+        assert!(model_env.is_empty());
+
+        let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
+        let err = Command::new(&absent_binary)
+            .args(&argv)
+            .spawn()
+            .expect_err("spawn must fail when binary is absent");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }

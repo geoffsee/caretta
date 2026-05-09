@@ -96,4 +96,36 @@ mod tests {
             &[("XAI_BASE_URL", "https://api.x.ai/v1")]
         );
     }
+
+    #[test]
+    fn xai_launch_path_propagates_not_found_for_absent_binary() {
+        use std::process::Command;
+
+        let wrapper = XaiWrapper;
+        let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
+        argv.extend(wrapper.launch_auto_mode());
+        let (model_args, model_env) = wrapper.launch_model_selection("smoke-model");
+        assert!(
+            model_args.is_empty(),
+            "xai routes model selection through env, not argv"
+        );
+        argv.extend(model_args);
+
+        assert_eq!(wrapper.binary(), "copilot");
+        assert!(!argv.is_empty(), "launch argv must be non-empty");
+        assert_eq!(argv[0], "-p");
+        assert!(argv.iter().any(|a| a == "--yolo"));
+        assert_eq!(
+            model_env,
+            vec![("COPILOT_MODEL".to_string(), "smoke-model".to_string())]
+        );
+
+        let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
+        let err = Command::new(&absent_binary)
+            .args(&argv)
+            .envs(model_env)
+            .spawn()
+            .expect_err("spawn must fail when binary is absent");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }

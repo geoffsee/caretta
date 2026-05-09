@@ -91,4 +91,29 @@ mod tests {
             Some(vec!["--resume".to_string()])
         );
     }
+
+    #[test]
+    fn copilot_launch_path_propagates_not_found_for_absent_binary() {
+        use std::process::Command;
+
+        let wrapper = CopilotWrapper;
+        let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
+        argv.extend(wrapper.launch_auto_mode());
+        let (model_args, model_env) = wrapper.launch_model_selection("smoke-model");
+        argv.extend(model_args);
+
+        assert_eq!(wrapper.binary(), "copilot");
+        assert!(!argv.is_empty(), "launch argv must be non-empty");
+        assert_eq!(argv[0], "-p");
+        assert!(argv.iter().any(|a| a == "--yolo"));
+        assert!(argv.iter().any(|a| a == "--model"));
+        assert!(model_env.is_empty());
+
+        let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
+        let err = Command::new(&absent_binary)
+            .args(&argv)
+            .spawn()
+            .expect_err("spawn must fail when binary is absent");
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
 }
