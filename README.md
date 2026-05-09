@@ -89,7 +89,7 @@ freq-ai reads `freq-ai.toml` from the repo root on every launch (the legacy file
 project_name           = "my-project"   # default: inferred from the repo dir
 workflow_preset        = "default"      # default: "default"  (run `freq-ai presets`)
 bootstrap_agent_files  = true           # default: true   — legacy agent-file bootstrap flag
-bootstrap_snapshot     = true           # default: true   — capture a toak-rs snapshot on launch
+bootstrap_snapshot     = false          # default: false  — opt-in toak-rs codebase snapshot on launch
 use_subscription       = false          # default: false  — billing hint for adapters that support it
 
 # ── Per-agent default model ───────────────────────────────────────────────
