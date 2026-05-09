@@ -168,17 +168,77 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
         "implement #{issue_num}: {title}\n\nCloses #{issue_num}\n\n{}",
         cfg.agent.co_author()
     );
-    timed!(
+    let push_ok = timed!(
         "commit",
         commit_with_retries(cfg, issue_num, &branch, &commit_msg)
     );
+    if push_ok {
+        let pr_title = format!("implement #{issue_num}: {title}");
+        let pr_body =
+            format!("Closes #{issue_num}\n\nAutomated PR opened by freq-ai issue runner.");
+        create_pr_if_missing(&branch, &base, &pr_title, &pr_body);
+    }
     log(&format!("Issue #{issue_num} loop iteration complete."));
+}
+
+/// Open a PR for `branch` against `base` if no open PR already exists for that
+/// head branch. Idempotent: re-runs of the same issue won't fail just because
+/// the PR is already open.
+pub fn create_pr_if_missing(branch: &str, base: &str, title: &str, body: &str) -> bool {
+    let (ok, existing) = cmd_capture(
+        "gh",
+        &[
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "url",
+            "-q",
+            ".[0].url // empty",
+        ],
+    );
+    if ok && !existing.trim().is_empty() {
+        log(&format!(
+            "PR already open for branch '{branch}': {}",
+            existing.trim()
+        ));
+        return true;
+    }
+    if cmd_run(
+        "gh",
+        &[
+            "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body,
+        ],
+    ) {
+        log(&format!(
+            "Opened PR for branch '{branch}' against '{base}'."
+        ));
+        return true;
+    }
+    log(&format!(
+        "Failed to open PR for branch '{branch}' against '{base}'."
+    ));
+    false
 }
 
 pub fn commit_with_retries(_cfg: &Config, _issue_num: u32, branch: &str, message: &str) -> bool {
     let mut ok = false;
     for attempt in 1..=MAX_COMMIT_ATTEMPTS {
-        if cmd_run("git", &["add", "."]) && cmd_run("git", &["commit", "-m", message]) {
+        if !cmd_run("git", &["add", "."]) {
+            log(&format!("Commit attempt {attempt} failed, retrying..."));
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            continue;
+        }
+        let (_, status_out) = cmd_capture("git", &["status", "--porcelain"]);
+        if status_out.trim().is_empty() {
+            log("Nothing to commit — working tree clean. Skipping commit, proceeding to push.");
+            ok = true;
+            break;
+        }
+        if cmd_run("git", &["commit", "-m", message]) {
             ok = true;
             break;
         }
