@@ -13,86 +13,21 @@ use std::process::Command;
 #[cfg(feature = "bundle-runtime")]
 use tar::Archive;
 
+mod available_models;
+mod bundled_agents;
+mod utilities;
+
+pub use available_models::{
+    CliScan, CuratedModel, CuratedModels, RawScanResult, curate_all, raw_scan_to_json,
+    scan_all_clis, scan_available_models, scan_cli,
+};
+pub use bundled_agents::{BundledAgent, SUPPORTED_AGENTS};
+
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/agent_runtime_generated.rs"));
 }
 
 pub use generated::{ARCHIVE_NAME, ARCHIVE_SHA256, ARCHIVE_SHORT_SHA256, TARGET_ARCH, TARGET_OS};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BundledAgent {
-    pub id: &'static str,
-    pub binary: &'static str,
-    pub package: Option<&'static str>,
-    pub entrypoint: Option<&'static str>,
-    pub external: bool,
-}
-
-pub const SUPPORTED_AGENTS: &[BundledAgent] = &[
-    BundledAgent {
-        id: "claude",
-        binary: "claude",
-        package: Some("@anthropic-ai/claude-code"),
-        entrypoint: Some("node_modules/@anthropic-ai/claude-code/bin/claude.exe"),
-        external: false,
-    },
-    BundledAgent {
-        id: "cline",
-        binary: "cline",
-        package: Some("cline"),
-        entrypoint: Some("node_modules/cline/dist/cli.mjs"),
-        external: false,
-    },
-    BundledAgent {
-        id: "codex",
-        binary: "codex",
-        package: Some("@openai/codex"),
-        entrypoint: Some("node_modules/@openai/codex/bin/codex.js"),
-        external: false,
-    },
-    BundledAgent {
-        id: "copilot",
-        binary: "copilot",
-        package: Some("@github/copilot"),
-        entrypoint: Some("node_modules/@github/copilot/npm-loader.js"),
-        external: false,
-    },
-    BundledAgent {
-        id: "cursor",
-        binary: "cursor",
-        package: None,
-        entrypoint: None,
-        external: true,
-    },
-    BundledAgent {
-        id: "gemini",
-        binary: "gemini",
-        package: Some("@google/gemini-cli"),
-        entrypoint: Some("node_modules/@google/gemini-cli/bundle/gemini.js"),
-        external: false,
-    },
-    BundledAgent {
-        id: "grok",
-        binary: "grok",
-        package: Some("@kazuki-ookura/grok-cli"),
-        entrypoint: Some("node_modules/@kazuki-ookura/grok-cli/dist/index.js"),
-        external: false,
-    },
-    BundledAgent {
-        id: "junie",
-        binary: "junie",
-        package: Some("@jetbrains/junie"),
-        entrypoint: Some("node_modules/@jetbrains/junie/bin/index.js"),
-        external: false,
-    },
-    BundledAgent {
-        id: "xai",
-        binary: "copilot",
-        package: Some("@github/copilot"),
-        entrypoint: Some("node_modules/@github/copilot/npm-loader.js"),
-        external: false,
-    },
-];
 
 #[derive(Debug, Clone)]
 pub struct AgentRuntime {

@@ -15,6 +15,8 @@ node_modules/
 /scripts/discover-all-agents
 /scripts/discover-help
 /samples/*
+# Written by crates/agent-runtime `build.rs`; embed path is crates/cli/assets (symlink).
+/assets/available-models.json
 /agent_discovery_results/
 /.playwright-mcp
 /playwright-freq-*

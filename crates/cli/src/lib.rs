@@ -35,7 +35,7 @@ use agent::shell::{
     clear_stop_request, list_all_files, parse_args, preflight, record_agent_response, request_stop,
     reset_chat_history, run_chat_send, run_code_review, run_interview_draft, run_interview_respond,
     run_loop, run_pr_review_fix, run_refresh_agents, run_refresh_docs, run_security_code_review,
-    run_single_issue, run_workflow_draft,
+    run_single_issue, run_tracker_matrix, run_workflow_draft,
 };
 use agent::tracker::{
     DEFAULT_REVIEW_BOT_LOGIN, PendingIssue, PrSummary, TrackerInfo, current_branch_pr,
@@ -74,7 +74,7 @@ struct WorkflowEntriesResponse {
     name = "freq-ai",
     about = "Distributed application runtime agent",
     long_about = "freq-ai runs agent-powered project workflows from the command line or launches the desktop UI when no subcommand is given.",
-    after_help = "Examples:\n  freq-ai\n  freq-ai --agent codex code-review\n  freq-ai --dry-run refresh-docs\n  freq-ai --preset software-factory run backlog-curation\n  freq-ai serve --port 3000",
+    after_help = "Examples:\n  freq-ai\n  freq-ai --agent codex code-review\n  freq-ai --dry-run refresh-docs\n  freq-ai --preset software-factory run backlog-curation\n  freq-ai tracker-matrix 51 --json\n  freq-ai models\n  freq-ai --agent codex models --plain\n  freq-ai serve --port 3000",
     version
 )]
 struct Cli {
@@ -97,6 +97,12 @@ struct Cli {
     /// See `freq-ai presets` for the list of available presets.
     #[arg(long, value_name = "NAME")]
     preset: Option<String>,
+
+    /// Agent model for this invocation (overrides persisted freq-ai dev config).
+    /// `FREQ_AI_MODEL` applies the same override when set.
+    /// Hint: `freq-ai --agent … models` lists bundled IDs from `assets/available-models.json`.
+    #[arg(long, value_name = "MODEL")]
+    model: Option<String>,
 
     /// Write the bundled label taxonomy to .github/labels.yml and exit
     #[arg(long)]
@@ -139,6 +145,9 @@ enum Commands {
     RefreshDocs,
     /// Run a single issue
     Issue {
+        /// Tracker issue whose body lists this work item (for blocker → branch chaining)
+        #[arg(long, value_name = "TRACKER_ISSUE")]
+        tracker: Option<u32>,
         /// Issue number to run
         #[arg(value_name = "NUMBER")]
         number: u32,
@@ -148,6 +157,15 @@ enum Commands {
         /// Tracker issue number to process
         #[arg(value_name = "TRACKER")]
         tracker: u32,
+    },
+    /// Print pending issue numbers for a tracker (for CI matrix generation)
+    TrackerMatrix {
+        /// Tracker issue number to read
+        #[arg(value_name = "TRACKER")]
+        tracker: u32,
+        /// Emit a JSON array of issue numbers on stdout
+        #[arg(long)]
+        json: bool,
     },
     /// Serve the web UI via a local HTTP server
     Serve {
@@ -167,6 +185,17 @@ enum Commands {
         /// See `freq-ai presets <NAME>` for available IDs.
         #[arg(value_name = "WORKFLOW")]
         workflow: String,
+    },
+    /// List bundled model IDs and labels for `--model` / `FREQ_AI_MODEL`
+    ///
+    /// Data comes from assets/available-models.json (regenerate: cargo build -p freq-ai-agent-runtime).
+    Models {
+        /// Print only model IDs, one per line (for shell completion).
+        #[arg(long)]
+        plain: bool,
+        /// List every adapter; with `--plain`, deduplicate IDs across adapters.
+        #[arg(long)]
+        all: bool,
     },
 }
 
@@ -229,6 +258,8 @@ where
         config.dry_run = cli.dry_run;
         overrides(&mut config);
 
+        apply_freq_ai_model_env_and_cli(&mut config, cli.model.as_deref());
+
         // CLI `--preset` wins over freq-ai.toml and library overrides — fail fast
         // with the available list if the name doesn't match a real preset dir.
         if let Some(preset) = &cli.preset {
@@ -266,12 +297,26 @@ where
             Some(Commands::SecurityReview) => run_security_code_review(&config),
             Some(Commands::RefreshAgents) => run_refresh_agents(&config),
             Some(Commands::RefreshDocs) => run_refresh_docs(&config),
-            Some(Commands::Issue { number }) => {
-                let trackers = find_tracker();
-                let tracker_num = trackers.first().map(|t| t.number).unwrap_or(0);
-                run_single_issue(&config, tracker_num, number)
+            Some(Commands::Issue { number, tracker }) => {
+                let tracker_num = tracker
+                    .or_else(|| find_tracker().first().map(|t| t.number))
+                    .unwrap_or(0);
+                let blockers = if tracker_num != 0 {
+                    let body = get_tracker_body(tracker_num);
+                    parse_pending(&body)
+                        .into_iter()
+                        .find(|p| p.number == number)
+                        .map(|p| p.blockers)
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                run_single_issue(&config, tracker_num, number, &blockers);
             }
             Some(Commands::Loop { tracker }) => run_loop(&config, tracker),
+            Some(Commands::TrackerMatrix { tracker, json }) => {
+                run_tracker_matrix(&config, tracker, json);
+            }
             Some(Commands::Run { workflow }) => {
                 let workflows = load_workflows(&config.root, &config.workflow_preset);
                 let normalized = workflow.replace('-', "_");
@@ -295,6 +340,9 @@ where
                         std::process::exit(2);
                     }
                 }
+            }
+            Some(Commands::Models { plain, all }) => {
+                agent::models_catalog::run_models_list(cli.agent, plain, all);
             }
             Some(Commands::Presets { name }) => match name {
                 None => {
@@ -387,6 +435,23 @@ where
 /// (e.g. custom `skill_paths`) survive into the GUI rather than being
 /// re-derived from `freq-ai.toml` alone.
 static CONFIG_OVERRIDE: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
+
+fn apply_nonempty_model_trim(into: &mut String, candidate: Option<&str>) {
+    if let Some(m) = candidate {
+        let m = m.trim();
+        if !m.is_empty() {
+            *into = m.to_string();
+        }
+    }
+}
+
+fn apply_freq_ai_model_env_and_cli(config: &mut Config, cli_model: Option<&str>) {
+    apply_nonempty_model_trim(
+        &mut config.model,
+        std::env::var("FREQ_AI_MODEL").ok().as_deref(),
+    );
+    apply_nonempty_model_trim(&mut config.model, cli_model);
+}
 
 fn ensure_default_workflow_preset_first(mut presets: Vec<String>) -> Vec<String> {
     if !presets.iter().any(|preset| preset == "default") {
@@ -753,7 +818,19 @@ fn App() -> Element {
         changed_files.write().clear();
         let cfg = config.read().clone();
         tokio::spawn(async move {
-            run_single_issue(&cfg, 0, issue_num);
+            let trackers = find_tracker();
+            let tracker_num = trackers.first().map(|t| t.number).unwrap_or(0);
+            let blockers = if tracker_num != 0 {
+                let body = get_tracker_body(tracker_num);
+                parse_pending(&body)
+                    .into_iter()
+                    .find(|p| p.number == issue_num)
+                    .map(|p| p.blockers)
+                    .unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            run_single_issue(&cfg, tracker_num, issue_num, &blockers);
         });
     };
 
@@ -1118,5 +1195,27 @@ fn App() -> Element {
                 theme_name: theme.read().name.to_string(),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod model_trim_tests {
+    use super::apply_nonempty_model_trim;
+
+    #[test]
+    fn successive_nonempty_candidates_override() {
+        let mut m = "first".into();
+        apply_nonempty_model_trim(&mut m, Some("  second  "));
+        apply_nonempty_model_trim(&mut m, Some("third"));
+        assert_eq!(m, "third");
+    }
+
+    #[test]
+    fn skips_empty_or_whitespace_only() {
+        let mut m = "keep".into();
+        apply_nonempty_model_trim(&mut m, Some("   "));
+        apply_nonempty_model_trim(&mut m, Some(""));
+        apply_nonempty_model_trim(&mut m, None);
+        assert_eq!(m, "keep");
     }
 }

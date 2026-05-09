@@ -1,4 +1,4 @@
-use crate::agent::cmd::{cmd_capture, cmd_run, log};
+use crate::agent::cmd::{cmd_capture, cmd_run, log, origin_default_branch};
 use crate::agent::issue::preflight;
 use crate::agent::process::{emit_event, stop_requested};
 use crate::agent::run::run_agent;
@@ -99,14 +99,15 @@ pub fn run_refresh_agents(cfg: &Config) {
         .unwrap_or_default()
         .as_secs();
     let branch = format!("{BRANCH_PREFIX}refresh-agents-{ts}");
-    cmd_run("git", &["checkout", "master"]);
+    let trunk = origin_default_branch();
+    cmd_run("git", &["checkout", &trunk]);
     cmd_run("git", &["branch", "-D", &branch]);
     cmd_run("git", &["checkout", "-b", &branch]);
 
     run_agent(cfg, &prompt);
     if stop_requested() {
         log("Stop requested. Refresh Agents cancelled.");
-        cmd_run("git", &["checkout", "master"]);
+        cmd_run("git", &["checkout", &trunk]);
         emit_event(AgentEvent::Done);
         return;
     }
@@ -115,7 +116,7 @@ pub fn run_refresh_agents(cfg: &Config) {
     let (_, status_out) = cmd_capture("git", &["status", "--porcelain"]);
     if status_out.trim().is_empty() {
         log("No drift detected — agent-facing docs are up to date.");
-        cmd_run("git", &["checkout", "master"]);
+        cmd_run("git", &["checkout", &trunk]);
         cmd_run("git", &["branch", "-D", &branch]);
         emit_event(AgentEvent::Done);
         return;

@@ -175,6 +175,42 @@ pub fn cmd_stdout_or_die(program: &str, args: &[&str], context: &str) -> String 
     cmd_stdout(program, args).unwrap_or_else(|| die(context))
 }
 
+/// Default branch on `origin` (commonly `main` or `master`).
+///
+/// Uses `refs/remotes/origin/HEAD` when present; otherwise checks for
+/// `origin/main` and `origin/master`. Falls back to `"main"`.
+pub fn origin_default_branch() -> String {
+    if let Some(sym) = cmd_stdout(
+        "git",
+        &["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"],
+    ) && let Some(short) = trim_origin_head_to_branch(&sym)
+    {
+        return short.to_string();
+    }
+    for name in ["main", "master"] {
+        if cmd_stdout(
+            "git",
+            &[
+                "rev-parse",
+                "--quiet",
+                "--verify",
+                &format!("refs/remotes/origin/{name}"),
+            ],
+        )
+        .is_some()
+        {
+            return name.to_string();
+        }
+    }
+    "main".to_string()
+}
+
+fn trim_origin_head_to_branch(sym: &str) -> Option<&str> {
+    let s = sym.trim();
+    s.strip_prefix("refs/remotes/origin/")
+        .filter(|b| !b.is_empty())
+}
+
 /// Run a command, inheriting stdio. Returns success bool.
 pub fn cmd_run(program: &str, args: &[&str]) -> bool {
     Command::new(program)
@@ -244,7 +280,7 @@ pub fn list_all_files(root: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{configure_log_redaction, sanitize_log_message};
+    use super::{configure_log_redaction, sanitize_log_message, trim_origin_head_to_branch};
     use cli_common::LogRedactionConfigFile;
     use std::sync::{LazyLock, Mutex, MutexGuard};
 
@@ -324,5 +360,18 @@ mod tests {
         });
         let out = sanitize_log_message(r#"{"token":"not_a_secret"}"#);
         assert!(out.contains(r#""token":"not_a_secret""#));
+    }
+
+    #[test]
+    fn trim_origin_head_extracts_branch_short_name() {
+        assert_eq!(
+            trim_origin_head_to_branch("refs/remotes/origin/main"),
+            Some("main")
+        );
+        assert_eq!(
+            trim_origin_head_to_branch("refs/remotes/origin/master\n"),
+            Some("master")
+        );
+        assert_eq!(trim_origin_head_to_branch("refs/heads/main"), None);
     }
 }

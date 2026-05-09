@@ -11,6 +11,10 @@ on:
         description: "Optional natural-language steering context"
         required: false
         type: string
+      model:
+        description: "Optional agent model override for freq-ai (e.g. Claude model id)"
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -22,41 +26,74 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  tracker-loop:
+  # Resolves pending child issues from the tracker body (blockers respected), emits a JSON array for the matrix below.
+  # Requires a freq-ai release that includes the `tracker-matrix` subcommand (bundled in packages/action).
+  tracker-matrix-plan:
     runs-on: ubuntu-latest
+    outputs:
+      issues: ${{ steps.plan.outputs.issues-json }}
+      issue-count: ${{ steps.plan.outputs.issue-count }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Run freq-ai tracker loop
-        uses: geoffsee/freq-ai-action@v0.0.2
+      - uses: geoffsee/freq-ai-action@v0.0.3
+        id: plan
         with:
-          task: loop
-          args: ${{ inputs.tracker }}
+          task: tracker-matrix
+          args: ${{ inputs.tracker }} --json
+          preset: software-factory
+          agent: claude
+          auto: "false"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  tracker-issue:
+    needs: tracker-matrix-plan
+    if: ${{ needs.tracker-matrix-plan.outputs.issue-count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      max-parallel: 1
+      matrix:
+        issue: ${{ fromJson(needs.tracker-matrix-plan.outputs.issues) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run freq-ai issue
+        uses: geoffsee/freq-ai-action@v0.0.3
+        with:
+          task: issue
+          args: --tracker ${{ inputs.tracker }} ${{ matrix.issue }}
           preset: software-factory
           agent: claude
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FREQ_AI_CONTEXT: ${{ inputs.context }}
+          FREQ_AI_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
 
   code-review:
-    needs: tracker-loop
-    if: ${{ needs.tracker-loop.result == 'success' }}
+    needs: [tracker-matrix-plan, tracker-issue]
+    if: >-
+      !failure() && !cancelled() &&
+      (needs.tracker-matrix-plan.outputs.issue-count == '0' ||
+       needs.tracker-issue.result == 'success')
     runs-on: ubuntu-latest
     outputs:
       prs: ${{ steps.open-prs.outputs.prs }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Run freq-ai code review
-        uses: geoffsee/freq-ai-action@v0.0.2
+        uses: geoffsee/freq-ai-action@v0.0.3
         with:
           task: code-review
           agent: claude
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FREQ_AI_CONTEXT: ${{ inputs.context }}
+          FREQ_AI_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: List open PRs for follow-up
         id: open-prs
@@ -79,11 +116,10 @@ jobs:
       matrix:
         pr: ${{ fromJson(needs.code-review.outputs.prs) }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Run freq-ai review follow-up
-        uses: geoffsee/freq-ai-action@v0.0.2
+        uses: geoffsee/freq-ai-action@v0.0.3
         with:
           task: fix-pr
           args: ${{ matrix.pr }}
@@ -91,3 +127,5 @@ jobs:
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           FREQ_AI_CONTEXT: ${{ inputs.context }}
+          FREQ_AI_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}

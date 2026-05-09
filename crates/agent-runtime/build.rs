@@ -9,8 +9,20 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tar::{Builder, EntryType, Header};
 
+#[path = "src/bundled_agents.rs"]
+mod bundled_agents;
+
+#[path = "src/utilities.rs"]
+mod utilities;
+
+#[path = "src/available_models.rs"]
+mod available_models;
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=src/available_models.rs");
+    println!("cargo:rerun-if-changed=src/bundled_agents.rs");
+    println!("cargo:rerun-if-changed=src/utilities.rs");
     // Cache key intentionally tracks ONLY `bun.lock`. We do not re-run when
     // `package.json` changes on its own (a lockfile update will reflect any
     // dependency change), and we do not invalidate on `BUN` binary path
@@ -19,6 +31,10 @@ fn main() {
     println!("cargo:rerun-if-changed=bun.lock");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+    let repo_root = manifest_dir
+        .parent()
+        .and_then(Path::parent)
+        .expect("freq-ai-agent-runtime should live at workspace/crates/agent-runtime");
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("CARGO_CFG_TARGET_OS");
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").expect("CARGO_CFG_TARGET_ARCH");
@@ -34,6 +50,13 @@ fn main() {
     // cargo run can short-circuit `run_bun_install_if_needed` while leaving
     // the freshly-installed stub binary unrepaired in `node_modules/`.
     ensure_claude_native_binary(&manifest_dir, &bun_path);
+
+    available_models::scan_available_models(repo_root, &manifest_dir).unwrap_or_else(|err| {
+        panic!(
+            "failed to write {}: {err}",
+            repo_root.join("assets/available-models.json").display()
+        );
+    });
 
     let archive_name = format!("freq-ai-agents-{target_os}-{target_arch}.tar.gz");
     let generated_path = out_dir.join("agent_runtime_generated.rs");

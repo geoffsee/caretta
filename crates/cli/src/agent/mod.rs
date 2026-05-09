@@ -9,6 +9,7 @@ pub mod config_store;
 pub mod interview;
 pub mod issue;
 pub mod launch;
+pub mod models_catalog;
 pub mod process;
 pub mod refresh;
 pub mod review;
