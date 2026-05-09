@@ -231,15 +231,37 @@ impl AgentRuntime {
     }
 
     pub fn command_for_binary(&self, binary: &str) -> Command {
-        let program = self
-            .binary_path(binary)
-            .unwrap_or_else(|| PathBuf::from(binary));
-        let mut command = Command::new(program);
+        let mut command = if binary == "claude" {
+            self.command_for_claude_wrapper().unwrap_or_else(|| {
+                Command::new(
+                    self.binary_path(binary)
+                        .unwrap_or_else(|| PathBuf::from(binary)),
+                )
+            })
+        } else {
+            Command::new(
+                self.binary_path(binary)
+                    .unwrap_or_else(|| PathBuf::from(binary)),
+            )
+        };
         command.env(
             "PATH",
             runtime_path([self.runtime_bin_dir(), self.bin_dir()]),
         );
         command
+    }
+
+    fn command_for_claude_wrapper(&self) -> Option<Command> {
+        let wrapper = self
+            .root
+            .join("node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs");
+        if !wrapper.is_file() {
+            return None;
+        }
+
+        let mut command = Command::new(self.node_path().unwrap_or_else(|| PathBuf::from("node")));
+        command.arg(wrapper);
+        Some(command)
     }
 }
 
@@ -373,6 +395,31 @@ mod tests {
         let paths: Vec<PathBuf> = env::split_paths(&path).collect();
         assert_eq!(paths[0], runtime.runtime_bin_dir());
         assert_eq!(paths[1], runtime.bin_dir());
+    }
+
+    #[test]
+    fn claude_command_uses_wrapper_instead_of_direct_native_binary() {
+        let tempdir = tempfile::tempdir().expect("create temp runtime dir");
+        let root = tempdir.path();
+        let wrapper = root.join("node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs");
+        fs::create_dir_all(wrapper.parent().unwrap()).expect("create wrapper parent");
+        fs::write(&wrapper, "").expect("write wrapper");
+        let node = root.join("bin/node");
+        fs::create_dir_all(node.parent().unwrap()).expect("create runtime bin");
+        fs::write(&node, "").expect("write node");
+
+        let runtime = AgentRuntime {
+            root: root.to_path_buf(),
+        };
+        let command = runtime.command_for_binary("claude");
+
+        let expected_node = fs::canonicalize(&node).unwrap_or(node);
+        assert_eq!(command.get_program(), expected_node.as_os_str());
+        let args = command
+            .get_args()
+            .map(PathBuf::from)
+            .collect::<Vec<PathBuf>>();
+        assert_eq!(args, vec![wrapper]);
     }
 
     #[test]

@@ -64,16 +64,18 @@ fn run_claude_native_with_env_for_prompt(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap_or_else(|_| panic!("failed to spawn {binary}"));
+    let program = cmd.get_program().to_string_lossy().to_string();
+    let started_at = Instant::now();
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return handle_agent_spawn_error(binary, &program, err, started_at, prompt);
+        }
+    };
     set_active_child_pid(Some(child.id()));
 
     let stdout = child.stdout.take().expect("piped stdout");
     let reader = BufReader::new(stdout);
-    let started_at = Instant::now();
     let mut saw_result = false;
     let mut raw_output = String::new();
 
@@ -302,6 +304,25 @@ fn estimated_result_event(ok: bool, elapsed_ms: u128, prompt: &str, output: &str
     })
 }
 
+fn handle_agent_spawn_error(
+    binary: &str,
+    program: &str,
+    err: std::io::Error,
+    started_at: Instant,
+    prompt: &str,
+) -> bool {
+    let message = format!("Failed to spawn {binary} at {program}: {err}");
+    log(&message);
+    set_active_child_pid(None);
+    emit_event(estimated_result_event(
+        false,
+        started_at.elapsed().as_millis(),
+        prompt,
+        &message,
+    ));
+    false
+}
+
 fn append_event_output(ev: &AgentEvent, output: &mut String) {
     match ev {
         AgentEvent::Claude(ClaudeEvent::Assistant { message }) => {
@@ -345,16 +366,18 @@ fn run_codex_native_with_env_for_prompt(
     for (k, v) in extra_env {
         cmd.env(k, v);
     }
-    let mut child = cmd
-        .stdout(Stdio::piped())
-        .stderr(Stdio::inherit())
-        .spawn()
-        .unwrap_or_else(|_| panic!("failed to spawn {binary}"));
+    let program = cmd.get_program().to_string_lossy().to_string();
+    let started_at = Instant::now();
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return handle_agent_spawn_error(binary, &program, err, started_at, prompt);
+        }
+    };
     set_active_child_pid(Some(child.id()));
 
     let stdout = child.stdout.take().expect("piped stdout");
     let reader = BufReader::new(stdout);
-    let started_at = Instant::now();
     let mut saw_result = false;
     let mut output_text = String::new();
 
@@ -439,7 +462,10 @@ pub fn local_inference_overrides(cfg: &Config) -> crate::agent::types::AgentLaun
 
 #[cfg(test)]
 mod tests {
-    use super::{codex_events_from_json_line, native_command};
+    use super::{
+        codex_events_from_json_line, native_command, run_claude_native_with_env,
+        run_codex_native_with_env,
+    };
     use crate::agent::types::{AgentEvent, ClaudeEvent};
     use std::path::PathBuf;
 
@@ -468,6 +494,30 @@ mod tests {
             .map(|a| a.to_string_lossy().to_string())
             .collect();
         assert_eq!(args, vec!["-p".to_string(), "hi".to_string()]);
+    }
+
+    #[test]
+    fn claude_spawn_error_returns_false_instead_of_panicking() {
+        let result = std::panic::catch_unwind(|| {
+            run_claude_native_with_env("__freq_ai_missing_agent__", &[], &[], None)
+        });
+
+        assert!(
+            !result.expect("spawn failure should not panic"),
+            "missing agent binary should report an unsuccessful run"
+        );
+    }
+
+    #[test]
+    fn codex_spawn_error_returns_false_instead_of_panicking() {
+        let result = std::panic::catch_unwind(|| {
+            run_codex_native_with_env("__freq_ai_missing_agent__", &[], &[], None)
+        });
+
+        assert!(
+            !result.expect("spawn failure should not panic"),
+            "missing agent binary should report an unsuccessful run"
+        );
     }
 
     #[test]
