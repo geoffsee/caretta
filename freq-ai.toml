@@ -5,3 +5,7 @@ bootstrap_agent_files = true
 advanced = false
 preset = "vllm"
 base_url = "http://localhost:8000/v1"
+
+[test]
+command = ["./scripts/test-examples.sh"]
+format_command = ["cargo", "fmt", "--all"]
