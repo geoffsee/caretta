@@ -14,14 +14,37 @@ pub fn generate_codebase_snapshot(root: &str) -> String {
         }
         Ok(_) => {
             let root = root.to_string();
-            std::thread::spawn(move || generate_codebase_snapshot_on_new_runtime(&root))
+            match std::thread::spawn(move || generate_codebase_snapshot_on_new_runtime(&root))
                 .join()
-                .unwrap_or_else(|_| {
-                    log("WARNING: toak-rs snapshot worker thread panicked");
+            {
+                Ok(snapshot) => snapshot,
+                Err(panic) => {
+                    log(&format!(
+                        "WARNING: toak-rs snapshot worker thread panicked: {}",
+                        describe_panic_payload(panic.as_ref())
+                    ));
                     String::new()
-                })
+                }
+            }
         }
         Err(_) => generate_codebase_snapshot_on_new_runtime(root),
+    }
+}
+
+/// Best-effort extraction of a human-readable reason from a thread-panic payload.
+///
+/// `JoinHandle::join` returns `Box<dyn Any + Send>`; the standard library only
+/// guarantees the payload is downcastable to `&'static str` or `String` when
+/// the panic originated from `panic!` with a string-like message. Anything else
+/// is reported generically so callers still get a useful log line.
+#[cfg(not(target_arch = "wasm32"))]
+fn describe_panic_payload(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
     }
 }
 
@@ -192,6 +215,75 @@ mod tests {
         assert!(
             tokens > 0,
             "count_tokens should return >0 for non-empty input"
+        );
+    }
+
+    /// Exercises the current-thread runtime branch, which dispatches to a
+    /// dedicated worker thread because `block_on` is not available inside a
+    /// current-thread runtime task.
+    #[tokio::test(flavor = "current_thread")]
+    async fn generate_codebase_snapshot_works_inside_current_thread_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        fs::write(root.join("main.rs"), "fn main() { println!(\"hello\"); }\n").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "main.rs"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-m", "init"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+
+        let root = root.to_string_lossy().into_owned();
+        let content = generate_codebase_snapshot(&root);
+        assert!(
+            content.contains("main"),
+            "current-thread branch should still produce a non-empty snapshot"
+        );
+    }
+
+    /// When the worker thread fails to even build a runtime we expect an
+    /// explicit empty string rather than a panic propagating out. This keeps
+    /// the public contract simple: callers always get a `String`.
+    #[test]
+    fn generate_codebase_snapshot_returns_empty_on_invalid_root() {
+        // A path that does not exist (and is not a git repo) drives toak-rs
+        // into its failure branch, which by contract returns String::new().
+        let bogus = "/definitely/not/a/real/path/for/freq-ai/snapshot/tests";
+        let snapshot = generate_codebase_snapshot(bogus);
+        assert_eq!(
+            snapshot, "",
+            "explicit empty-on-failure contract for missing roots"
+        );
+    }
+
+    #[test]
+    fn describe_panic_payload_extracts_str_message() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(describe_panic_payload(payload.as_ref()), "boom");
+    }
+
+    #[test]
+    fn describe_panic_payload_extracts_string_message() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("kaboom"));
+        assert_eq!(describe_panic_payload(payload.as_ref()), "kaboom");
+    }
+
+    #[test]
+    fn describe_panic_payload_falls_back_for_unknown_payload() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42u32);
+        assert_eq!(
+            describe_panic_payload(payload.as_ref()),
+            "unknown panic payload"
         );
     }
 
