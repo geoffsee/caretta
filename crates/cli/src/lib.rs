@@ -22,6 +22,7 @@
 
 pub mod agent;
 pub mod custom_themes;
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 pub mod ui;
 
 pub use agent::types::{Agent, Config, SkillPaths};
@@ -49,12 +50,18 @@ use agent::types::{
 use agent::workflow::{list_presets, load_sidebar_entries, load_workflows};
 use clap::{Parser, Subcommand};
 use custom_themes::Theme;
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 use dioxus::prelude::*;
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 use std::collections::HashMap;
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 use tokio::sync::mpsc;
 use tracing::info;
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 use ui::components::BASE_CSS;
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 use ui::security::{SecurityFinding, run_security_scan};
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 use ui::{Editor, Sidebar, Statusbar};
 
 #[cfg(target_arch = "wasm32")]
@@ -277,6 +284,7 @@ where
         // Eagerly populate the issue-comment trigger cache from the (possibly
         // overridden) skill path so the sidebar reminder is non-empty before the
         // first render. Done after `overrides` so consumers' custom paths win.
+        #[cfg(feature = "desktop")]
         ui::sidebar::init_issue_comment_triggers(std::path::Path::new(
             &config.skill_paths.issue_tracking,
         ));
@@ -398,6 +406,7 @@ where
                     }
                 }
             },
+            #[cfg(feature = "desktop")]
             Some(Commands::Serve { port }) => {
                 info!(
                     "Launching API/web server for root={} with requested_port={}",
@@ -411,6 +420,15 @@ where
                     }
                 });
             }
+            #[cfg(not(feature = "desktop"))]
+            Some(Commands::Serve { .. }) => {
+                eprintln!(
+                    "The web server requires the 'desktop' feature.\n\
+                     Rebuild with: cargo build --features desktop"
+                );
+                std::process::exit(1);
+            }
+            #[cfg(feature = "desktop")]
             Some(Commands::Gui) | None => {
                 // Stash the finalised Config so the Dioxus App component can pick
                 // it up via `parse_args` (which already loads from freq-ai.toml). The
@@ -426,6 +444,14 @@ where
                     .expect("CONFIG_OVERRIDE set twice");
                 dioxus::launch(App);
             }
+            #[cfg(not(feature = "desktop"))]
+            Some(Commands::Gui) | None => {
+                eprintln!(
+                    "The desktop GUI requires the 'desktop' feature.\n\
+                     Rebuild with: cargo build --features desktop"
+                );
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -434,6 +460,7 @@ where
 /// component reads from this on first render so library consumers' overrides
 /// (e.g. custom `skill_paths`) survive into the GUI rather than being
 /// re-derived from `freq-ai.toml` alone.
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 static CONFIG_OVERRIDE: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
 
 fn apply_nonempty_model_trim(into: &mut String, candidate: Option<&str>) {
@@ -465,6 +492,7 @@ fn ensure_default_workflow_preset_first(mut presets: Vec<String>) -> Vec<String>
     presets
 }
 
+#[cfg(any(target_arch = "wasm32", feature = "desktop"))]
 #[component]
 fn App() -> Element {
     let mut config = use_signal(|| {

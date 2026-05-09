@@ -23,6 +23,10 @@ path = "src/main.rs"
 # the agent runtime archive embedded.
 default = []
 bundle-runtime = ["agent-runtime/bundle-runtime"]
+# Enable the Dioxus desktop GUI and its GTK/system-library dependencies.
+# Required for `cargo run -- gui`. Off by default so `cargo test --workspace`
+# works in headless CI environments that lack GTK headers.
+desktop = ["dep:dioxus"]
 
 [dependencies]
 agent-common = { path = "../agent-common" }
@@ -52,7 +56,7 @@ indexmap = { version = "2", features = ["serde"] }
 tempfile = "3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-dioxus = { version = "0.6", features = ["desktop"] }
+dioxus = { version = "0.6", features = ["desktop"], optional = true }
 tokio = { version = "1", features = ["full"] }
 toak-rs = { version = "6.0.3", default-features = false }
 keyring = "3"
