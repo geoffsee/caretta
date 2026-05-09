@@ -116,7 +116,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             log(&format!(
                 "Tests failed for #{issue_num} — invoking agent to fix..."
             ));
-            let (_, test_out) = cmd_capture("cargo", &["test", "--workspace"]);
+            let (_, test_out) =
+                cmd_capture("cargo", &["test", "--workspace", "--exclude", "freq-ai"]);
             let fix_prompt = build_test_fix_prompt(issue_num, &test_out);
             run_agent(cfg, &fix_prompt);
             cmd_run("cargo", &["fmt", "--all"]);
