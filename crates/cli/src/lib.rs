@@ -81,7 +81,7 @@ struct WorkflowEntriesResponse {
     name = "freq-ai",
     about = "Distributed application runtime agent",
     long_about = "freq-ai runs agent-powered project workflows from the command line or launches the desktop UI when no subcommand is given.",
-    after_help = "Examples:\n  freq-ai\n  freq-ai --agent codex code-review\n  freq-ai --dry-run refresh-docs\n  freq-ai --preset software-factory run backlog-curation\n  freq-ai tracker-matrix 51 --json\n  freq-ai models\n  freq-ai --agent codex models --plain\n  freq-ai serve --port 3000",
+    after_help = "Examples:\n  freq-ai gui                              # requires --features desktop at build time\n  freq-ai --agent codex code-review\n  freq-ai --dry-run refresh-docs\n  freq-ai --preset software-factory run backlog-curation\n  freq-ai tracker-matrix 51 --json\n  freq-ai models\n  freq-ai --agent codex models --plain\n  freq-ai serve --port 3000              # requires --features desktop at build time",
     version
 )]
 struct Cli {
