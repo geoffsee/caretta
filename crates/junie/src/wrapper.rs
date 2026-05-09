@@ -59,6 +59,7 @@ mod tests {
     use super::JunieWrapper;
     use agent_common::AgentCliAdapter;
     use agent_common::claude_family_native_argv;
+    use std::process::Command;
 
     #[test]
     fn builds_model_prompt_project_and_output_args() {
@@ -100,8 +101,6 @@ mod tests {
 
     #[test]
     fn junie_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = JunieWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());

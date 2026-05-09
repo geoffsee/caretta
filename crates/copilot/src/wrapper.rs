@@ -56,6 +56,7 @@ impl AgentCliAdapter for CopilotWrapper {
 mod tests {
     use super::CopilotWrapper;
     use agent_common::AgentCliAdapter;
+    use std::process::Command;
 
     #[test]
     fn builds_model_prompt_and_resume_args() {
@@ -94,8 +95,6 @@ mod tests {
 
     #[test]
     fn copilot_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = CopilotWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());

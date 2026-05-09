@@ -61,6 +61,7 @@ impl AgentCliAdapter for ClineWrapper {
 mod tests {
     use super::ClineWrapper;
     use agent_common::AgentCliAdapter;
+    use std::process::Command;
 
     #[test]
     fn builds_prompt_model_and_version_args() {
@@ -105,8 +106,6 @@ mod tests {
 
     #[test]
     fn cline_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = ClineWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());

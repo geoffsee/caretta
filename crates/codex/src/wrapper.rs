@@ -87,6 +87,7 @@ impl AgentCliAdapter for CodexWrapper {
 mod tests {
     use super::CodexWrapper;
     use agent_common::AgentCliAdapter;
+    use std::process::Command;
 
     #[test]
     fn builds_prompt_model_and_project_args() {
@@ -121,8 +122,6 @@ mod tests {
 
     #[test]
     fn codex_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = CodexWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());
@@ -140,11 +139,8 @@ mod tests {
                 .any(|a| a == "--dangerously-bypass-approvals-and-sandbox")
         );
         assert!(model_env.is_empty());
-        assert!(
-            local_env
-                .iter()
-                .any(|(k, _)| k == "OPENAI_BASE_URL" || k == "OPENAI_API_KEY")
-        );
+        assert!(local_env.iter().any(|(k, _)| k == "OPENAI_BASE_URL"));
+        assert!(local_env.iter().any(|(k, _)| k == "OPENAI_API_KEY"));
 
         let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
         let err = Command::new(&absent_binary)

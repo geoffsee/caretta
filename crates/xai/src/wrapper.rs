@@ -65,6 +65,7 @@ impl XaiWrapper {
 mod tests {
     use super::XaiWrapper;
     use agent_common::AgentCliAdapter;
+    use std::process::Command;
 
     #[test]
     fn uses_copilot_binary_with_xai_flag_mapping() {
@@ -99,8 +100,6 @@ mod tests {
 
     #[test]
     fn xai_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = XaiWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());

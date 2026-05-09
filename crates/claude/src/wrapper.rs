@@ -138,6 +138,7 @@ mod tests {
     use super::{ClaudeWrapper, CursorWrapper};
     use agent_common::AgentCliAdapter;
     use agent_common::claude_family_native_argv;
+    use std::process::Command;
 
     #[test]
     fn builds_model_and_native_argv() {
@@ -185,8 +186,6 @@ mod tests {
 
     #[test]
     fn claude_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = ClaudeWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());
@@ -200,11 +199,8 @@ mod tests {
         assert!(!argv.is_empty(), "launch argv must be non-empty");
         assert!(argv.iter().any(|a| a == "--dangerously-skip-permissions"));
         assert!(model_env.is_empty());
-        assert!(
-            local_env
-                .iter()
-                .any(|(k, _)| k == "ANTHROPIC_BASE_URL" || k == "ANTHROPIC_API_KEY")
-        );
+        assert!(local_env.iter().any(|(k, _)| k == "ANTHROPIC_BASE_URL"));
+        assert!(local_env.iter().any(|(k, _)| k == "ANTHROPIC_API_KEY"));
 
         let absent_binary = format!("{}-freq-ai-launch-smoke-absent", wrapper.binary());
         let err = Command::new(&absent_binary)
@@ -217,8 +213,6 @@ mod tests {
 
     #[test]
     fn cursor_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = CursorWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());

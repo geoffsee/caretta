@@ -56,6 +56,7 @@ impl AgentCliAdapter for GeminiWrapper {
 mod tests {
     use super::GeminiWrapper;
     use agent_common::AgentCliAdapter;
+    use std::process::Command;
 
     #[test]
     fn builds_model_prompt_and_output_format_args() {
@@ -95,8 +96,6 @@ mod tests {
 
     #[test]
     fn gemini_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = GeminiWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());

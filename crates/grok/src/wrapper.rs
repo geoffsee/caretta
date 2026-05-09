@@ -50,6 +50,7 @@ impl AgentCliAdapter for GrokWrapper {
 mod tests {
     use super::GrokWrapper;
     use agent_common::AgentCliAdapter;
+    use std::process::Command;
 
     #[test]
     fn builds_model_prompt_and_project_args() {
@@ -92,8 +93,6 @@ mod tests {
 
     #[test]
     fn grok_launch_path_propagates_not_found_for_absent_binary() {
-        use std::process::Command;
-
         let wrapper = GrokWrapper;
         let mut argv = wrapper.freqai_native_run_argv("freq-ai launch smoke");
         argv.extend(wrapper.launch_auto_mode());
