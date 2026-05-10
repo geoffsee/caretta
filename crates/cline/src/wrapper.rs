@@ -1,4 +1,4 @@
-use agent_common::AgentCliAdapter;
+use agent_common::{AdapterCapabilities, AgentCliAdapter};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ClineWrapper;
@@ -6,6 +6,15 @@ pub struct ClineWrapper;
 impl AgentCliAdapter for ClineWrapper {
     fn binary(&self) -> &'static str {
         "cline"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: true,
+            vision: true,
+            streaming: true,
+            context_window: Some(128_000),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

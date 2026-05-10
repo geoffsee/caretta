@@ -17,6 +17,7 @@ fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
 
 /// Run the draft phase of any two-phase workflow loaded from YAML.
 pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
+    use crate::agent::adapter_dispatch::check_capabilities;
     use crate::agent::workflow::{
         fetch_extra_context, gather_context_as_json, load_and_render, load_workflows,
     };
@@ -25,6 +26,14 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     let wf = workflows.get(workflow_id).unwrap_or_else(|| {
         die(&format!("Unknown workflow: {workflow_id}"));
     });
+
+    if !wf.requires_capabilities.is_empty() {
+        let reqs = wf.requires_capabilities.to_requirements();
+        if let Err(e) = check_capabilities(cfg.agent, &reqs) {
+            die(&format!("Capability mismatch: {e}"));
+        }
+    }
+
     let phase_cfg = wf.phases.get("draft").unwrap_or_else(|| {
         die(&format!("No draft phase in workflow '{workflow_id}'"));
     });

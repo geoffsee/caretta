@@ -1,4 +1,4 @@
-use agent_common::AgentCliAdapter;
+use agent_common::{AdapterCapabilities, AgentCliAdapter};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GrokWrapper;
@@ -6,6 +6,15 @@ pub struct GrokWrapper;
 impl AgentCliAdapter for GrokWrapper {
     fn binary(&self) -> &'static str {
         "grok"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: true,
+            vision: true,
+            streaming: true,
+            context_window: Some(131_072),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

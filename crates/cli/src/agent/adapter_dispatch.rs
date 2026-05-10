@@ -1,7 +1,9 @@
 //! Dispatches [`cli_common::Agent`] to provider [`agent_common::AgentCliAdapter`] implementations.
 //! All binary names and flag spellings for subprocess construction live in the provider crates.
 
-use agent_common::{AgentCliAdapter, AgentCliCommand};
+use agent_common::{
+    AdapterCapabilities, AgentCliAdapter, AgentCliCommand, WorkflowCapabilityRequirements,
+};
 use claude::{ClaudeWrapper, CursorWrapper};
 use cli_common::Agent;
 use cline::ClineWrapper;
@@ -165,6 +167,67 @@ pub fn launch_auto_mode(agent: Agent) -> Vec<String> {
     }
 }
 
+/// Return the declared capabilities for `agent`.
+pub fn adapter_capabilities(agent: Agent) -> AdapterCapabilities {
+    match agent {
+        Agent::Claude => ClaudeWrapper.capabilities(),
+        Agent::Cursor => CursorWrapper.capabilities(),
+        Agent::Junie => JunieWrapper.capabilities(),
+        Agent::Copilot => CopilotWrapper.capabilities(),
+        Agent::Codex => CodexWrapper.capabilities(),
+        Agent::Gemini => GeminiWrapper.capabilities(),
+        Agent::Grok => GrokWrapper.capabilities(),
+        Agent::Xai => XaiWrapper.capabilities(),
+        Agent::Cline => ClineWrapper.capabilities(),
+    }
+}
+
+/// Check whether `agent` satisfies `requirements`. Returns `Err` with a human-readable
+/// message listing missing capabilities; `Ok(())` otherwise.
+pub fn check_capabilities(
+    agent: Agent,
+    requirements: &WorkflowCapabilityRequirements,
+) -> Result<(), String> {
+    let caps = adapter_capabilities(agent);
+    requirements.check(&caps, &agent.to_string())
+}
+
+/// Print a table of all adapters and their declared capabilities to stdout.
+pub fn run_list_adapters() {
+    let adapters: &[(Agent, &str)] = &[
+        (Agent::Claude, "claude"),
+        (Agent::Cursor, "cursor"),
+        (Agent::Cline, "cline"),
+        (Agent::Codex, "codex"),
+        (Agent::Copilot, "copilot"),
+        (Agent::Gemini, "gemini"),
+        (Agent::Grok, "grok"),
+        (Agent::Junie, "junie"),
+        (Agent::Xai, "xai"),
+    ];
+
+    println!(
+        "{:<10}  {:<9}  {:<7}  {:<9}  {}",
+        "ADAPTER", "TOOL_USE", "VISION", "STREAMING", "CONTEXT_WINDOW"
+    );
+    println!("{}", "-".repeat(58));
+    for (agent, name) in adapters {
+        let caps = adapter_capabilities(*agent);
+        let ctx = caps
+            .context_window
+            .map(|w| format!("{w:>11}"))
+            .unwrap_or_else(|| "    unknown".to_string());
+        println!(
+            "{:<10}  {:<9}  {:<7}  {:<9}  {}",
+            name,
+            if caps.tool_use { "yes" } else { "no" },
+            if caps.vision { "yes" } else { "no" },
+            if caps.streaming { "yes" } else { "no" },
+            ctx,
+        );
+    }
+}
+
 pub fn launch_local_inference(
     agent: Agent,
     base_url: &str,
@@ -183,6 +246,7 @@ pub fn launch_local_inference(
 mod tests {
     use super::*;
     use agent_common::claude_family_native_argv;
+    use clap::ValueEnum;
     use cli_common::Agent;
 
     #[test]
@@ -270,5 +334,53 @@ mod tests {
             env,
             vec![("COPILOT_MODEL".to_string(), "grok-3".to_string())]
         );
+    }
+
+    #[test]
+    fn claude_capabilities_include_vision_and_large_context() {
+        let caps = adapter_capabilities(Agent::Claude);
+        assert!(caps.tool_use);
+        assert!(caps.vision);
+        assert!(caps.streaming);
+        assert_eq!(caps.context_window, Some(200_000));
+    }
+
+    #[test]
+    fn codex_capabilities_lack_tool_use_and_vision() {
+        let caps = adapter_capabilities(Agent::Codex);
+        assert!(!caps.tool_use);
+        assert!(!caps.vision);
+        assert!(caps.streaming);
+    }
+
+    #[test]
+    fn gemini_capabilities_report_one_million_context() {
+        let caps = adapter_capabilities(Agent::Gemini);
+        assert!(caps.tool_use);
+        assert!(caps.vision);
+        assert_eq!(caps.context_window, Some(1_000_000));
+    }
+
+    #[test]
+    fn capability_check_returns_error_for_missing_capability() {
+        let reqs = agent_common::WorkflowCapabilityRequirements {
+            tool_use: true,
+            vision: false,
+            streaming: false,
+            min_context_window: None,
+        };
+        assert!(check_capabilities(Agent::Claude, &reqs).is_ok());
+        assert!(check_capabilities(Agent::Codex, &reqs).is_err());
+    }
+
+    #[test]
+    fn capability_check_passes_for_empty_requirements() {
+        let reqs = agent_common::WorkflowCapabilityRequirements::default();
+        for &agent in Agent::value_variants() {
+            assert!(
+                check_capabilities(agent, &reqs).is_ok(),
+                "empty requirements should pass for every adapter"
+            );
+        }
     }
 }

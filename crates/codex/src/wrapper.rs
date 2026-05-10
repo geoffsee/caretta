@@ -1,4 +1,4 @@
-use agent_common::AgentCliAdapter;
+use agent_common::{AdapterCapabilities, AgentCliAdapter};
 
 fn local_inference_api_key(api_key: &str) -> String {
     let trimmed = api_key.trim();
@@ -15,6 +15,15 @@ pub struct CodexWrapper;
 impl AgentCliAdapter for CodexWrapper {
     fn binary(&self) -> &'static str {
         "codex"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: false,
+            vision: false,
+            streaming: true,
+            context_window: Some(128_000),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

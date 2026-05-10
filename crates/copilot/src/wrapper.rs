@@ -1,4 +1,4 @@
-use agent_common::AgentCliAdapter;
+use agent_common::{AdapterCapabilities, AgentCliAdapter};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct CopilotWrapper;
@@ -6,6 +6,15 @@ pub struct CopilotWrapper;
 impl AgentCliAdapter for CopilotWrapper {
     fn binary(&self) -> &'static str {
         "copilot"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: false,
+            vision: false,
+            streaming: false,
+            context_window: None,
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

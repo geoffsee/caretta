@@ -1,4 +1,4 @@
-use agent_common::AgentCliAdapter;
+use agent_common::{AdapterCapabilities, AgentCliAdapter};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct XaiWrapper;
@@ -6,6 +6,15 @@ pub struct XaiWrapper;
 impl AgentCliAdapter for XaiWrapper {
     fn binary(&self) -> &'static str {
         "copilot"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: true,
+            vision: true,
+            streaming: true,
+            context_window: Some(131_072),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

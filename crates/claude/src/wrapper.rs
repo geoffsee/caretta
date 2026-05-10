@@ -1,4 +1,4 @@
-use agent_common::{AgentCliAdapter, claude_family_native_argv};
+use agent_common::{AdapterCapabilities, AgentCliAdapter, claude_family_native_argv};
 
 fn local_inference_api_key(api_key: &str) -> String {
     let trimmed = api_key.trim();
@@ -41,6 +41,15 @@ pub struct CursorWrapper;
 impl AgentCliAdapter for ClaudeWrapper {
     fn binary(&self) -> &'static str {
         "claude"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: true,
+            vision: true,
+            streaming: true,
+            context_window: Some(200_000),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {
@@ -93,6 +102,15 @@ impl AgentCliAdapter for ClaudeWrapper {
 impl AgentCliAdapter for CursorWrapper {
     fn binary(&self) -> &'static str {
         "cursor"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: true,
+            vision: true,
+            streaming: true,
+            context_window: Some(200_000),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

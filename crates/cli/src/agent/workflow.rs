@@ -7,8 +7,41 @@ use crate::agent::assets::assets_dir;
 use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;
+use agent_common::WorkflowCapabilityRequirements;
 
 // ── YAML config types ────────────────────────────────────────────────────
+
+/// Capability requirements a workflow may declare in its YAML.
+///
+/// All fields default to `false`/`None` (no requirement). When a workflow needs
+/// a specific capability it declares it here so caretta can emit a clear
+/// pre-run error rather than a silent runtime failure.
+#[derive(Debug, Default, Deserialize)]
+pub struct WorkflowCapabilityRequirementsConfig {
+    #[serde(default)]
+    pub tool_use: bool,
+    #[serde(default)]
+    pub vision: bool,
+    #[serde(default)]
+    pub streaming: bool,
+    #[serde(default)]
+    pub min_context_window: Option<u32>,
+}
+
+impl WorkflowCapabilityRequirementsConfig {
+    pub fn to_requirements(&self) -> WorkflowCapabilityRequirements {
+        WorkflowCapabilityRequirements {
+            tool_use: self.tool_use,
+            vision: self.vision,
+            streaming: self.streaming,
+            min_context_window: self.min_context_window,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        !self.tool_use && !self.vision && !self.streaming && self.min_context_window.is_none()
+    }
+}
 
 #[derive(Debug, Deserialize)]
 pub struct WorkflowConfig {
@@ -33,6 +66,10 @@ pub struct WorkflowConfig {
     pub phases: IndexMap<String, PhaseConfig>,
     #[serde(default)]
     pub fragments: HashMap<String, String>,
+    /// Adapter capabilities this workflow requires. Caretta emits a clear error
+    /// before any work begins if the selected adapter does not satisfy these.
+    #[serde(default)]
+    pub requires_capabilities: WorkflowCapabilityRequirementsConfig,
 }
 
 /// Fetch the body of a GitHub issue by its label and inject it as a template variable.

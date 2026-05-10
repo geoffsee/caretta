@@ -1,3 +1,4 @@
+use crate::agent::adapter_dispatch::adapter_capabilities;
 use crate::agent::tracker::{PendingIssue, PrSummary, TrackerInfo};
 use crate::agent::types::AgentExt;
 use crate::agent::types::{Agent, BotAuthMode, Config, LocalInferencePreset, Workflow};
@@ -188,6 +189,33 @@ pub fn Sidebar(
     let awaiting = *awaiting_feedback.read();
     let auto_merge = *auto_merge_enabled.read();
     let has_bot = config.read().has_bot_credentials();
+    let caps = adapter_capabilities(config.read().agent);
+    let caps_summary = {
+        let ctx = caps
+            .context_window
+            .map(|w| {
+                if w >= 1_000_000 {
+                    format!("{}M ctx", w / 1_000_000)
+                } else {
+                    format!("{}K ctx", w / 1_000)
+                }
+            })
+            .unwrap_or_default();
+        let mut parts = Vec::new();
+        if caps.tool_use {
+            parts.push("tools");
+        }
+        if caps.vision {
+            parts.push("vision");
+        }
+        if caps.streaming {
+            parts.push("streaming");
+        }
+        if !ctx.is_empty() {
+            parts.push(ctx.as_str());
+        }
+        parts.join(" · ")
+    };
     let advanced_open = config.read().local_inference.advanced;
     let pricing_model_key = config.read().pricing_model_key();
     let pricing_for_model = pricing_model_key
@@ -244,6 +272,9 @@ pub fn Sidebar(
                             option { value: "junie", "Junie" }
                             option { value: "xai", "xAI" }
                         }
+                    }
+                    if !caps_summary.is_empty() {
+                        div { class: "advanced-hint", "{caps_summary}" }
                     }
                     if !config.read().agent.available_models().is_empty() {
                         label { class: "control-row",

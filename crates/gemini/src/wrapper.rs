@@ -1,4 +1,4 @@
-use agent_common::AgentCliAdapter;
+use agent_common::{AdapterCapabilities, AgentCliAdapter};
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct GeminiWrapper;
@@ -6,6 +6,15 @@ pub struct GeminiWrapper;
 impl AgentCliAdapter for GeminiWrapper {
     fn binary(&self) -> &'static str {
         "gemini"
+    }
+
+    fn capabilities(&self) -> AdapterCapabilities {
+        AdapterCapabilities {
+            tool_use: true,
+            vision: true,
+            streaming: true,
+            context_window: Some(1_000_000),
+        }
     }
 
     fn help_args(&self) -> Vec<String> {

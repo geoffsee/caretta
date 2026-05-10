@@ -215,6 +215,9 @@ enum Commands {
         #[arg(long)]
         all: bool,
     },
+    /// Print a table of all configured adapters and their declared capabilities
+    #[command(name = "list-adapters")]
+    ListAdapters,
 }
 
 /// Standalone entry point — equivalent to `run_with_overrides(|_| {})`.
@@ -386,6 +389,9 @@ where
             }
             Some(Commands::Models { plain, all }) => {
                 agent::models_catalog::run_models_list(cli.agent, plain, all);
+            }
+            Some(Commands::ListAdapters) => {
+                agent::adapter_dispatch::run_list_adapters();
             }
             Some(Commands::Presets { name }) => match name {
                 None => {
