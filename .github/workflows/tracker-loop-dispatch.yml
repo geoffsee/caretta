@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: geoffsee/caretta-action@v0.0.5
+      - uses: geoffsee/caretta-action@v0.0.6
         id: plan
         with:
           task: tracker-matrix
@@ -60,7 +60,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run caretta issue
-        uses: geoffsee/caretta-action@v0.0.5
+        uses: geoffsee/caretta-action@v0.0.6
         with:
           task: issue
           args: --tracker ${{ inputs.tracker }} ${{ matrix.issue }}
@@ -85,7 +85,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run caretta code review
-        uses: geoffsee/caretta-action@v0.0.5
+        uses: geoffsee/caretta-action@v0.0.6
         with:
           task: code-review
           agent: claude
@@ -123,7 +123,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Run caretta review follow-up
-        uses: geoffsee/caretta-action@v0.0.5
+        uses: geoffsee/caretta-action@v0.0.6
         with:
           task: fix-pr
           args: ${{ matrix.pr }}
@@ -149,7 +149,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Update branches and enable auto-merge
-        uses: geoffsee/caretta-action@v0.0.5
+        uses: geoffsee/caretta-action@v0.0.6
         with:
           task: auto-merge
           args: --tracker ${{ inputs.tracker }} --automerge-queue

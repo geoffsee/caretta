@@ -8,7 +8,7 @@ against issues, trackers, pull requests, and release checkpoints.
 Most agent workflows call the published action:
 
 ```yaml
-- uses: geoffsee/caretta-action@v0.0.5
+- uses: geoffsee/caretta-action@v0.0.6
   with:
     task: loop
     args: 123
