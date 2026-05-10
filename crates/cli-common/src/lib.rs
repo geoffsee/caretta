@@ -603,35 +603,14 @@ impl Default for SkillPaths {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Paths the user has declared as security-relevant via `[security_scan].paths`
+/// in `caretta.toml`. The scanner runs its generic per-file checks against each
+/// declared path. Declaring nothing leaves the per-file checks idle so agents
+/// don't spend tokens guessing which files matter.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanTargets {
-    pub edge: String,
-    pub network_kem: String,
-    pub network_crypto: String,
-    pub network: String,
-    pub service: String,
-    pub gateway: String,
-    pub gateway_users: String,
-    pub gateway_kms: String,
-    pub cli_build: String,
-    pub compute: String,
-}
-
-impl Default for ScanTargets {
-    fn default() -> Self {
-        Self {
-            edge: "crates/edge-node/src/lib.rs".into(),
-            network_kem: "crates/network-node/src/kem.rs".into(),
-            network_crypto: "crates/network-node/src/crypto.rs".into(),
-            network: "crates/network-node/src/lib.rs".into(),
-            service: "crates/service-node/src/lib.rs".into(),
-            gateway: "crates/gateway-node/src/lib.rs".into(),
-            gateway_users: "crates/gateway-node/src/users.rs".into(),
-            gateway_kms: "crates/gateway-node/src/kms.rs".into(),
-            cli_build: "crates/freq-cli/src/build.rs".into(),
-            compute: "crates/compute-node/src/lib.rs".into(),
-        }
-    }
+    #[serde(default)]
+    pub paths: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -848,43 +827,13 @@ pub struct LogRedactionConfigFile {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(default)]
 pub struct ScanTargetsFile {
-    #[serde(skip_serializing_if = "is_none")]
-    pub edge: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub network_kem: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub network_crypto: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub network: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub service: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub gateway: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub gateway_users: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub gateway_kms: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub cli_build: Option<String>,
-    #[serde(skip_serializing_if = "is_none")]
-    pub compute: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
 }
 
 impl ScanTargetsFile {
     pub fn into_scan_targets(self) -> ScanTargets {
-        let def = ScanTargets::default();
-        ScanTargets {
-            edge: self.edge.unwrap_or(def.edge),
-            network_kem: self.network_kem.unwrap_or(def.network_kem),
-            network_crypto: self.network_crypto.unwrap_or(def.network_crypto),
-            network: self.network.unwrap_or(def.network),
-            service: self.service.unwrap_or(def.service),
-            gateway: self.gateway.unwrap_or(def.gateway),
-            gateway_users: self.gateway_users.unwrap_or(def.gateway_users),
-            gateway_kms: self.gateway_kms.unwrap_or(def.gateway_kms),
-            cli_build: self.cli_build.unwrap_or(def.cli_build),
-            compute: self.compute.unwrap_or(def.compute),
-        }
+        ScanTargets { paths: self.paths }
     }
 }
 

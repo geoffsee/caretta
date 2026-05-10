@@ -118,16 +118,7 @@ pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
         project_name: Some(cfg.project_name.clone()),
         local_inference,
         security_scan: ScanTargetsFile {
-            edge: Some(cfg.scan_targets.edge.clone()),
-            network_kem: Some(cfg.scan_targets.network_kem.clone()),
-            network_crypto: Some(cfg.scan_targets.network_crypto.clone()),
-            network: Some(cfg.scan_targets.network.clone()),
-            service: Some(cfg.scan_targets.service.clone()),
-            gateway: Some(cfg.scan_targets.gateway.clone()),
-            gateway_users: Some(cfg.scan_targets.gateway_users.clone()),
-            gateway_kms: Some(cfg.scan_targets.gateway_kms.clone()),
-            cli_build: Some(cfg.scan_targets.cli_build.clone()),
-            compute: Some(cfg.scan_targets.compute.clone()),
+            paths: cfg.scan_targets.paths.clone(),
         },
         skills: SkillPathsFile {
             user_personas: Some(cfg.skill_paths.user_personas.clone()),

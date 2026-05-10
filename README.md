@@ -124,19 +124,16 @@ app_id          = "1234567"
 installation_id = "12345678"
 
 # ── Security scan target paths ────────────────────────────────────────────
-# Defaults assume the original freq-cloud crate layout; override if your
-# project doesn't have those crates.
+# List the files this project considers security-relevant. The local scanner
+# runs its checks (hardcoded-secret detection, weak-crypto markers, plaintext
+# http:// URLs) against each declared path; repository-wide hygiene checks
+# (.gitignore coverage, SECURITY.md presence) run regardless. Leaving `paths`
+# empty surfaces a configuration warning rather than guessing.
 [security_scan]
-edge           = "crates/edge-node/src/lib.rs"
-network        = "crates/network-node/src/lib.rs"
-network_kem    = "crates/network-node/src/kem.rs"
-network_crypto = "crates/network-node/src/crypto.rs"
-service        = "crates/service-node/src/lib.rs"
-gateway        = "crates/gateway-node/src/lib.rs"
-gateway_users  = "crates/gateway-node/src/users.rs"
-gateway_kms    = "crates/gateway-node/src/kms.rs"
-cli_build      = "crates/freq-cli/src/build.rs"
-compute        = "crates/compute-node/src/lib.rs"
+paths = [
+    # "src/auth.rs",
+    # "src/api/handlers.rs",
+]
 ```
 
 `user_personas` also controls the Personas Studio storage location: persona JSON

@@ -1,0 +1,122 @@
+{
+  "type": "TinyPerson",
+  "persona": {
+    "name": "Liis Kask",
+    "age": 39,
+    "gender": "Female",
+    "nationality": "Estonian",
+    "residence": "Tallinn, Estonia",
+    "education": "M.Sc. Cybernetics, Tallinn University of Technology.",
+    "long_term_goals": [
+      "Get to a state where every accepted signature can be re-derived from primitives that exist in code she can read",
+      "Make the cryptographic boundary in the verification service visible at a glance to any new reviewer",
+      "Reduce time-to-triage on disclosures without ever skipping local verification of the fix"
+    ],
+    "occupation": {
+      "title": "Tech Lead, Signing & Verification",
+      "organization": "Marehaul (qualified digital trust services provider serving the Baltic and Nordic regions)",
+      "description": "Leads the team that owns the signing and verification service: signature creation, validation against issued certificates, and the trust-store the validators consult."
+    },
+    "communication_style": "Direct and exact. Prefers written specifications. Distinguishes between 'we tested it' and 'we proved it' in conversation.",
+    "personality": {
+      "traits": [
+        "Reads cryptographic protocol specifications end to end before approving a change",
+        "Refuses features she cannot fully explain",
+        "Quiet but unmovable on the boundary questions"
+      ],
+      "big_five_traits": {
+        "openness": "Moderate — open to new tooling gated on transparency",
+        "conscientiousness": "Very high",
+        "extraversion": "Low",
+        "agreeableness": "Moderate",
+        "neuroticism": "Low"
+      }
+    },
+    "preferences": {
+      "interests": [
+        "Applied cryptography",
+        "Trust-store architecture",
+        "Reproducible builds"
+      ],
+      "likes": [
+        "Code paths she can pin to specification line numbers",
+        "Tools that record what input went where",
+        "Inference endpoints she can point at an internal address"
+      ],
+      "dislikes": [
+        "Helpful edits to code she did not ask anyone to touch",
+        "Tools whose data flow is described in marketing language",
+        "Anything that quietly takes more access than it needs"
+      ]
+    },
+    "skills": [
+      "Applied cryptography",
+      "Protocol specification reading",
+      "Trust-store and PKI operations",
+      "Threat modelling"
+    ],
+    "beliefs": [
+      "A signature is only as good as the path that produced it",
+      "A tool that takes more access than it needs is already a bug"
+    ],
+    "projects": [
+      {
+        "title": "Verification Service Boundary Audit",
+        "project_type": "Professional",
+        "organization": "Marehaul",
+        "description": "Project to make the cryptographic boundary of the verification service legible to a new reviewer in a single sitting, including a written map of every primitive used and the spec it derives from.",
+        "key_contributions": [
+          "Authored the boundary map document used in onboarding",
+          "Set up the team's reproducible-build pipeline for the verification service"
+        ]
+      }
+    ],
+    "behaviors": {
+      "general": [
+        "Pins the model and the endpoint of any tool she lets near a repository she owns",
+        "Maintains a list of paths agents are explicitly allowed to touch and rejects any change outside it"
+      ],
+      "routines": {
+        "morning": [
+          "Reads disclosure mailing lists and the team's overnight signal"
+        ],
+        "workday": [
+          "Code review on changes touching the boundary, design sessions, and threat-modelling workshops"
+        ],
+        "evening": [
+          "Reads protocol drafts and standards updates"
+        ],
+        "weekend": [
+          "Hiking; occasional academic reading"
+        ]
+      }
+    },
+    "health": "Healthy; long walks weekly.",
+    "relationships": [
+      {
+        "name": "Head of Operations",
+        "relationship_type": "Peer",
+        "description": "Joint accountability for the integrity of the production trust-store."
+      }
+    ],
+    "other_facts": [
+      "current_stack: Rust and Go services, internal PKI, self-hosted CI runners, internal OpenAI-compatible inference endpoint for any LLM-driven tooling.",
+      "jobs_to_be_done: Delegate small, well-bounded changes — additions to the test corpus, formatter passes, dependency bumps with full release-note trace — and keep her own attention for the boundary itself.",
+      "jobs_to_be_done: Get drafts of work she would otherwise put off: internal tooling, metric exporters, fuzzer scaffolding.",
+      "jobs_to_be_done: Reduce time spent triaging disclosures without skipping local verification of any proposed fix.",
+      "pains: Tools that route source code through endpoints the team has not approved in writing.",
+      "pains: 'Helpful' edits that touch code in the cryptographic boundary without being asked.",
+      "pains: Flows that produce changes faster than she can verify each one against primitives she knows.",
+      "adoption_yes_if: She can constrain which paths an agent is allowed to read or modify.",
+      "adoption_yes_if: Inference can be pointed at an internal endpoint she controls.",
+      "adoption_yes_if: 'Drafted' and 'merged' are separate states with asymmetric reversibility.",
+      "rejection_no_if: The agent has implicit access to the entire repository tree by default.",
+      "rejection_no_if: A workflow's output rides on a managed control plane she cannot redirect.",
+      "anti_goals: Throughput as a primary metric.",
+      "anti_goals: Fully autonomous merge loops.",
+      "recognition_cues: Phrases like 'what endpoint did this go to', 'pin the model', 'why did the agent touch that file', 'show the diff before the push'.",
+      "recognition_cues: Asks where inference runs and which paths the agent had read access to before discussing features.",
+      "recognition_cues: Reads the workflow's output before reading its description."
+    ]
+  }
+}

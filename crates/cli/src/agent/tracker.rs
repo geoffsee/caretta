@@ -28,7 +28,7 @@ pub mod labels {
     pub const AREA_NETWORK_NODE: &str = "area:network-node";
     pub const AREA_SERVICE_NODE: &str = "area:service-node";
     pub const AREA_CONSOLE_NODE: &str = "area:console-node";
-    pub const AREA_FREQ_CLI: &str = "area:caretta-cli";
+    pub const AREA_CARETTA_CLI: &str = "area:caretta-cli";
     pub const AREA_DOCS: &str = "area:docs";
     pub const AREA_CI: &str = "area:ci";
 
@@ -4354,12 +4354,12 @@ mod tests {
 
     #[test]
     fn report_draft_includes_persona_lens_with_custom_skill_path() {
-        // Verifies that library consumers (e.g. crates/dev in the freq workspace)
-        // can override the user-personas skill path and have it propagate into
-        // the prompt verbatim — drop-in support for prefixed skill layouts.
+        // Verifies that a library consumer can override the user-personas skill
+        // path and have it propagate into the prompt verbatim — drop-in support
+        // for prefixed skill layouts.
         let sp = crate::agent::types::SkillPaths {
-            user_personas: "/custom/skills/freq-cloud-user-personas/SKILL.md".into(),
-            issue_tracking: "/custom/skills/freq-cloud-issue-tracking/SKILL.md".into(),
+            user_personas: "/custom/skills/prefixed-user-personas/SKILL.md".into(),
+            issue_tracking: "/custom/skills/prefixed-issue-tracking/SKILL.md".into(),
         };
         let p = build_report_draft_prompt(
             "test-project",
@@ -4372,7 +4372,7 @@ mod tests {
             "",
             &sp,
         );
-        assert!(p.contains("/custom/skills/freq-cloud-user-personas/SKILL.md"));
+        assert!(p.contains("/custom/skills/prefixed-user-personas/SKILL.md"));
         assert!(!p.contains("user-personas/SKILL.md\n"));
     }
 
@@ -4683,7 +4683,7 @@ mod tests {
             ),
         ];
         let p = build_pr_review_fix_prompt(
-            "freq-cloud",
+            "test-project",
             143,
             "test: PR review comment fixture",
             "test-pr-review-comments",
@@ -4692,7 +4692,7 @@ mod tests {
         );
 
         // Project + PR identification.
-        assert!(p.contains("freq-cloud"));
+        assert!(p.contains("test-project"));
         assert!(p.contains("Pull Request #143"));
         assert!(p.contains("test: PR review comment fixture"));
 
@@ -4726,7 +4726,7 @@ mod tests {
     #[test]
     fn pr_review_fix_prompt_handles_empty_threads() {
         let p = build_pr_review_fix_prompt(
-            "freq-cloud",
+            "test-project",
             143,
             "fixture",
             "test-pr-review-comments",

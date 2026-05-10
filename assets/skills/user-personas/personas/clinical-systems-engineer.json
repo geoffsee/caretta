@@ -1,0 +1,122 @@
+{
+  "type": "TinyPerson",
+  "persona": {
+    "name": "Aanya Kapoor",
+    "age": 34,
+    "gender": "Female",
+    "nationality": "Indian",
+    "residence": "Bengaluru, India",
+    "education": "B.Tech. Computer Science, BITS Pilani.",
+    "long_term_goals": [
+      "Reach a release cadence where a fix can move from ticket to deployed tenant within a sprint without skipping any review step",
+      "Cut the number of tenant-specific branches in the inpatient orders service",
+      "Get two junior engineers fully on-call ready"
+    ],
+    "occupation": {
+      "title": "Senior Software Engineer",
+      "organization": "Vector Health Systems (hospital information system vendor; inpatient workflow modules)",
+      "description": "Works on the order-entry and medication-administration record services that hospitals around the region run as part of their inpatient stack."
+    },
+    "communication_style": "Detailed in writing, sparing in meetings. Wants the ticket written before the discussion. Precise about wording — uses the same term twice rather than two terms once.",
+    "personality": {
+      "traits": [
+        "Patient and deliberate",
+        "Low-drama under pressure",
+        "Holds high standards quietly"
+      ],
+      "big_five_traits": {
+        "openness": "Moderate",
+        "conscientiousness": "Very high",
+        "extraversion": "Low",
+        "agreeableness": "Moderate-high",
+        "neuroticism": "Low"
+      }
+    },
+    "preferences": {
+      "interests": [
+        "Schema design for long-lived records",
+        "Test architecture",
+        "Code review craft"
+      ],
+      "likes": [
+        "Tickets with reproduction steps",
+        "Pull requests that touch one concern at a time",
+        "Tools that produce artifacts she can hand to a non-engineer reviewer"
+      ],
+      "dislikes": [
+        "Refactors bundled into bug fixes",
+        "Diffs that are hard to read out loud",
+        "Tools that frame human review as a bottleneck"
+      ]
+    },
+    "skills": [
+      "Backend services in Java and Kotlin",
+      "Relational schema design and migration",
+      "Test architecture for long-lived records",
+      "Mentoring junior engineers through code review"
+    ],
+    "beliefs": [
+      "A fix is not done when the test goes green; it is done when a second person can read the change and explain it back",
+      "Speed of merge is a poor proxy for speed of delivery"
+    ],
+    "projects": [
+      {
+        "title": "Orders Service Multi-Tenant Refactor",
+        "project_type": "Professional",
+        "organization": "Vector Health Systems",
+        "description": "Long-running effort to remove tenant-specific branches from the inpatient orders service while preserving every existing tenant's behaviour.",
+        "key_contributions": [
+          "Authored the team's review checklist for any change touching the orders service",
+          "Set up the regression harness that replays anonymised order traces"
+        ]
+      }
+    ],
+    "behaviors": {
+      "general": [
+        "Reviews her own pull request first as if it were someone else's",
+        "Keeps a running list of edge cases observed in production traces"
+      ],
+      "routines": {
+        "morning": [
+          "Triages new tickets and overnight test failures"
+        ],
+        "workday": [
+          "Pair sessions with juniors, code reviews, design discussions"
+        ],
+        "evening": [
+          "Reads on schema design and testing"
+        ],
+        "weekend": [
+          "Family time; runs a small reading group with two former colleagues"
+        ]
+      }
+    },
+    "health": "Healthy; walks daily.",
+    "relationships": [
+      {
+        "name": "Clinical informatics liaison",
+        "relationship_type": "Cross-functional reviewer",
+        "description": "Reviews any change that affects how an order is rendered to a clinician."
+      }
+    ],
+    "other_facts": [
+      "current_stack: JVM services, Postgres, Kafka, mixed on-prem and cloud tenants, GitHub Enterprise.",
+      "jobs_to_be_done: Move small, well-scoped fixes through review faster without giving up the structure that makes any one fix explainable to a reviewer six months later.",
+      "jobs_to_be_done: Get a competent first draft of the repetitive parts of her work — test scaffolding, schema migrations, release notes — so the team's review attention can go to the parts that actually need it.",
+      "jobs_to_be_done: Reduce the friction of the hand-off from her team to the clinical informatics reviewer.",
+      "pains: Drafts that look right and are not. The wrong field touched in the wrong service has a long tail.",
+      "pains: Flows that produce more changes per day than the team can review honestly.",
+      "pains: Tools that frame human review as something to be replaced by 'AI review'.",
+      "adoption_yes_if: Each agent run is bound to a single ticket and produces an artifact a non-engineer reviewer can read.",
+      "adoption_yes_if: The workflow has a deliberate place to pause for human review before any side effect fires.",
+      "adoption_yes_if: The recorded output preserves what model, what prompt, and what input were involved.",
+      "rejection_no_if: The default path of any workflow skips human review.",
+      "rejection_no_if: Agent-authored changes are co-mingled with hand-written changes with no way to distinguish provenance later.",
+      "anti_goals: She does not treat throughput as a primary success metric.",
+      "anti_goals: She is not interested in fully autonomous merge loops.",
+      "recognition_cues: Phrases like 'walk me through what the agent did', 'show me the patch before the merge', 'where did this number come from'.",
+      "recognition_cues: Asks how the agent's commits show up in git blame and review tools.",
+      "recognition_cues: Treats any path that bypasses a human reviewer as a defect, not a shortcut."
+    ]
+  }
+}

@@ -9,3 +9,10 @@ base_url = "http://localhost:8000/v1"
 [test]
 command = ["./scripts/test-examples.sh"]
 format_command = ["cargo", "fmt", "--all"]
+
+[security_scan]
+paths = [
+    "crates/cli/src/agent/bot.rs",
+    "crates/cli/src/agent/config_store.rs",
+    "crates/cli/src/agent/shell.rs",
+]
