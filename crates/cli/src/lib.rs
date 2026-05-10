@@ -175,6 +175,12 @@ enum Commands {
         /// Tracker issue number to process
         #[arg(value_name = "TRACKER")]
         tracker: u32,
+        /// Resume a paused or interrupted run from its last completed phase
+        #[arg(long, value_name = "RUN_ID")]
+        resume: Option<String>,
+        /// Halt the run after completing the named phase (issue number) and print the checkpoint path
+        #[arg(long, value_name = "PHASE")]
+        pause_after: Option<String>,
     },
     /// Print pending issue numbers for a tracker (for CI matrix generation)
     TrackerMatrix {
@@ -344,7 +350,11 @@ where
                 };
                 run_single_issue(&config, tracker_num, number, &blockers);
             }
-            Some(Commands::Loop { tracker }) => run_loop(&config, tracker),
+            Some(Commands::Loop {
+                tracker,
+                resume,
+                pause_after,
+            }) => run_loop(&config, tracker, resume.as_deref(), pause_after.as_deref()),
             Some(Commands::TrackerMatrix { tracker, json }) => {
                 run_tracker_matrix(&config, tracker, json);
             }
@@ -845,7 +855,7 @@ fn App() -> Element {
         changed_files.write().clear();
         let cfg = config.read().clone();
         tokio::spawn(async move {
-            run_loop(&cfg, tracker_num);
+            run_loop(&cfg, tracker_num, None, None);
         });
     };
 

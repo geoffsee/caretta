@@ -1,3 +1,7 @@
+use crate::agent::checkpoint::{
+    CheckpointStatus, RunCheckpoint, checkpoint_path, load_checkpoint, new_run_id, save_checkpoint,
+    unix_secs_to_iso8601,
+};
 use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_stdout, count_tokens, die, has_command, log, origin_default_branch,
 };
@@ -356,12 +360,54 @@ pub fn run_tracker_matrix(cfg: &Config, tracker_num: u32, json_fmt: bool) {
     }
 }
 
-pub fn run_loop(cfg: &Config, tracker_num: u32) {
+pub fn run_loop(cfg: &Config, tracker_num: u32, resume: Option<&str>, pause_after: Option<&str>) {
     preflight(cfg);
     log(&format!(
         "Agent started in loop mode on {} (tracker #{tracker_num})",
         cfg.project_name
     ));
+
+    // Establish run ID and initial checkpoint state.
+    let (run_id, mut checkpoint) = match resume {
+        Some(id) => {
+            let cp = load_checkpoint(&cfg.root, id).unwrap_or_else(|| {
+                die(&format!(
+                    "No checkpoint found for run-id '{id}' in {}/.caretta/",
+                    cfg.root
+                ))
+            });
+            log(&format!(
+                "Resuming run '{}' from after phase '{}'",
+                id,
+                cp.last_completed.as_deref().unwrap_or("none")
+            ));
+            (id.to_string(), cp)
+        }
+        None => {
+            let id = new_run_id();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let cp = RunCheckpoint {
+                run_id: id.clone(),
+                started_at: unix_secs_to_iso8601(now),
+                tracker: tracker_num,
+                completed_phases: Vec::new(),
+                last_completed: None,
+                status: CheckpointStatus::Running,
+            };
+            log(&format!("Starting new run '{id}'"));
+            (id, cp)
+        }
+    };
+
+    let cp_path = checkpoint_path(&cfg.root, &run_id);
+
+    if !cfg.dry_run {
+        save_checkpoint(&cfg.root, &checkpoint)
+            .unwrap_or_else(|e| log(&format!("Warning: could not write checkpoint: {e}")));
+    }
 
     let mut cycle = 0u64;
     loop {
@@ -397,6 +443,16 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
             if stop_requested() {
                 break;
             }
+
+            // When resuming, skip phases already completed in the previous run.
+            let phase_key = issue_num.to_string();
+            if checkpoint.completed_phases.contains(&phase_key) {
+                log(&format!(
+                    "Skipping issue #{issue_num} (already completed in run '{run_id}')."
+                ));
+                continue;
+            }
+
             let Some(issue) = pending_by_num.get(&issue_num) else {
                 continue;
             };
@@ -404,6 +460,27 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
                 "Loop heartbeat: cycle {cycle} starting issue #{issue_num}."
             ));
             work_on_issue(cfg, tracker_num, issue.number, &issue.blockers);
+
+            // Record phase completion and persist checkpoint.
+            checkpoint.completed_phases.push(phase_key.clone());
+            checkpoint.last_completed = Some(phase_key.clone());
+            if let Err(e) = save_checkpoint(&cfg.root, &checkpoint) {
+                log(&format!("Warning: could not write checkpoint: {e}"));
+            }
+
+            // Honour --pause-after: halt and print checkpoint path for human review.
+            if pause_after.is_some_and(|p| p == phase_key.as_str()) {
+                checkpoint.status = CheckpointStatus::Paused;
+                if let Err(e) = save_checkpoint(&cfg.root, &checkpoint) {
+                    log(&format!("Warning: could not write checkpoint: {e}"));
+                }
+                log(&format!(
+                    "Paused after phase '{phase_key}'. Checkpoint: {}",
+                    cp_path.display()
+                ));
+                println!("{}", cp_path.display());
+                return;
+            }
         }
 
         if cfg.dry_run {
@@ -411,6 +488,12 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
         }
 
         std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    checkpoint.status = CheckpointStatus::Complete;
+    if !cfg.dry_run {
+        save_checkpoint(&cfg.root, &checkpoint)
+            .unwrap_or_else(|e| log(&format!("Warning: could not write checkpoint: {e}")));
     }
 }
 

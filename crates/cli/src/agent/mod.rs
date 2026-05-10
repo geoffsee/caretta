@@ -4,6 +4,7 @@ pub mod assets;
 pub mod auto_merge;
 pub mod bot;
 pub mod chat;
+pub mod checkpoint;
 pub mod cli;
 pub mod cmd;
 pub mod config_store;
