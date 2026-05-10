@@ -131,7 +131,15 @@ jobs:
             exit 1
           fi
 
-          http_code="$(curl -sS -o /tmp/caretta-crate-version.json -w "%{http_code}" "https://crates.io/api/v1/crates/caretta/${version}")"
+          user_agent="caretta-release-workflow (https://github.com/geoffsee/caretta)"
+          http_code="$(
+            curl -sS \
+              -A "$user_agent" \
+              -H "Accept: application/json" \
+              -o /tmp/caretta-crate-version.json \
+              -w "%{http_code}" \
+              "https://crates.io/api/v1/crates/caretta/${version}"
+          )"
           case "$http_code" in
             200)
               echo "caretta ${version} is already published on crates.io; skipping."
