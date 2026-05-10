@@ -701,6 +701,28 @@ pub fn pr_head_branch(pr_num: u32) -> String {
     )
 }
 
+/// Current GitHub `reviewDecision` for a PR.
+///
+/// Returns one of `APPROVED`, `CHANGES_REQUESTED`, `REVIEW_REQUIRED`, or
+/// an empty string when no reviews have been submitted. Returns `None` if
+/// `gh` is unreachable so callers can decide whether to retry or skip.
+pub fn pr_review_decision(pr_num: u32) -> Option<String> {
+    let num_s = pr_num.to_string();
+    cmd_stdout(
+        "gh",
+        &[
+            "pr",
+            "view",
+            &num_s,
+            "--json",
+            "reviewDecision",
+            "--jq",
+            ".reviewDecision // \"\"",
+        ],
+    )
+    .map(|s| s.trim().to_string())
+}
+
 /// One unresolved review thread on a pull request.
 ///
 /// Returned by [`fetch_unresolved_review_threads`] and consumed by
@@ -1111,6 +1133,139 @@ Address each thread below. The author of each thread is the project's review bot
 
 If a thread is ambiguous or you cannot determine the right fix without a human, leave the file unchanged for that thread and explain in your final summary which thread(s) you skipped and why."#
     )
+}
+
+/// Build a verification-pass prompt: given the original review threads and the
+/// post-fix diff, the agent decides per-thread whether the new code addresses
+/// the original concern, and writes its verdict to `output_path` as JSON.
+///
+/// Schema written by the agent:
+/// ```json
+/// {
+///   "verified": ["<thread_id>", ...],
+///   "unverified": [{"id": "<thread_id>", "reason": "..."}, ...]
+/// }
+/// ```
+pub fn build_pr_review_verification_prompt(
+    project_name: &str,
+    pr_num: u32,
+    diff: &str,
+    threads: &[ReviewThread],
+    output_path: &str,
+) -> String {
+    let mut threads_section = String::new();
+    for t in threads {
+        threads_section.push_str(&format!(
+            "### Thread `{id}`\nFile: `{path}:{line}` (by @{author})\n\n{body}\n\n---\n\n",
+            id = t.id,
+            path = t.path,
+            line = t.line,
+            author = t.author,
+            body = t.body,
+        ));
+    }
+    let thread_count = threads.len();
+
+    format!(
+        r#"You are a freq-ai code-review verifier on pull request #{pr_num} for the {project_name} project.
+
+The Fix Comments agent has just pushed changes intended to address each review thread below.
+Your job: for each thread, decide whether the change actually addresses the original concern.
+
+## Working directory
+
+Your current working directory is a freshly-created git worktree containing the post-fix code.
+Use Read/Grep/Bash (read-only) to inspect the relevant files at HEAD.
+
+## Post-fix diff (for orientation only — verify against the actual files)
+
+```diff
+{diff}
+```
+
+## Review Threads to Verify ({thread_count})
+
+{threads_section}
+
+## Instructions
+
+- For each thread, decide if the new code addresses the original concern. Be strict:
+  - If the fix is superficial, partial, off-target, or absent → **unverified**.
+  - A suggestion-only thread is verified iff the new code reflects the spirit of the suggestion.
+- Cover EVERY thread ID exactly once across the two output lists.
+- Do NOT edit any files. Do NOT commit, push, or post comments. Read-only verification.
+
+## Output
+
+When you have decided on every thread, write a JSON file to this exact path (overwrite if it exists):
+
+    {output_path}
+
+The file MUST contain ONLY a JSON object matching this schema:
+
+```json
+{{
+  "verified": ["<thread_id>", "..."],
+  "unverified": [
+    {{"id": "<thread_id>", "reason": "<short why-not>"}}
+  ]
+}}
+```
+
+After writing the file, your final response can be a single line summary. The calling script reads the file, not your response."#
+    )
+}
+
+/// Verdict for one thread parsed from the verification agent's JSON output.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VerificationVerdict {
+    pub verified: Vec<String>,
+    pub unverified: Vec<UnverifiedThread>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnverifiedThread {
+    pub id: String,
+    pub reason: String,
+}
+
+/// Parse the JSON file the verification agent writes. Returns `None` if the
+/// file is missing or malformed — callers should treat that as "no verdicts"
+/// (i.e. nothing approved automatically).
+pub fn parse_verification_verdict(json: &str) -> Option<VerificationVerdict> {
+    let v: serde_json::Value = serde_json::from_str(json).ok()?;
+    let verified = v
+        .get("verified")
+        .and_then(|n| n.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|s| s.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let unverified = v
+        .get("unverified")
+        .and_then(|n| n.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let id = item.get("id").and_then(serde_json::Value::as_str)?;
+                    let reason = item
+                        .get("reason")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("");
+                    Some(UnverifiedThread {
+                        id: id.to_string(),
+                        reason: reason.to_string(),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Some(VerificationVerdict {
+        verified,
+        unverified,
+    })
 }
 
 pub fn build_sprint_planning_draft_prompt(
@@ -4927,5 +5082,67 @@ mod tests {
             .collect();
         assert_eq!(drifted.len(), 1);
         assert_eq!(drifted[0].number, 5);
+    }
+
+    // ── Verification verdict parser ──
+
+    #[test]
+    fn parse_verification_verdict_splits_verified_and_unverified() {
+        let json = r#"{
+            "verified": ["PRT_a", "PRT_b"],
+            "unverified": [
+                {"id": "PRT_c", "reason": "fix touches wrong file"}
+            ]
+        }"#;
+        let v = parse_verification_verdict(json).expect("parses");
+        assert_eq!(v.verified, vec!["PRT_a", "PRT_b"]);
+        assert_eq!(v.unverified.len(), 1);
+        assert_eq!(v.unverified[0].id, "PRT_c");
+        assert_eq!(v.unverified[0].reason, "fix touches wrong file");
+    }
+
+    #[test]
+    fn parse_verification_verdict_handles_missing_fields() {
+        let v = parse_verification_verdict(r#"{}"#).expect("parses");
+        assert!(v.verified.is_empty());
+        assert!(v.unverified.is_empty());
+    }
+
+    #[test]
+    fn parse_verification_verdict_rejects_garbage() {
+        assert!(parse_verification_verdict("not json").is_none());
+        assert!(parse_verification_verdict("").is_none());
+    }
+
+    #[test]
+    fn build_pr_review_verification_prompt_includes_thread_ids_and_output_path() {
+        let threads = vec![
+            ReviewThread {
+                id: "PRT_x".to_string(),
+                path: "src/lib.rs".to_string(),
+                line: 12,
+                body: "guard against panic".to_string(),
+                author: "llm-overlord".to_string(),
+            },
+            ReviewThread {
+                id: "PRT_y".to_string(),
+                path: "src/main.rs".to_string(),
+                line: 7,
+                body: "use anyhow::Context".to_string(),
+                author: "llm-overlord".to_string(),
+            },
+        ];
+        let prompt = build_pr_review_verification_prompt(
+            "freq-ai",
+            42,
+            "diff --git a/src/lib.rs b/src/lib.rs\n",
+            &threads,
+            "/tmp/verify.json",
+        );
+        assert!(prompt.contains("PRT_x"));
+        assert!(prompt.contains("PRT_y"));
+        assert!(prompt.contains("/tmp/verify.json"));
+        assert!(prompt.contains("verified"));
+        assert!(prompt.contains("unverified"));
     }
 }

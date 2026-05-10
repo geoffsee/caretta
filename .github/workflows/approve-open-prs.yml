@@ -1,0 +1,64 @@
+name: Approve Open PRs
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: approve-open-prs
+  cancel-in-progress: true
+
+jobs:
+  list-eligible-prs:
+    runs-on: ubuntu-latest
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+      pr-count: ${{ steps.list.outputs.pr-count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List PRs with CHANGES_REQUESTED
+        id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list \
+            --state open \
+            --limit 100 \
+            --json number,isDraft,reviewDecision \
+            --jq '[.[] | select(.isDraft == false and .reviewDecision == "CHANGES_REQUESTED").number]')"
+          count="$(jq 'length' <<<"$prs")"
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+          echo "pr-count=$count" >> "$GITHUB_OUTPUT"
+          echo "Found $count eligible PR(s) with CHANGES_REQUESTED: $prs"
+
+  approve-pr:
+    needs: list-eligible-prs
+    if: ${{ needs.list-eligible-prs.outputs.pr-count != '0' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        pr: ${{ fromJson(needs.list-eligible-prs.outputs.prs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run freq-ai approve-pr
+        uses: geoffsee/freq-ai-action@v0.0.4
+        with:
+          task: approve-pr
+          args: ${{ matrix.pr }}
+          agent: claude
+        env:
+          DEV_BOT_TOKEN: ${{ secrets.DEV_BOT_TOKEN }}
+          DEV_BOT_APP_ID: ${{ secrets.DEV_BOT_APP_ID }}
+          DEV_BOT_INSTALLATION_ID: ${{ secrets.DEV_BOT_INSTALLATION_ID }}
+          DEV_BOT_PRIVATE_KEY_B64: ${{ secrets.DEV_BOT_PRIVATE_KEY_B64 }}
+          GH_TOKEN: ${{ github.token }}

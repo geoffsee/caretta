@@ -230,6 +230,16 @@ pub fn cmd_run_in(program: &str, args: &[&str], dir: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Run a command with extra env vars set, inheriting stdio. Returns success bool.
+pub fn cmd_run_env(program: &str, args: &[&str], env: &[(String, String)]) -> bool {
+    let mut cmd = Command::new(program);
+    cmd.args(args);
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+    cmd.status().map(|s| s.success()).unwrap_or(false)
+}
+
 /// Run a command, capture combined stdout+stderr. Returns (success, output).
 pub fn cmd_capture(program: &str, args: &[&str]) -> (bool, String) {
     match Command::new(program)

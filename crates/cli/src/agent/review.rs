@@ -1,16 +1,17 @@
 use crate::agent::bot::resolve_bot_token;
-use crate::agent::cmd::{cmd_run, cmd_stdout, log};
+use crate::agent::cmd::{cmd_run, cmd_run_env, cmd_stdout, log};
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::{emit_event, stop_requested};
 use crate::agent::run::{run_agent_with_env, run_agent_with_env_in_dir};
 use crate::agent::tracker::{
     DEFAULT_REVIEW_BOT_LOGIN, build_code_review_prompt, build_pr_review_fix_prompt,
-    build_security_review_prompt, fetch_unresolved_review_threads, list_open_prs, pr_body, pr_diff,
-    pr_head_branch, resolve_review_thread,
+    build_pr_review_verification_prompt, build_security_review_prompt,
+    fetch_unresolved_review_threads, list_open_prs, parse_verification_verdict, pr_body, pr_diff,
+    pr_head_branch, pr_review_decision, resolve_review_thread,
 };
 use crate::agent::types::{AgentEvent, Config};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub fn run_code_review(cfg: &Config) {
     preflight(cfg);
@@ -212,13 +213,155 @@ pub fn run_pr_review_fix(cfg: &Config, pr_num: u32) {
         return;
     }
 
+    let verified_ids = run_verification_pass(cfg, pr_num, &threads, &worktree_path);
     let resolved = threads
         .iter()
-        .filter(|thread| resolve_review_thread(&thread.id))
+        .filter(|thread| verified_ids.contains(&thread.id) && resolve_review_thread(&thread.id))
         .count();
     log(&format!(
         "Fix Comments complete for PR #{pr_num}: pushed changes and resolved {resolved}/{} thread(s).",
         threads.len()
     ));
+
+    if resolved == threads.len() {
+        try_approve_pr(cfg, pr_num);
+    } else {
+        log(&format!(
+            "Skipping auto-approve for PR #{pr_num}: {} thread(s) still unresolved.",
+            threads.len() - resolved
+        ));
+    }
     emit_event(AgentEvent::Done);
+}
+
+/// Run the verification agent pass and return the set of thread IDs it
+/// confirmed are addressed by the new code. On any failure (agent error,
+/// missing/malformed verdict file, stop requested) returns an empty set so the
+/// caller leaves all threads unresolved — better to require a human than to
+/// rubber-stamp a wrong fix.
+fn run_verification_pass(
+    cfg: &Config,
+    pr_num: u32,
+    threads: &[crate::agent::tracker::ReviewThread],
+    worktree_path: &Path,
+) -> std::collections::HashSet<String> {
+    use std::collections::HashSet;
+    let empty = HashSet::new();
+
+    let verdict_path = std::env::temp_dir().join(format!(
+        "freq-ai-pr-{pr_num}-{}-verify.json",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&verdict_path);
+    let verdict_path_str = verdict_path.to_string_lossy().to_string();
+
+    let post_fix_diff = pr_diff(pr_num);
+    let prompt = build_pr_review_verification_prompt(
+        &cfg.project_name,
+        pr_num,
+        &post_fix_diff,
+        threads,
+        &verdict_path_str,
+    );
+
+    log(&format!(
+        "Running verification pass for PR #{pr_num} (verdict file: {verdict_path_str})."
+    ));
+    if !run_agent_with_env_in_dir(cfg, &prompt, &[], worktree_path) {
+        log(&format!(
+            "Verification agent failed for PR #{pr_num}; treating all threads as unverified."
+        ));
+        return empty;
+    }
+    if stop_requested() {
+        log("Stop requested during verification pass; treating all threads as unverified.");
+        return empty;
+    }
+
+    let json = match std::fs::read_to_string(&verdict_path) {
+        Ok(s) => s,
+        Err(err) => {
+            log(&format!(
+                "Verification verdict file missing for PR #{pr_num} ({err}); treating all threads as unverified."
+            ));
+            return empty;
+        }
+    };
+    let _ = std::fs::remove_file(&verdict_path);
+
+    let Some(verdict) = parse_verification_verdict(&json) else {
+        log(&format!(
+            "Verification verdict for PR #{pr_num} was not valid JSON; treating all threads as unverified."
+        ));
+        return empty;
+    };
+
+    if !verdict.unverified.is_empty() {
+        for unv in &verdict.unverified {
+            log(&format!(
+                "Thread {id} unverified: {reason}",
+                id = unv.id,
+                reason = unv.reason
+            ));
+        }
+    }
+    verdict.verified.into_iter().collect()
+}
+
+/// Approve a PR if all bot-authored review threads are resolved and the
+/// current `reviewDecision` is `CHANGES_REQUESTED`. Returns `true` when an
+/// approval review was successfully submitted.
+///
+/// Uses the bot identity (`DEV_BOT_TOKEN` or App-minted token) so the approval
+/// counts against `CHANGES_REQUESTED` left by the same bot. Without bot
+/// credentials the call will fail (GitHub rejects self-approval).
+pub fn try_approve_pr(cfg: &Config, pr_num: u32) -> bool {
+    let unresolved = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN);
+    if !unresolved.is_empty() {
+        log(&format!(
+            "PR #{pr_num} still has {} unresolved bot-authored thread(s); not approving.",
+            unresolved.len()
+        ));
+        return false;
+    }
+
+    let decision = pr_review_decision(pr_num).unwrap_or_default();
+    if decision != "CHANGES_REQUESTED" {
+        log(&format!(
+            "PR #{pr_num} reviewDecision is {decision:?}; nothing to clear (no approval submitted)."
+        ));
+        return false;
+    }
+
+    let bot_token = cfg
+        .effective_bot_credentials()
+        .as_ref()
+        .and_then(resolve_bot_token);
+    let env: Vec<(String, String)> = bot_token
+        .as_deref()
+        .map(|t| vec![("GH_TOKEN".to_string(), t.to_string())])
+        .unwrap_or_default();
+    if env.is_empty() {
+        log(
+            "WARNING: No bot credentials configured; approval will run under your identity \
+             and GitHub rejects self-approval. Set DEV_BOT_TOKEN or configure a GitHub App.",
+        );
+    }
+
+    let pr_num_s = pr_num.to_string();
+    let body =
+        "All requested changes have been addressed. Approving via freq-ai code-review follow-up.";
+    let ok = cmd_run_env(
+        "gh",
+        &["pr", "review", &pr_num_s, "--approve", "--body", body],
+        &env,
+    );
+    if ok {
+        log(&format!("Approved PR #{pr_num}."));
+    } else {
+        log(&format!(
+            "WARNING: failed to submit approve review on PR #{pr_num}."
+        ));
+    }
+    ok
 }

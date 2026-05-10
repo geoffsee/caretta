@@ -36,7 +36,7 @@ use agent::shell::{
     clear_stop_request, list_all_files, parse_args, preflight, record_agent_response, request_stop,
     reset_chat_history, run_chat_send, run_code_review, run_interview_draft, run_interview_respond,
     run_loop, run_pr_review_fix, run_refresh_agents, run_refresh_docs, run_security_code_review,
-    run_single_issue, run_tracker_matrix, run_workflow_draft,
+    run_single_issue, run_tracker_matrix, run_workflow_draft, try_approve_pr,
 };
 use agent::tracker::{
     DEFAULT_REVIEW_BOT_LOGIN, PendingIssue, PrSummary, TrackerInfo, current_branch_pr,
@@ -123,6 +123,13 @@ enum Commands {
     /// Address review threads on a PR
     FixPr {
         /// Pull request number to inspect and update
+        #[arg(value_name = "PR")]
+        pr: u32,
+    },
+    /// Approve a PR if all bot-authored review threads are resolved
+    /// and the current reviewDecision is CHANGES_REQUESTED.
+    ApprovePr {
+        /// Pull request number to evaluate
         #[arg(value_name = "PR")]
         pr: u32,
     },
@@ -292,6 +299,9 @@ where
         match cli.command {
             Some(Commands::FixPr { pr }) => {
                 run_pr_review_fix(&config, pr);
+            }
+            Some(Commands::ApprovePr { pr }) => {
+                try_approve_pr(&config, pr);
             }
             Some(Commands::Ideation) => run_workflow_draft(&config, "ideation"),
             Some(Commands::UxrSynth) => run_workflow_draft(&config, "report_research"),
