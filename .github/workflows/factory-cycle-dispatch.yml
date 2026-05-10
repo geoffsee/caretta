@@ -1,9 +1,6 @@
 name: Factory Cycle Dispatch
 
 on:
-  push:
-    branches:
-      - ci
   workflow_dispatch:
     inputs:
       context:
@@ -22,41 +19,61 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  housekeeping:
-    uses: ./.github/workflows/nightly-housekeeping.yml
-    with:
-      context: ${{ inputs.context }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  ideation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Discovery/Ideation
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: run
+          args: ideation
+          agent: claude
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-  backlog-curation:
-    needs: housekeeping
-    uses: ./.github/workflows/weekly-backlog-curation.yml
-    with:
-      context: ${{ inputs.context }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  uxr-synth:
+    needs: ideation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Synthesize User Research
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: run
+          args: report-research
+          agent: claude
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-  autonomous-sprint:
-    needs: backlog-curation
-    uses: ./.github/workflows/autonomous-sprint.yml
-    with:
-      context: ${{ inputs.context }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  strategic-review:
+    needs: uxr-synth
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Review Research
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: run
+          args: strategic-review
+          agent: claude
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
-  ci-governance:
-    needs: autonomous-sprint
-    uses: ./.github/workflows/weekly-ci-governance.yml
-    with:
-      context: ${{ inputs.context }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
-  factory-retrospective:
-    needs: ci-governance
-    uses: ./.github/workflows/monthly-factory-retrospective.yml
-    with:
-      context: ${{ inputs.context }}
-    secrets:
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+  sprint-planning:
+    needs: strategic-review
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Plan Sprint
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: run
+          args: sprint-planning
+          agent: claude
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
