@@ -590,7 +590,7 @@ fn run_agent_with_env_with_cwd(
         &overrides.args,
     );
     let stdin_prompt = (cmd.prompt_transport == PromptTransport::Stdin).then_some(prompt);
-    let append_system_prompt = appended_system_prompt_for_agent(cfg.agent);
+    let append_system_prompt_owned = build_appended_system_prompt(cfg);
     match cfg.agent {
         Agent::Codex => run_codex_native_with_env_for_prompt_and_stdin(
             &cmd.command.binary,
@@ -607,13 +607,29 @@ fn run_agent_with_env_with_cwd(
             cwd,
             prompt,
             stdin_prompt,
-            append_system_prompt,
+            append_system_prompt_owned.as_deref(),
         ),
     }
 }
 
 fn appended_system_prompt_for_agent(agent: Agent) -> Option<&'static str> {
     matches!(agent, Agent::Claude).then_some(CARETTA_CLAUDE_SYSTEM_PROMPT)
+}
+
+/// Build the full appended system prompt for a given config, including any
+/// active path-constraint guidance appended after the base caretta guidance.
+#[cfg(not(target_arch = "wasm32"))]
+fn build_appended_system_prompt(cfg: &Config) -> Option<String> {
+    let base = appended_system_prompt_for_agent(cfg.agent)?;
+    match crate::agent::path_constraint::build_system_prompt_fragment(&cfg.path_constraints) {
+        Some(fragment) => Some(format!("{base}\n{fragment}\n")),
+        None => Some(base.to_string()),
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+fn build_appended_system_prompt(cfg: &Config) -> Option<String> {
+    appended_system_prompt_for_agent(cfg.agent).map(str::to_string)
 }
 
 pub fn local_inference_overrides(cfg: &Config) -> crate::agent::types::AgentLaunchOverrides {

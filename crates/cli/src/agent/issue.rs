@@ -108,6 +108,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: now.clone(),
             finished_at: now,
             duration_ms: 0,
+            path_constraints: cfg.path_constraints.clone(),
+            policy_violations: vec![],
         };
         log(&format!(
             "[dry-run] Prompt ({prompt_tokens} tokens). Would work on #{issue_num}, then open PR.\n\n---\n{}",
@@ -204,6 +206,23 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
         extract_run_data(&captured);
     let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+
+    // Check path constraints and log any violations.
+    let policy_violations =
+        crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
+    if !policy_violations.is_empty() {
+        log(&format!(
+            "Path-constraint policy: {} violation(s) detected for issue #{issue_num}",
+            policy_violations.len()
+        ));
+        for v in &policy_violations {
+            log(&format!(
+                "  POLICY VIOLATION: tool={} path={} reason={}",
+                v.tool, v.path, v.reason
+            ));
+        }
+    }
+
     let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     append_run(
         &AgentRunRecord {
@@ -219,6 +238,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: run_started_at,
             finished_at: run_finished_at,
             duration_ms: run_duration_ms,
+            path_constraints: cfg.path_constraints.clone(),
+            policy_violations,
         },
         &db_path,
     );

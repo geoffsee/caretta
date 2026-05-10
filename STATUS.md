@@ -9,4 +9,4 @@
 | Adapter Capability Negotiation (#72) | 🔴 Not Started | |
 | Deterministic Asset Hash Pinning (#73) | 🔴 Not Started | |
 | Workflow Preset Versioning (#74) | 🔴 Not Started | Blocked by #70 (now unblocked) |
-| Path-Constraint Capability (#75) | 🔴 Not Started | Blocked by #70 (now unblocked) |
+| Path-Constraint Capability (#75) | ✅ Done | `[path_constraints]` in `caretta.toml`; per-workflow YAML override; system-prompt injection; post-run violation detection logged to SQLite event log (schema v2) |

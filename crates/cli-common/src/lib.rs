@@ -613,6 +613,45 @@ pub struct ScanTargets {
     pub paths: Vec<String>,
 }
 
+/// Explicit path allowlist/denylist for regulated deployments.
+///
+/// When `allow_paths` is non-empty, tool calls (Read, Write, Edit, Glob, Grep)
+/// targeting a path that does not begin with one of the listed prefixes are
+/// flagged as policy violations and recorded in the event log. `deny_paths` is
+/// always applied regardless of `allow_paths`.
+///
+/// # Relationship to the workflow scoping layer
+/// The workflow scoping layer controls *which workflow prompt* the agent
+/// receives; path constraints control *which files* the agent may touch during
+/// that workflow. They are complementary: scoping narrows the task; path
+/// constraints bound file-system access regardless of task.
+///
+/// # Configuration
+/// In `caretta.toml`:
+/// ```toml
+/// [path_constraints]
+/// allow_paths = ["src/", "tests/"]
+/// deny_paths  = ["vendor/", "secrets/"]
+/// ```
+/// In a workflow YAML, add an optional `path_constraints` key to override
+/// or supplement the project-level constraints for a specific workflow.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PathConstraints {
+    /// If non-empty, only file paths that begin with one of these prefixes are allowed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_paths: Vec<String>,
+    /// File paths beginning with these prefixes are always blocked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_paths: Vec<String>,
+}
+
+impl PathConstraints {
+    pub fn is_unconstrained(&self) -> bool {
+        self.allow_paths.is_empty() && self.deny_paths.is_empty()
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: Agent,
@@ -635,6 +674,8 @@ pub struct Config {
     /// Override path for the agent event log SQLite database.
     /// Defaults to the `CARETTA_EVENT_LOG` env var, then `~/.local/share/caretta/event_log.db`.
     pub event_log_path: Option<String>,
+    /// Path allowlist/denylist enforced for every agent tool call in this run.
+    pub path_constraints: PathConstraints,
 }
 
 /// Project-specific test/format commands run after an agent edit.
@@ -741,6 +782,7 @@ impl fmt::Debug for Config {
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
             .field("event_log_path", &self.event_log_path)
+            .field("path_constraints", &self.path_constraints)
             .finish()
     }
 }
@@ -820,6 +862,9 @@ pub struct DevConfig {
     /// Override path for the SQLite event log (also: CARETTA_EVENT_LOG env var).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_log_path: Option<String>,
+    /// Path allowlist/denylist for this project. Applied to every agent run.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub path_constraints: PathConstraints,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

@@ -14,13 +14,14 @@
 /// forward migrations so that future schema additions only need a new `if version < N`
 /// block — existing data is never destructively altered.
 use crate::agent::types::{AgentEvent, ClaudeEvent, ContentBlock};
+use cli_common::PathConstraints;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -28,6 +29,14 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 1;
 pub struct ToolCallRecord {
     pub name: String,
     pub args: Value,
+}
+
+/// A tool call that targeted a path outside the active `PathConstraints`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyViolation {
+    pub tool: String,
+    pub path: String,
+    pub reason: String,
 }
 
 /// All data captured for a single agent run, ready to persist or preview.
@@ -44,6 +53,10 @@ pub struct AgentRunRecord {
     pub started_at: String,
     pub finished_at: String,
     pub duration_ms: u64,
+    /// Path constraints that were active during this run (empty = unconstrained).
+    pub path_constraints: PathConstraints,
+    /// Policy violations detected in this run (path accesses outside constraints).
+    pub policy_violations: Vec<PolicyViolation>,
 }
 
 // ── Path resolution ───────────────────────────────────────────────────────────
@@ -101,6 +114,15 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
                 duration_ms     INTEGER
             );",
         )?;
+    }
+
+    if version < 2 {
+        // Add path-constraint audit columns (schema v2).
+        // ALTER TABLE ADD COLUMN is safe to run on a table that already exists.
+        conn.execute_batch(
+            "ALTER TABLE agent_runs ADD COLUMN path_constraints TEXT NOT NULL DEFAULT '{}';
+             ALTER TABLE agent_runs ADD COLUMN policy_violations TEXT NOT NULL DEFAULT '[]';",
+        )?;
         conn.execute("DELETE FROM schema_version", [])?;
         conn.execute(
             "INSERT INTO schema_version (version) VALUES (?1)",
@@ -129,14 +151,19 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
 
     let tool_calls_json =
         serde_json::to_string(&record.tool_calls).unwrap_or_else(|_| "[]".to_string());
+    let path_constraints_json =
+        serde_json::to_string(&record.path_constraints).unwrap_or_else(|_| "{}".to_string());
+    let policy_violations_json =
+        serde_json::to_string(&record.policy_violations).unwrap_or_else(|_| "[]".to_string());
 
     if let Err(e) = conn.execute(
         "INSERT INTO agent_runs (
             agent_id, model, workflow_phase,
             issue_number, tracker_number,
             tool_calls, input_tokens, output_tokens,
-            status, started_at, finished_at, duration_ms
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            status, started_at, finished_at, duration_ms,
+            path_constraints, policy_violations
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             record.agent_id,
             record.model,
@@ -150,6 +177,8 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
             record.started_at,
             record.finished_at,
             record.duration_ms as i64,
+            path_constraints_json,
+            policy_violations_json,
         ],
     ) {
         tracing::warn!("event_log: failed to insert run record: {e}");
@@ -160,18 +189,20 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
 /// Used by `--dry-run` to show what *would* be written.
 pub fn preview_entry(record: &AgentRunRecord) -> String {
     let entry = serde_json::json!({
-        "agent_id":       record.agent_id,
-        "model":          record.model,
-        "workflow_phase": record.workflow_phase,
-        "issue_number":   record.issue_number,
-        "tracker_number": record.tracker_number,
-        "tool_calls":     record.tool_calls,
-        "input_tokens":   record.input_tokens,
-        "output_tokens":  record.output_tokens,
-        "status":         record.status,
-        "started_at":     record.started_at,
-        "finished_at":    record.finished_at,
-        "duration_ms":    record.duration_ms,
+        "agent_id":          record.agent_id,
+        "model":             record.model,
+        "workflow_phase":    record.workflow_phase,
+        "issue_number":      record.issue_number,
+        "tracker_number":    record.tracker_number,
+        "tool_calls":        record.tool_calls,
+        "input_tokens":      record.input_tokens,
+        "output_tokens":     record.output_tokens,
+        "status":            record.status,
+        "started_at":        record.started_at,
+        "finished_at":       record.finished_at,
+        "duration_ms":       record.duration_ms,
+        "path_constraints":  record.path_constraints,
+        "policy_violations": record.policy_violations,
     });
     serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".to_string())
 }
@@ -298,8 +329,8 @@ fn is_leap_year(year: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentRunRecord, ToolCallRecord, append_run, extract_run_data, is_leap_year, iso8601_now,
-        preview_entry, resolve_db_path,
+        AgentRunRecord, PolicyViolation, ToolCallRecord, append_run, extract_run_data,
+        is_leap_year, iso8601_now, preview_entry, resolve_db_path,
     };
     use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBlock};
     use std::path::PathBuf;
@@ -396,6 +427,11 @@ mod tests {
             started_at: "2026-05-10T00:00:00Z".to_string(),
             finished_at: "2026-05-10T00:00:01Z".to_string(),
             duration_ms: 1000,
+            path_constraints: cli_common::PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+            policy_violations: vec![],
         };
 
         let preview = preview_entry(&record);
@@ -404,6 +440,8 @@ mod tests {
         assert_eq!(parsed["agent_id"], "claude");
         assert_eq!(parsed["issue_number"], 42);
         assert_eq!(parsed["status"], "dry-run");
+        assert!(parsed["path_constraints"]["allow_paths"].is_array());
+        assert!(parsed["policy_violations"].is_array());
     }
 
     #[test]
@@ -424,6 +462,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 1000,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
         };
 
         append_run(&record, &db_path);
@@ -445,6 +485,54 @@ mod tests {
     }
 
     #[test]
+    fn append_run_stores_path_constraints_and_violations() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("pc_test.db");
+
+        let record = AgentRunRecord {
+            agent_id: "claude".to_string(),
+            model: "test-model".to_string(),
+            workflow_phase: "issue".to_string(),
+            issue_number: Some(99),
+            tracker_number: None,
+            tool_calls: vec![],
+            input_tokens: None,
+            output_tokens: None,
+            status: "completed".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: "2026-01-01T00:00:01Z".to_string(),
+            duration_ms: 0,
+            path_constraints: cli_common::PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+            policy_violations: vec![PolicyViolation {
+                tool: "Read".to_string(),
+                path: "vendor/foo.rs".to_string(),
+                reason: "path is outside allow_paths: [src/]".to_string(),
+            }],
+        };
+
+        append_run(&record, &db_path);
+
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        let (pc_json, pv_json): (String, String) = conn
+            .query_row(
+                "SELECT path_constraints, policy_violations FROM agent_runs LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query");
+
+        let pc: serde_json::Value = serde_json::from_str(&pc_json).expect("valid json");
+        let pv: serde_json::Value = serde_json::from_str(&pv_json).expect("valid json");
+
+        assert_eq!(pc["allow_paths"][0], "src/");
+        assert_eq!(pv[0]["tool"], "Read");
+        assert_eq!(pv[0]["path"], "vendor/foo.rs");
+    }
+
+    #[test]
     fn migrate_is_idempotent() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("idempotent.db");
@@ -463,6 +551,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 0,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
         };
 
         append_run(&record, &db_path);

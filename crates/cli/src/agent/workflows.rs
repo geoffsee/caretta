@@ -32,6 +32,18 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     preflight(cfg);
     log(&phase_cfg.log_start);
 
+    // Apply per-workflow path constraints when declared in workflow.yaml.
+    let effective_cfg_storage;
+    let cfg = if let Some(wf_constraints) = &wf.path_constraints {
+        effective_cfg_storage = crate::agent::types::Config {
+            path_constraints: wf_constraints.clone(),
+            ..cfg.clone()
+        };
+        &effective_cfg_storage
+    } else {
+        cfg
+    };
+
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);
     fetch_extra_context(wf, &mut vars);
@@ -110,6 +122,18 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
 
     preflight(cfg);
     log(&phase_cfg.log_start);
+
+    // Apply per-workflow path constraints when declared in workflow.yaml.
+    let effective_cfg_storage;
+    let cfg = if let Some(wf_constraints) = &wf.path_constraints {
+        effective_cfg_storage = crate::agent::types::Config {
+            path_constraints: wf_constraints.clone(),
+            ..cfg.clone()
+        };
+        &effective_cfg_storage
+    } else {
+        cfg
+    };
 
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);

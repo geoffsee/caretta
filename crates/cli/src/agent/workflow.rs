@@ -7,6 +7,7 @@ use crate::agent::assets::assets_dir;
 use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;
+use cli_common::PathConstraints;
 
 // ── YAML config types ────────────────────────────────────────────────────
 
@@ -33,6 +34,11 @@ pub struct WorkflowConfig {
     pub phases: IndexMap<String, PhaseConfig>,
     #[serde(default)]
     pub fragments: HashMap<String, String>,
+    /// Optional per-workflow path constraints. When set, these override the
+    /// project-level `[path_constraints]` from `caretta.toml` for this
+    /// workflow's runs. Omitting this field inherits the project-level config.
+    #[serde(default)]
+    pub path_constraints: Option<PathConstraints>,
 }
 
 /// Fetch the body of a GitHub issue by its label and inject it as a template variable.
