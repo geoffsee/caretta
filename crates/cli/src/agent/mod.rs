@@ -7,6 +7,8 @@ pub mod chat;
 pub mod cli;
 pub mod cmd;
 pub mod config_store;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod event_log;
 pub mod interview;
 pub mod issue;
 pub mod launch;

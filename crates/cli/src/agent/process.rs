@@ -4,6 +4,29 @@ use std::sync::{Mutex, OnceLock};
 
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_CHILD_PID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
+static RUN_EVENT_CAPTURE: OnceLock<Mutex<Option<Vec<AgentEvent>>>> = OnceLock::new();
+
+fn run_event_capture_slot() -> &'static Mutex<Option<Vec<AgentEvent>>> {
+    RUN_EVENT_CAPTURE.get_or_init(|| Mutex::new(None))
+}
+
+/// Begin collecting all emitted events into an in-memory buffer.
+/// Call [`drain_run_capture`] after the agent run to retrieve them.
+pub fn start_run_capture() {
+    if let Ok(mut capture) = run_event_capture_slot().lock() {
+        *capture = Some(Vec::new());
+    }
+}
+
+/// Stop collecting events and return whatever was accumulated since the last
+/// [`start_run_capture`] call. Returns an empty Vec if no capture was active.
+pub fn drain_run_capture() -> Vec<AgentEvent> {
+    if let Ok(mut capture) = run_event_capture_slot().lock() {
+        capture.take().unwrap_or_default()
+    } else {
+        Vec::new()
+    }
+}
 
 pub fn active_child_pid_slot() -> &'static Mutex<Option<u32>> {
     ACTIVE_CHILD_PID.get_or_init(|| Mutex::new(None))
@@ -38,6 +61,11 @@ pub fn request_stop() {
 }
 
 pub fn emit_event(ev: AgentEvent) {
+    if let Ok(mut capture) = run_event_capture_slot().lock()
+        && let Some(events) = capture.as_mut()
+    {
+        events.push(ev.clone());
+    }
     if let Some(tx) = EVENT_SENDER.get() {
         let _ = tx.send(ev);
     }

@@ -32,6 +32,7 @@ pub fn parse_args() -> Config {
         bot_settings: Default::default(),
         bot_credentials: None,
         test: Default::default(),
+        event_log_path: None,
     }
 }
 
@@ -80,5 +81,6 @@ pub fn parse_args() -> Config {
         bot_settings,
         bot_credentials,
         test,
+        event_log_path: dev_cfg.event_log_path,
     }
 }

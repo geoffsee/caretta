@@ -1,8 +1,11 @@
 use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_stdout, count_tokens, die, has_command, log, origin_default_branch,
 };
+use crate::agent::event_log::{
+    AgentRunRecord, append_run, extract_run_data, iso8601_now, preview_entry, resolve_db_path,
+};
 use crate::agent::launch::log_resolved_agent_launch;
-use crate::agent::process::stop_requested;
+use crate::agent::process::{drain_run_capture, start_run_capture, stop_requested};
 use crate::agent::review::run_pr_review_fix;
 use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
@@ -90,10 +93,29 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             &tracker_body,
         );
         log_resolved_agent_launch(cfg, &[]);
+        let prompt_tokens = count_tokens(&prompt) as u32;
+        let now = iso8601_now();
+        let dry_record = AgentRunRecord {
+            agent_id: cfg.agent.to_string(),
+            model: cfg.model.clone(),
+            workflow_phase: "issue".to_string(),
+            issue_number: Some(issue_num),
+            tracker_number: (tracker_num != 0).then_some(tracker_num),
+            tool_calls: vec![],
+            input_tokens: Some(prompt_tokens),
+            output_tokens: None,
+            status: "dry-run".to_string(),
+            started_at: now.clone(),
+            finished_at: now,
+            duration_ms: 0,
+        };
         log(&format!(
-            "[dry-run] Prompt ({} tokens). Would work on #{issue_num}, then open PR.\n\n---\n{}",
-            count_tokens(&prompt),
+            "[dry-run] Prompt ({prompt_tokens} tokens). Would work on #{issue_num}, then open PR.\n\n---\n{}",
             prompt
+        ));
+        log(&format!(
+            "[dry-run] Preview event log entry:\n{}",
+            preview_entry(&dry_record)
         ));
         return;
     }
@@ -161,6 +183,9 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     log(&format!(
         "Launching agent for issue #{issue_num} on branch '{branch}'..."
     ));
+    let run_started_at = iso8601_now();
+    let run_wall_clock = Instant::now();
+    start_run_capture();
     let agent_ok = run_agent(
         cfg,
         &build_prompt(
@@ -172,6 +197,30 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             tracker_num,
             &tracker_body,
         ),
+    );
+    let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
+    let run_finished_at = iso8601_now();
+    let captured = drain_run_capture();
+    let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
+        extract_run_data(&captured);
+    let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+    append_run(
+        &AgentRunRecord {
+            agent_id: cfg.agent.to_string(),
+            model: effective_model,
+            workflow_phase: "issue".to_string(),
+            issue_number: Some(issue_num),
+            tracker_number: (tracker_num != 0).then_some(tracker_num),
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            status: run_status,
+            started_at: run_started_at,
+            finished_at: run_finished_at,
+            duration_ms: run_duration_ms,
+        },
+        &db_path,
     );
     if agent_ok {
         log(&format!("Agent run completed for issue #{issue_num}."));

@@ -137,6 +137,7 @@ pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
         log_redaction: existing.log_redaction,
         agent_models,
         test: cfg.test.clone(),
+        event_log_path: cfg.event_log_path.clone(),
     };
 
     let toml = toml::to_string_pretty(&file_cfg).map_err(|e| e.to_string())?;

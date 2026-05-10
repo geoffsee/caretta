@@ -1,0 +1,12 @@
+# Feature Status
+
+## Audit / Provenance Layer (Tracker #76)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Structured Agent Event Log (#70) | ✅ Done | SQLite append-only log; schema versioned; `--dry-run` preview; configurable via `CARETTA_EVENT_LOG` or `event_log_path` in `caretta.toml` |
+| Workflow Checkpoint and Resume (#71) | 🔴 Not Started | |
+| Adapter Capability Negotiation (#72) | 🔴 Not Started | |
+| Deterministic Asset Hash Pinning (#73) | 🔴 Not Started | |
+| Workflow Preset Versioning (#74) | 🔴 Not Started | Blocked by #70 (now unblocked) |
+| Path-Constraint Capability (#75) | 🔴 Not Started | Blocked by #70 (now unblocked) |

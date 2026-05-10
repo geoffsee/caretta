@@ -632,6 +632,9 @@ pub struct Config {
     pub bot_settings: BotSettings,
     pub bot_credentials: Option<BotCredentials>,
     pub test: TestCommands,
+    /// Override path for the agent event log SQLite database.
+    /// Defaults to the `CARETTA_EVENT_LOG` env var, then `~/.local/share/caretta/event_log.db`.
+    pub event_log_path: Option<String>,
 }
 
 /// Project-specific test/format commands run after an agent edit.
@@ -737,6 +740,7 @@ impl fmt::Debug for Config {
             .field("pricing", &self.pricing)
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
+            .field("event_log_path", &self.event_log_path)
             .finish()
     }
 }
@@ -813,6 +817,9 @@ pub struct DevConfig {
     pub agent_models: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub test: TestCommands,
+    /// Override path for the SQLite event log (also: CARETTA_EVENT_LOG env var).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_log_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
