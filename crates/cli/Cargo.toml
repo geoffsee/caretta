@@ -24,7 +24,7 @@ path = "src/main.rs"
 default = []
 bundle-runtime = ["agent-runtime/bundle-runtime"]
 # Enable the Dioxus desktop GUI and its GTK/system-library dependencies.
-# Required for `cargo run -- gui`. Off by default so `cargo test --workspace`
+# Required for `cargo run --features desktop -- gui` and `-- serve`. Off by default so `cargo test --workspace`
 # works in headless CI environments that lack GTK headers.
 desktop = ["dep:dioxus"]
 
