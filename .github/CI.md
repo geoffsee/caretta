@@ -41,7 +41,7 @@ should use their native `task` value directly.
 - `autopilot.yml`: scheduled/manual controller that evaluates issues/PRs and dispatches tracker or backlog work.
 - `release-mediator.yml`: scheduled/manual neutral release checkpoint generator that promotes checkpoints to tags.
 - `release-tag-publisher.yml`: reusable/manual tag publisher for checkpoint issues.
-- `release.yml`: builds release artifacts when a `v*` tag is pushed.
+- `release.yml`: builds release artifacts and publishes the `caretta` crate when a `v*` tag is pushed.
 
 ## Operating Flow
 
@@ -54,7 +54,7 @@ should use their native `task` value directly.
 7. `Release Mediator` creates a neutral, time-bounded checkpoint issue each Friday.
 8. `Release Mediator` calls `Release Tag Publisher` with the checkpoint issue number.
 9. `Release Tag Publisher` creates and pushes the next annotated `v*` tag.
-10. The pushed `v*` tag triggers `release.yml`.
+10. The pushed `v*` tag triggers `release.yml`, which builds release artifacts and publishes the matching Cargo version to crates.io.
 
 ## Release Checkpoints
 
@@ -66,7 +66,8 @@ or launch narratives.
 `release-mediator.yml` and `release-tag-publisher.yml` are implicitly bound:
 each published checkpoint is promoted to the next patch tag by default. The tag
 publisher validates the issue has the `release-checkpoint` label, computes the
-next semver tag from the requested bump, creates an annotated tag, and pushes it.
+next semver tag from the requested bump, confirms it matches the workspace
+`Cargo.toml` version, creates an annotated tag, and pushes it.
 
 Release automation is constrained to `master`. `release-mediator.yml` skips
 checkpoint creation and tag publishing unless the workflow ref is

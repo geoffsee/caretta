@@ -26,3 +26,4 @@ node_modules/
 /.playground/
 /crates/agent-runtime/.grok/settings.json
 /scripts/cleanup-generated-issues.sh
+/publish/caretta/
