@@ -8,5 +8,5 @@
 | Workflow Checkpoint and Resume (#71) | 🔴 Not Started | |
 | Adapter Capability Negotiation (#72) | 🔴 Not Started | |
 | Deterministic Asset Hash Pinning (#73) | 🔴 Not Started | |
-| Workflow Preset Versioning (#74) | 🔴 Not Started | Blocked by #70 (now unblocked) |
+| Workflow Preset Versioning (#74) | ✅ Done | `preset.yaml` manifests with semver version; `name@req` resolution; v2 DB schema records preset name+version per run |
 | Path-Constraint Capability (#75) | 🔴 Not Started | Blocked by #70 (now unblocked) |

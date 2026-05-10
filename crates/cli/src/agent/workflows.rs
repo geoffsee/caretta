@@ -19,6 +19,7 @@ fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
 pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     use crate::agent::workflow::{
         fetch_extra_context, gather_context_as_json, load_and_render, load_workflows,
+        resolve_preset,
     };
 
     let workflows = load_workflows(&cfg.root, &cfg.workflow_preset);
@@ -30,6 +31,10 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     });
 
     preflight(cfg);
+    match resolve_preset(&cfg.root, &cfg.workflow_preset) {
+        Ok((name, ver)) => log(&format!("Preset resolved: {name} v{ver}")),
+        Err(e) => log(&format!("WARNING: {e}")),
+    }
     log(&phase_cfg.log_start);
 
     let mut vars = gather_context_as_json(cfg, &wf.context);
@@ -98,6 +103,7 @@ fn synthesized_cli_feedback() -> String {
 pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     use crate::agent::workflow::{
         fetch_extra_context, gather_context_as_json, load_and_render, load_workflows,
+        resolve_preset,
     };
 
     let workflows = load_workflows(&cfg.root, &cfg.workflow_preset);
@@ -109,6 +115,10 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     });
 
     preflight(cfg);
+    match resolve_preset(&cfg.root, &cfg.workflow_preset) {
+        Ok((name, ver)) => log(&format!("Preset resolved: {name} v{ver}")),
+        Err(e) => log(&format!("WARNING: {e}")),
+    }
     log(&phase_cfg.log_start);
 
     let mut vars = gather_context_as_json(cfg, &wf.context);

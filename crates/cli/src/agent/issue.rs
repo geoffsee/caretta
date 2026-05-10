@@ -71,6 +71,17 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
         String::new()
     };
 
+    let (resolved_preset_name, resolved_preset_version) = {
+        use crate::agent::workflow::resolve_preset;
+        match resolve_preset(&cfg.root, &cfg.workflow_preset) {
+            Ok((name, ver)) => (Some(name), Some(ver)),
+            Err(e) => {
+                log(&format!("WARNING: preset resolution failed: {e}"));
+                (Some(cfg.workflow_preset.clone()), None)
+            }
+        }
+    };
+
     if cfg.dry_run {
         let codebase =
             if !cfg.bootstrap_snapshot || env::var("DISABLE_TOAK").is_ok_and(|v| v == "1") {
@@ -108,6 +119,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: now.clone(),
             finished_at: now,
             duration_ms: 0,
+            preset_name: resolved_preset_name,
+            preset_version: resolved_preset_version,
         };
         log(&format!(
             "[dry-run] Prompt ({prompt_tokens} tokens). Would work on #{issue_num}, then open PR.\n\n---\n{}",
@@ -219,6 +232,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: run_started_at,
             finished_at: run_finished_at,
             duration_ms: run_duration_ms,
+            preset_name: resolved_preset_name,
+            preset_version: resolved_preset_version,
         },
         &db_path,
     );

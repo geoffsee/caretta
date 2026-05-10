@@ -20,7 +20,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 1;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -44,6 +44,10 @@ pub struct AgentRunRecord {
     pub started_at: String,
     pub finished_at: String,
     pub duration_ms: u64,
+    /// Resolved workflow preset name (e.g. `"default"`, `"xp"`).
+    pub preset_name: Option<String>,
+    /// Resolved semver version of the workflow preset (e.g. `"0.1.0"`).
+    pub preset_version: Option<String>,
 }
 
 // ── Path resolution ───────────────────────────────────────────────────────────
@@ -104,6 +108,17 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute("DELETE FROM schema_version", [])?;
         conn.execute(
             "INSERT INTO schema_version (version) VALUES (?1)",
+            params![1_i64],
+        )?;
+    }
+
+    if version < 2 {
+        conn.execute_batch(
+            "ALTER TABLE agent_runs ADD COLUMN preset_name    TEXT;
+             ALTER TABLE agent_runs ADD COLUMN preset_version TEXT;",
+        )?;
+        conn.execute(
+            "UPDATE schema_version SET version = ?1",
             params![CURRENT_SCHEMA_VERSION],
         )?;
     }
@@ -135,8 +150,9 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
             agent_id, model, workflow_phase,
             issue_number, tracker_number,
             tool_calls, input_tokens, output_tokens,
-            status, started_at, finished_at, duration_ms
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            status, started_at, finished_at, duration_ms,
+            preset_name, preset_version
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
         params![
             record.agent_id,
             record.model,
@@ -150,6 +166,8 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
             record.started_at,
             record.finished_at,
             record.duration_ms as i64,
+            record.preset_name,
+            record.preset_version,
         ],
     ) {
         tracing::warn!("event_log: failed to insert run record: {e}");
@@ -172,6 +190,8 @@ pub fn preview_entry(record: &AgentRunRecord) -> String {
         "started_at":     record.started_at,
         "finished_at":    record.finished_at,
         "duration_ms":    record.duration_ms,
+        "preset_name":    record.preset_name,
+        "preset_version": record.preset_version,
     });
     serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".to_string())
 }
@@ -298,8 +318,8 @@ fn is_leap_year(year: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentRunRecord, ToolCallRecord, append_run, extract_run_data, is_leap_year, iso8601_now,
-        preview_entry, resolve_db_path,
+        AgentRunRecord, CURRENT_SCHEMA_VERSION, ToolCallRecord, append_run, extract_run_data,
+        is_leap_year, iso8601_now, preview_entry, resolve_db_path,
     };
     use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBlock};
     use std::path::PathBuf;
@@ -396,6 +416,8 @@ mod tests {
             started_at: "2026-05-10T00:00:00Z".to_string(),
             finished_at: "2026-05-10T00:00:01Z".to_string(),
             duration_ms: 1000,
+            preset_name: Some("default".to_string()),
+            preset_version: Some("0.1.0".to_string()),
         };
 
         let preview = preview_entry(&record);
@@ -404,6 +426,8 @@ mod tests {
         assert_eq!(parsed["agent_id"], "claude");
         assert_eq!(parsed["issue_number"], 42);
         assert_eq!(parsed["status"], "dry-run");
+        assert_eq!(parsed["preset_name"], "default");
+        assert_eq!(parsed["preset_version"], "0.1.0");
     }
 
     #[test]
@@ -424,6 +448,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 1000,
+            preset_name: Some("default".to_string()),
+            preset_version: Some("0.1.0".to_string()),
         };
 
         append_run(&record, &db_path);
@@ -463,6 +489,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 0,
+            preset_name: None,
+            preset_version: None,
         };
 
         append_run(&record, &db_path);
@@ -475,8 +503,53 @@ mod tests {
         assert_eq!(count, 2, "each append_run should add exactly one row");
 
         let ver: i64 = conn
+            .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+                row.get(0)
+            })
+            .expect("schema_version should exist");
+        assert_eq!(
+            ver, CURRENT_SCHEMA_VERSION,
+            "schema_version should be current"
+        );
+        let row_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
             .expect("schema_version count");
-        assert_eq!(ver, 1, "schema_version should have exactly one row");
+        assert_eq!(row_count, 1, "schema_version should have exactly one row");
+    }
+
+    #[test]
+    fn preset_columns_are_persisted_and_readable() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("preset_test.db");
+
+        let record = AgentRunRecord {
+            agent_id: "claude".to_string(),
+            model: "test-model".to_string(),
+            workflow_phase: "issue".to_string(),
+            issue_number: None,
+            tracker_number: None,
+            tool_calls: vec![],
+            input_tokens: None,
+            output_tokens: None,
+            status: "completed".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: "2026-01-01T00:00:01Z".to_string(),
+            duration_ms: 0,
+            preset_name: Some("xp".to_string()),
+            preset_version: Some("0.1.0".to_string()),
+        };
+
+        append_run(&record, &db_path);
+
+        let conn = rusqlite::Connection::open(&db_path).expect("open db");
+        let (pname, pver): (Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT preset_name, preset_version FROM agent_runs LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("read preset columns");
+        assert_eq!(pname.as_deref(), Some("xp"));
+        assert_eq!(pver.as_deref(), Some("0.1.0"));
     }
 }
