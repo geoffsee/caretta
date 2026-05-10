@@ -637,7 +637,7 @@ mod tests {
         let program = PathBuf::from(cmd.get_program());
         let display = program.to_string_lossy();
         assert!(
-            display.contains("freq-ai") || display == "codex",
+            display.contains("agent-runtime") || display == "codex",
             "unexpected codex program path: {display}"
         );
         let args: Vec<String> = cmd
