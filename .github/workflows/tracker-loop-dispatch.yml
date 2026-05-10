@@ -133,3 +133,28 @@ jobs:
           CARETTA_CONTEXT: ${{ inputs.context }}
           CARETTA_MODEL: ${{ inputs.model }}
           GH_TOKEN: ${{ github.token }}
+
+  # For approved agent/issue-* PRs: merge latest base into each branch, then enable squash auto-merge.
+  # Runs after review follow-up so fixes land before the queue step. Requires a caretta build with
+  # `caretta auto-merge --automerge-queue`.
+  prepare-automerge:
+    needs: [code-review, fix-review-comments]
+    if: >-
+      always() && !cancelled() &&
+      needs.code-review.result == 'success' &&
+      (needs.fix-review-comments.result == 'success' ||
+       needs.fix-review-comments.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update branches and enable auto-merge
+        uses: geoffsee/caretta-action@v0.0.5
+        with:
+          task: auto-merge
+          args: --tracker ${{ inputs.tracker }} --automerge-queue
+          preset: software-factory
+          agent: claude
+          auto: "false"
+        env:
+          GH_TOKEN: ${{ github.token }}

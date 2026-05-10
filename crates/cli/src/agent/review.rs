@@ -6,9 +6,10 @@ use crate::agent::process::{emit_event, stop_requested};
 use crate::agent::run::{run_agent_with_env, run_agent_with_env_in_dir};
 use crate::agent::tracker::{
     DEFAULT_REVIEW_BOT_LOGIN, build_code_review_prompt, build_pr_review_fix_prompt,
-    build_pr_review_verification_prompt, build_security_review_prompt,
-    fetch_unresolved_review_threads, list_open_prs, parse_verification_verdict, pr_body, pr_diff,
-    pr_head_branch, pr_review_decision, resolve_review_thread,
+    build_pr_review_verification_prompt, build_review_followup_code_review_prompt,
+    build_security_review_prompt, fetch_unresolved_review_threads, list_open_prs,
+    parse_verification_verdict, pr_body, pr_diff, pr_head_branch, pr_review_decision,
+    resolve_review_thread,
 };
 use crate::agent::types::{AgentEvent, Config};
 use std::path::{Path, PathBuf};
@@ -57,8 +58,24 @@ pub fn run_code_review(cfg: &Config) {
 
         let body = pr_body(pr.number);
         let diff = pr_diff(pr.number);
-        let prompt =
-            build_code_review_prompt(&cfg.project_name, pr.number, &pr.title, &body, &diff);
+        let threads = fetch_unresolved_review_threads(pr.number, DEFAULT_REVIEW_BOT_LOGIN);
+        let prompt = if threads.is_empty() {
+            build_code_review_prompt(&cfg.project_name, pr.number, &pr.title, &body, &diff)
+        } else {
+            log(&format!(
+                "PR #{} has {} unresolved bot-authored thread(s) — follow-up verification review (not a full audit).",
+                pr.number,
+                threads.len()
+            ));
+            build_review_followup_code_review_prompt(
+                &cfg.project_name,
+                pr.number,
+                &pr.title,
+                &body,
+                &diff,
+                &threads,
+            )
+        };
         run_agent_with_env(cfg, &prompt, &extra_env);
         if stop_requested() {
             log("Stop requested. Code review cancelled.");

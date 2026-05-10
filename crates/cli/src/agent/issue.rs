@@ -3,11 +3,14 @@ use crate::agent::cmd::{
 };
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::stop_requested;
+use crate::agent::review::run_pr_review_fix;
 use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
 use crate::agent::tracker::{
-    build_prompt, build_test_fix_prompt, fetch_issue, find_upstream_branch, get_tracker_body,
-    parse_pending, pending_issues_execution_order,
+    DEFAULT_REVIEW_BOT_LOGIN, build_prompt, build_test_fix_prompt, fetch_issue,
+    fetch_unresolved_review_threads, find_upstream_branch, get_tracker_body,
+    open_pr_number_for_head_branch, parse_pending, pending_issues_execution_order,
+    pr_review_decision,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config, MAX_COMMIT_ATTEMPTS, MAX_PUSH_ATTEMPTS};
 use crate::timed;
@@ -96,6 +99,27 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     }
 
     let branch = format!("{BRANCH_PREFIX}{issue_num}");
+    if let Some(pr_num) = open_pr_number_for_head_branch(&branch) {
+        if pr_review_decision(pr_num)
+            .as_deref()
+            .is_some_and(|d| d.eq_ignore_ascii_case("APPROVED"))
+        {
+            log(&format!(
+                "Open PR #{pr_num} for branch '{branch}' is already approved — skipping implementation run for issue #{issue_num}."
+            ));
+            return;
+        }
+        let threads = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN);
+        if !threads.is_empty() {
+            log(&format!(
+                "Open PR #{pr_num} has {} unresolved bot-authored review thread(s) — running fix-comments flow on that branch instead of a full implementation pass.",
+                threads.len()
+            ));
+            run_pr_review_fix(cfg, pr_num);
+            return;
+        }
+    }
+
     let trunk = origin_default_branch();
     let base = find_upstream_branch(blockers);
 

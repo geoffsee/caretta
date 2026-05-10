@@ -617,6 +617,30 @@ pub fn list_open_prs() -> Vec<PrSummary> {
     serde_json::from_str(&out).unwrap_or_default()
 }
 
+/// Open pull request number for `head` equal to `branch`, if one exists.
+pub fn open_pr_number_for_head_branch(branch: &str) -> Option<u32> {
+    let out = cmd_stdout(
+        "gh",
+        &[
+            "pr",
+            "list",
+            "--head",
+            branch,
+            "--state",
+            "open",
+            "--json",
+            "number",
+            "--jq",
+            ".[0].number // empty",
+        ],
+    )?;
+    let s = out.trim();
+    if s.is_empty() {
+        return None;
+    }
+    s.parse().ok()
+}
+
 /// Fetch the diff for a single PR.
 pub fn pr_diff(pr_num: u32) -> String {
     let num_s = pr_num.to_string();
@@ -2500,6 +2524,105 @@ Constraints the API enforces — respect them or you will get HTTP 422:
 On success, log the `html_url` from the response and exit. Do NOT also
 run `gh pr review` or `gh pr comment` — the inline comments and verdict
 are already posted in the single call above."#
+    )
+}
+
+/// Narrow review: verify whether the PR resolves outstanding bot-authored
+/// review threads. Prefer **APPROVE** or **REQUEST_CHANGES** only — avoid a
+/// full green-field audit when [`fetch_unresolved_review_threads`] returned
+/// comments to verify.
+pub fn build_review_followup_code_review_prompt(
+    project_name: &str,
+    pr_num: u32,
+    title: &str,
+    body: &str,
+    diff: &str,
+    threads: &[ReviewThread],
+) -> String {
+    let mut threads_section = String::new();
+    for (i, t) in threads.iter().enumerate() {
+        threads_section.push_str(&format!(
+            "### Thread {i} — `{path}:{line}` (by @{author})\n\n{body}\n\n",
+            i = i + 1,
+            path = t.path,
+            line = t.line,
+            author = t.author,
+            body = t.body,
+        ));
+    }
+    let thread_count = threads.len();
+
+    format!(
+        r#"You are performing a **follow-up verification review** on pull request #{pr_num} for the {project_name} project.
+
+This is **not** a full code review. The automated reviewer previously left **{thread_count}** unresolved thread(s) below. Your only job is to decide whether the **current diff** adequately addresses those concerns, and to either approve or request further changes.
+
+Read AGENTS.md and skills/ for project conventions.
+
+## Pull Request #{pr_num}: {title}
+
+### Description
+{body}
+
+### Diff
+```diff
+{diff}
+```
+
+## Outstanding review threads (must verify)
+
+{threads_section}
+
+## Instructions
+
+1. **Scope** — Judge whether each thread is addressed in the post-change code. Do **not** perform a broad style pass, hunt for nits in unrelated files, or re-review the entire PR as if it were new.
+2. **New problems** — If the fix introduces a **critical** or **warning**-level regression in touched code, include it via **REQUEST_CHANGES** with the same line-anchored REST payload as a normal review.
+3. **Verdict** — If every thread is satisfactorily resolved and there is no new blocking issue: submit **APPROVE** (comments array may be empty). If anything material remains: submit **REQUEST_CHANGES** with inline comments anchored to the **new** file lines (`side: RIGHT`).
+
+## Posting the Review
+
+Use the **same** single REST `POST repos/{{owner}}/{{repo}}/pulls/{pr_num}/reviews` pattern as a full caretta review. Do NOT use `gh pr review` for inline comments.
+
+### Step 1 — Resolve repo + head SHA
+```sh
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+HEAD_SHA=$(gh pr view {pr_num} --json headRefOid -q .headRefOid)
+```
+
+### Step 2 — Verdict
+- **APPROVE** — all threads above are addressed; no new blocking issues in scope.
+- **REQUEST_CHANGES** — at least one thread remains inadequately fixed, or a new blocking regression appeared.
+
+### Step 3 — POST payload
+Write JSON to a temp file and submit:
+
+```sh
+cat > /tmp/review-followup-{pr_num}.json <<'JSON'
+{{
+  "commit_id": "<HEAD_SHA>",
+  "event": "APPROVE | REQUEST_CHANGES",
+  "body": "<1-3 sentence summary>",
+  "comments": [
+    {{
+      "path": "<file path>",
+      "line": <new-version line number>,
+      "side": "RIGHT",
+      "body": "**[severity]** …"
+    }}
+  ]
+}}
+JSON
+
+gh api -X POST \
+  -H "Accept: application/vnd.github+json" \
+  "repos/$REPO/pulls/{pr_num}/reviews" \
+  --input /tmp/review-followup-{pr_num}.json
+```
+
+Constraints: `line` MUST fall inside diff hunks. On HTTP errors, print the response body and stop.
+
+### Step 4 — Confirm
+On success, log the review `html_url` from the response. Do NOT also run `gh pr review`."#
     )
 }
 
@@ -4499,6 +4622,33 @@ mod tests {
         let p = build_code_review_prompt("test-project", 1, "t", "b", "d");
         assert!(p.contains("Security"));
         assert!(p.contains("OWASP"));
+    }
+
+    #[test]
+    fn review_followup_prompt_scopes_to_outstanding_threads() {
+        let threads = vec![ReviewThread {
+            id: "thr1".into(),
+            path: "src/lib.rs".into(),
+            line: 10,
+            body: "Handle the None case.".into(),
+            author: DEFAULT_REVIEW_BOT_LOGIN.to_string(),
+        }];
+        let p = build_review_followup_code_review_prompt(
+            "test-project",
+            7,
+            "Fix parser",
+            "closes issues",
+            "+foo",
+            &threads,
+        );
+        assert!(p.contains("follow-up verification"));
+        assert!(p.contains("src/lib.rs"));
+        assert!(p.contains("Handle the None case."));
+        assert!(p.contains("/pulls/7/reviews"));
+        assert!(
+            !p.contains("OWASP"),
+            "follow-up prompt must not mandate full security audit"
+        );
     }
 
     // ── Phase 2: Fix Comments prompt + thread parser (#144) ──

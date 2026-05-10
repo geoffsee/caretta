@@ -3,8 +3,8 @@
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, cmd_stdout_or_die, has_command};
 use crate::agent::shell::log;
 use crate::agent::tracker::{
-    find_tracker, find_upstream_branch, get_tracker_body, parse_pending,
-    pending_issues_execution_order,
+    enable_auto_merge, find_tracker, find_upstream_branch, get_tracker_body, is_auto_merge_enabled,
+    parse_pending, pending_issues_execution_order,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -193,6 +193,41 @@ fn eligible_for_immediate_merge(row: &GhPrMergeRow) -> bool {
     )
 }
 
+/// Approved, non-draft rows — may still be `DIRTY` until `gh pr update-branch`
+/// merges the latest base.
+fn eligible_for_automerge_queue(row: &GhPrMergeRow) -> bool {
+    !row.is_draft
+        && matches!(
+            row.review_decision.as_deref(),
+            Some(d) if d.trim().eq_ignore_ascii_case("APPROVED")
+        )
+}
+
+#[derive(Clone, Copy, Debug)]
+enum MergePassMode {
+    SquashMergeWhenEligible,
+    UpdateBranchThenAutomergeQueue,
+}
+
+fn pr_update_branch(pr_num: u32, dry_run: bool) -> bool {
+    if dry_run {
+        log(&format!(
+            "[dry-run] Would update PR #{pr_num} with `gh pr update-branch`."
+        ));
+        return true;
+    }
+    log(&format!(
+        "Merging latest base into PR #{pr_num} (`gh pr update-branch`)…"
+    ));
+    let (ok, out) = cmd_capture("gh", &["pr", "update-branch", &pr_num.to_string()]);
+    if !ok {
+        log(&format!(
+            "`gh pr update-branch` failed for PR #{pr_num}: {out}"
+        ));
+    }
+    ok
+}
+
 fn retarget_pull_base(pr_num: u32, new_base: &str, dry_run: bool) -> bool {
     if dry_run {
         log(&format!(
@@ -252,12 +287,36 @@ fn resolve_execution_order(
 /// Walk deterministic tracker order / stack graph, aligning each `--base` with
 /// [`find_upstream_branch`] (same chaining policy as [`crate::agent::issue::work_on_issue`]), then squash-merge when Approved and GitHub marks no explicit conflict state (`DIRTY`).
 pub fn run_auto_merge_stack(cfg: &Config, tracker_override: Option<u32>) {
+    run_lineage_pass(
+        cfg,
+        tracker_override,
+        MergePassMode::SquashMergeWhenEligible,
+    );
+}
+
+/// Like [`run_auto_merge_stack`], but for each **approved** PR: merge the
+/// latest base into the head branch (`gh pr update-branch`), then enable
+/// squash auto-merge. Use in CI when merges should wait on branch protection /
+/// checks rather than an immediate `gh pr merge`.
+pub fn run_automerge_queue(cfg: &Config, tracker_override: Option<u32>) {
+    run_lineage_pass(
+        cfg,
+        tracker_override,
+        MergePassMode::UpdateBranchThenAutomergeQueue,
+    );
+}
+
+fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePassMode) {
     if !cfg.dry_run && !has_command("gh") {
         log("auto-merge: `gh` CLI not installed — abort.");
         return;
     }
     let trunk = crate::agent::cmd::origin_default_branch();
-    log(&format!("auto-merge (lineage): trunk base '{}'", trunk));
+    let pass_label = match mode {
+        MergePassMode::SquashMergeWhenEligible => "lineage (immediate squash)",
+        MergePassMode::UpdateBranchThenAutomergeQueue => "queue (update-branch + auto-merge)",
+    };
+    log(&format!("auto-merge ({pass_label}): trunk base '{trunk}'"));
 
     let gh_rows = if has_command("gh") {
         if cfg.dry_run {
@@ -407,19 +466,48 @@ pub fn run_auto_merge_stack(cfg: &Config, tracker_override: Option<u32>) {
             }
         }
 
-        if !eligible_for_immediate_merge(&row_snapshot) {
+        let eligible = match mode {
+            MergePassMode::SquashMergeWhenEligible => eligible_for_immediate_merge(&row_snapshot),
+            MergePassMode::UpdateBranchThenAutomergeQueue => {
+                eligible_for_automerge_queue(&row_snapshot)
+            }
+        };
+        if !eligible {
             log(&format!(
-                "Skipping PR #{} (#{issue}); mergeState={:?} reviewDecision={:?} draft={}",
+                "Skipping PR #{} (#{issue}); mergeState={:?} reviewDecision={:?} draft={} (mode={:?})",
                 row_snapshot.number,
                 row_snapshot.merge_state_status,
                 row_snapshot.review_decision,
                 row_snapshot.is_draft,
+                mode,
             ));
             continue;
         }
 
-        if !merge_pull_squash(row_snapshot.number, cfg.dry_run) {
-            continue;
+        match mode {
+            MergePassMode::SquashMergeWhenEligible => {
+                if !merge_pull_squash(row_snapshot.number, cfg.dry_run) {
+                    continue;
+                }
+            }
+            MergePassMode::UpdateBranchThenAutomergeQueue => {
+                if !pr_update_branch(row_snapshot.number, cfg.dry_run) {
+                    continue;
+                }
+                if !cfg.dry_run {
+                    if is_auto_merge_enabled(row_snapshot.number) {
+                        log(&format!(
+                            "PR #{} already has auto-merge enabled.",
+                            row_snapshot.number
+                        ));
+                    } else if !enable_auto_merge(row_snapshot.number) {
+                        log(&format!(
+                            "WARNING: could not enable auto-merge on PR #{}.",
+                            row_snapshot.number
+                        ));
+                    }
+                }
+            }
         }
 
         if !cfg.dry_run {
@@ -428,7 +516,7 @@ pub fn run_auto_merge_stack(cfg: &Config, tracker_override: Option<u32>) {
         }
     }
 
-    log("auto-merge (lineage): pass complete.");
+    log(&format!("auto-merge ({pass_label}): pass complete."));
 }
 
 #[cfg(test)]

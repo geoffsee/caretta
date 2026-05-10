@@ -27,7 +27,7 @@ pub mod ui;
 pub use agent::types::{Agent, Config, SkillPaths};
 
 use agent::actions::{ActionContext, lookup_action};
-use agent::auto_merge::run_auto_merge_stack;
+use agent::auto_merge::{run_auto_merge_stack, run_automerge_queue};
 use agent::config_store::{
     clear_bot_private_key_pem, clear_bot_token, clear_local_inference_api_key,
     store_bot_private_key_pem, store_bot_token, store_local_inference_api_key,
@@ -133,6 +133,9 @@ enum Commands {
         /// Tracker issue supplying deterministic execution order (`pending_issues_execution_order`)
         #[arg(long, value_name = "NUMBER")]
         tracker: Option<u32>,
+        /// Merge each approved PR's base into its branch, then enable squash auto-merge (GitHub `--auto`) instead of merging immediately.
+        #[arg(long)]
+        automerge_queue: bool,
     },
     /// Run ideation draft
     Ideation,
@@ -303,8 +306,15 @@ where
             Some(Commands::ApprovePr { pr }) => {
                 try_approve_pr(&config, pr);
             }
-            Some(Commands::AutoMerge { tracker }) => {
-                run_auto_merge_stack(&config, tracker);
+            Some(Commands::AutoMerge {
+                tracker,
+                automerge_queue,
+            }) => {
+                if automerge_queue {
+                    run_automerge_queue(&config, tracker);
+                } else {
+                    run_auto_merge_stack(&config, tracker);
+                }
             }
             Some(Commands::Ideation) => run_workflow_draft(&config, "ideation"),
             Some(Commands::UxrSynth) => run_workflow_draft(&config, "report_research"),

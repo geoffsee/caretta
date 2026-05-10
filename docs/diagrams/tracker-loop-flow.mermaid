@@ -1,0 +1,52 @@
+%% Tracker Loop Dispatch — high-level flow (see .github/workflows/tracker-loop-dispatch.yml)
+
+flowchart TB
+  subgraph dispatch["GitHub Actions: tracker-loop-dispatch"]
+    T["Workflow dispatch\n(tracker issue #T, optional context)"]
+    T --> Plan["job: tracker-matrix-plan\ncaretta tracker-matrix T --json"]
+    Plan --> IC{"planned\nissue-count == 0 ?"}
+    IC -->|yes| SkipIssue["job: tracker-issue\nSKIPPED"]
+    IC -->|no| Issue["job: tracker-issue\nmatrix: one run per child issue\ncaretta issue --tracker T N"]
+  end
+
+  subgraph issueWork["Per matrix cell: work_on_issue (agent/issue-N branch)"]
+    W0{"open PR for\nagent/issue-N ?"}
+    W0 -->|no| Impl["Normal path:\ncheckout base → issue branch →\nagent implement → commit → PR"]
+    W0 -->|yes| W1{"reviewDecision\n== APPROVED ?"}
+    W1 -->|yes| WSkip["Log and return\n(no duplicate work)"]
+    W1 -->|no| W2{"unresolved\nbot review threads?"}
+    W2 -->|yes| FixPR["run_pr_review_fix on PR\n(address review)"]
+    W2 -->|no| Impl
+  end
+
+  subgraph review["Review and merge queue"]
+    CR["job: code-review\ncaretta code-review"]
+    CR0{"unresolved bot threads\non PR?"}
+    Full["Full code-review prompt"]
+    Narrow["Follow-up verification prompt\n(approve or request changes)"]
+    ListPRs["List open PRs → prs output\n(for follow-up job)"]
+    FX{"code-review succeeded AND\nprs list non-empty?"}
+    FixRC["job: fix-review-comments\nmatrix: caretta fix-pr per PR"]
+    AutoSkip["job: fix-review-comments\nSKIPPED"]
+    AM["job: prepare-automerge\ncaretta auto-merge --tracker T --automerge-queue"]
+    AMSteps["Approved agent/issue-* PRs in tracker order:\ngh pr update-branch then enable squash auto-merge"]
+
+    CR --> CR0
+    CR0 -->|no| Full
+    CR0 -->|yes| Narrow
+    Full --> ListPRs
+    Narrow --> ListPRs
+    ListPRs --> FX
+    FX -->|yes| FixRC
+    FX -->|no| AutoSkip
+    FixRC --> AM
+    AutoSkip --> AM
+    AM --> AMSteps
+  end
+
+  Issue --> W0
+  SkipIssue --> CR
+  WSkip --> CR
+  FixPR --> CR
+  Impl --> CR
+  AMSteps --> GH["GitHub merges when\nchecks + branch protection satisfied"]
