@@ -373,6 +373,10 @@ pub fn run_loop(cfg: &Config, tracker_num: u32) {
         log(&format!(
             "Loop heartbeat: cycle {cycle} reading tracker #{tracker_num}..."
         ));
+        if cfg.dry_run {
+            log("[dry-run] loop: skipping tracker fetch and exiting after one cycle");
+            break;
+        }
         let body = get_tracker_body(tracker_num);
         let order = pending_issues_execution_order(&body);
         let pending_by_num: HashMap<u32, PendingIssue> = parse_pending(&body)
