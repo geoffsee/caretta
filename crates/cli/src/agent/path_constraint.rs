@@ -145,6 +145,10 @@ fn extract_path_arg(tool_name: &str, args: &Value) -> Option<String> {
 /// - `.` components are dropped.
 /// - `..` pops the preceding directory segment (like a real filesystem would).
 /// - Trailing `/` is stripped.
+/// - Absolute paths (those with a leading `/` or Windows drive prefix) are
+///   represented with a leading `"/"` sentinel so they never match a relative
+///   allow/deny prefix. For example, `/src/main.rs` normalizes to `//src/main.rs`,
+///   which will not match `allow_paths = ["src/"]`.
 fn normalize_path(path: &str) -> String {
     use std::path::{Component, Path};
     let without_dot_prefix = path.trim_start_matches("./");
@@ -155,23 +159,31 @@ fn normalize_path(path: &str) -> String {
                 parts.pop();
             }
             Component::Normal(s) => parts.push(s.to_str().unwrap_or("")),
-            // RootDir and Prefix (Windows drive letters) are intentionally dropped; remaining components are still matched.
-            _ => {}
+            Component::RootDir | Component::Prefix(_) => {
+                // Absolute path: use a sentinel so the normalized form starts
+                // with "/" and can never match a relative prefix like "src/".
+                // This prevents "/src/main.rs" from falsely satisfying
+                // allow_paths = ["src/"].
+                parts.clear();
+                parts.push("/");
+            }
+            Component::CurDir => {} // already stripped by trim_start_matches("./") above
         }
     }
     parts.join("/")
 }
 
 /// Return `true` if `path` begins with `prefix` (prefix-match semantics).
-/// Both `path` and `prefix` are already normalized (no leading `./`, no
-/// trailing `/`).
+/// `path` must already be normalized via `normalize_path`; `prefix` is
+/// normalized here so that operators who write `deny_paths = ["src/../vendor/"]`
+/// get the expected behaviour rather than a silently-inert rule.
 fn path_matches(path: &str, prefix: &str) -> bool {
-    let prefix = prefix.trim_start_matches("./").trim_end_matches('/');
-    if prefix.is_empty() {
+    let norm_prefix = normalize_path(prefix);
+    if norm_prefix.is_empty() {
         return true;
     }
     // Exact match or path is inside the prefix directory.
-    path == prefix || path.starts_with(&format!("{prefix}/"))
+    path == norm_prefix || path.starts_with(&format!("{norm_prefix}/"))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -357,5 +369,31 @@ mod tests {
             deny_paths: vec![],
         };
         assert!(check_tool_call(&tc("Grep", "path", "src/"), &c).is_none());
+    }
+
+    #[test]
+    fn absolute_path_is_not_allowed_by_relative_allow_path() {
+        let c = PathConstraints {
+            allow_paths: vec!["src/".to_string()],
+            deny_paths: vec![],
+        };
+        // An absolute path like /src/main.rs must not pass allow_paths = ["src/"].
+        // Without the sentinel fix, "/src/main.rs" would normalize to "src/main.rs"
+        // and falsely satisfy the allow-list.
+        let v = check_tool_call(&tc("Read", "file_path", "/src/main.rs"), &c)
+            .expect("absolute path should be a violation even when it looks like an allowed prefix");
+        assert!(v.reason.contains("allow_paths"));
+    }
+
+    #[test]
+    fn deny_path_with_traversal_components_still_fires() {
+        let c = PathConstraints {
+            allow_paths: vec![],
+            deny_paths: vec!["src/../vendor/".to_string()],
+        };
+        // "src/../vendor/" normalizes to "vendor", so it should still catch vendor/foo.rs.
+        let v = check_tool_call(&tc("Read", "file_path", "vendor/foo.rs"), &c)
+            .expect("traversal-containing deny prefix should normalize and still match");
+        assert!(v.reason.contains("deny_paths"));
     }
 }

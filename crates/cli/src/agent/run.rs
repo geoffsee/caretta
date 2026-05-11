@@ -651,9 +651,36 @@ mod tests {
         codex_events_from_json_line, native_command, run_claude_native_with_env,
         run_codex_native_with_env,
     };
-    use crate::agent::types::{Agent, AgentEvent, ClaudeEvent};
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::build_appended_system_prompt;
+    use crate::agent::types::{Agent, AgentEvent, ClaudeEvent, Config, PathConstraints};
     use std::fs;
     use std::path::PathBuf;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn make_test_config(agent: Agent, path_constraints: PathConstraints) -> Config {
+        Config {
+            agent,
+            model: String::new(),
+            auto_mode: false,
+            dry_run: false,
+            local_inference: Default::default(),
+            root: "/".into(),
+            project_name: "test".into(),
+            scan_targets: Default::default(),
+            skill_paths: Default::default(),
+            bootstrap_agent_files: false,
+            bootstrap_snapshot: false,
+            workflow_preset: "default".to_string(),
+            use_subscription: false,
+            pricing: Default::default(),
+            bot_settings: Default::default(),
+            bot_credentials: None,
+            test: Default::default(),
+            event_log_path: None,
+            path_constraints,
+        }
+    }
 
     #[test]
     fn native_command_uses_bundled_runtime_for_codex_when_available() {
@@ -742,6 +769,59 @@ mod tests {
             "stable guidance"
         );
         assert!(!args.iter().any(|arg| arg == "stable guidance"));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn build_appended_prompt_claude_with_constraints_appends_fragment() {
+        let cfg = make_test_config(
+            Agent::Claude,
+            PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+        );
+        let prompt = build_appended_system_prompt(&cfg)
+            .expect("Claude with constraints should produce a prompt");
+        assert!(prompt.contains("caretta's autonomous repository agent"),
+            "base guidance missing");
+        assert!(prompt.contains("Allowed path prefixes"),
+            "path-constraint fragment missing");
+        assert!(prompt.contains("src/"), "allow_paths value missing from fragment");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn build_appended_prompt_non_claude_with_constraints_returns_none() {
+        let cfg = make_test_config(
+            Agent::Codex,
+            PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+        );
+        // Non-Claude agents don't support system-prompt append; a tracing::warn
+        // is emitted but the return value is None.
+        assert!(build_appended_system_prompt(&cfg).is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn build_appended_prompt_no_triple_newline_between_base_and_fragment() {
+        let cfg = make_test_config(
+            Agent::Claude,
+            PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+        );
+        let prompt = build_appended_system_prompt(&cfg)
+            .expect("Claude with constraints should produce a prompt");
+        // The base prompt ends with "\n" and the format adds one separator "\n",
+        // yielding a blank line between sections ("\n\n"). A triple newline would
+        // indicate unintended extra whitespace in the assembly logic.
+        assert!(!prompt.contains("\n\n\n"),
+            "unexpected triple newline in assembled prompt");
     }
 
     #[test]

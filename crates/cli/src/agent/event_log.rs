@@ -121,8 +121,12 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         )?;
     }
 
-    if version == 1 {
+    if version >= 1 && version < 2 {
         // Upgrade existing v1 databases: add path-constraint audit columns.
+        // Using an exact range (>= N && < N+1) rather than == N makes it
+        // unambiguous that each block is a single-step migration; future
+        // blocks should follow the same pattern so users jumping multiple
+        // versions still execute every intermediate migration in order.
         conn.execute_batch(
             "ALTER TABLE agent_runs ADD COLUMN path_constraints TEXT NOT NULL DEFAULT '{}';
              ALTER TABLE agent_runs ADD COLUMN policy_violations TEXT NOT NULL DEFAULT '[]';",
