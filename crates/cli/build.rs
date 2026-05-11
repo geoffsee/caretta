@@ -1,7 +1,11 @@
+use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::{self, Read};
 use std::path::Path;
 use std::process::Command;
 
 fn main() {
+    generate_asset_manifest();
     let dist = Path::new("dist");
     let out_dir = std::env::var("OUT_DIR").unwrap();
 
@@ -52,4 +56,75 @@ fn main() {
         Ok(s) => println!("cargo::warning=wasm-opt exited with {s}, skipping optimization"),
         Err(_) => println!("cargo::warning=wasm-opt not found, skipping wasm optimization"),
     }
+}
+
+/// Walk `assets/skills/` and `assets/workflows/`, compute a SHA-256 hash for
+/// every file, and write the results as a static Rust array to OUT_DIR so
+/// `assets.rs` can include it for integrity verification.
+fn generate_asset_manifest() {
+    let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
+    let manifest_dir = Path::new(".");
+
+    // Rerun when any asset file changes.
+    println!("cargo::rerun-if-changed=assets/skills");
+    println!("cargo::rerun-if-changed=assets/workflows");
+
+    let mut entries: Vec<(String, String)> = Vec::new();
+
+    for prefix in ["skills", "workflows"] {
+        let dir = manifest_dir.join("assets").join(prefix);
+        if !dir.is_dir() {
+            continue;
+        }
+        collect_hashes(&dir, prefix, &mut entries)
+            .unwrap_or_else(|e| panic!("failed to hash asset files in {prefix}: {e}"));
+    }
+
+    // Sort for deterministic output regardless of filesystem order.
+    entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let mut source = String::from("pub static ASSET_MANIFEST: &[(&str, &str)] = &[\n");
+    for (path, hash) in &entries {
+        source.push_str(&format!("    ({path:?}, {hash:?}),\n"));
+    }
+    source.push_str("];\n");
+
+    let out_path = Path::new(&out_dir).join("asset_manifest_generated.rs");
+    fs::write(&out_path, source)
+        .unwrap_or_else(|e| panic!("failed to write asset_manifest_generated.rs: {e}"));
+}
+
+fn collect_hashes(dir: &Path, prefix: &str, entries: &mut Vec<(String, String)>) -> io::Result<()> {
+    for entry in walkdir::WalkDir::new(dir)
+        .sort_by_file_name()
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let rel = entry
+            .path()
+            .strip_prefix(dir)
+            .expect("strip assets prefix")
+            .to_string_lossy()
+            // Normalise to forward slashes on Windows.
+            .replace('\\', "/");
+        let manifest_key = format!("{prefix}/{rel}");
+        let hash = sha256_file(entry.path())?;
+        entries.push((manifest_key, hash));
+    }
+    Ok(())
+}
+
+fn sha256_file(path: &Path) -> io::Result<String> {
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
 }

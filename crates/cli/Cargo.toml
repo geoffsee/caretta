@@ -22,7 +22,7 @@ path = "src/main.rs"
 # release / distribution builds that must ship a self-contained binary with
 # the agent runtime archive embedded.
 default = []
-bundle-runtime = ["agent-runtime/bundle-runtime"]
+bundle-runtime = ["agent-runtime/bundle-runtime", "dep:sha2"]
 
 [dependencies]
 agent-common = { path = "../agent-common" }
@@ -36,6 +36,7 @@ grok = { package = "caretta-grok", path = "../grok" }
 junie = { package = "caretta-junie", path = "../junie" }
 xai = { package = "caretta-xai", path = "../xai" }
 agent-runtime = { package = "caretta-agent-runtime", path = "../agent-runtime" }
+sha2 = { version = "0.10", optional = true }
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -50,6 +51,13 @@ handlebars = "6"
 serde_yaml = "0.9"
 indexmap = { version = "2", features = ["serde"] }
 tempfile = "3"
+
+[dev-dependencies]
+sha2 = "0.10"
+
+[build-dependencies]
+sha2 = "0.10"
+walkdir = "2"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dioxus = { version = "0.6", features = ["desktop"] }
