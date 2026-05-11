@@ -772,9 +772,11 @@ pub const DEFAULT_REVIEW_BOT_LOGIN: &str = "llm-overlord";
 ///
 /// Mirrors `scripts/resolve-pr-threads.sh` — uses `gh api graphql` so we
 /// inherit whatever credentials are in the parent process's environment.
-/// Filters out resolved threads and human-authored threads (only `bot_login`
-/// or any author ending in `[bot]` is kept) so the Fix Comments agent only
-/// touches findings the project's review bot raised.
+/// Filters out resolved threads and human-authored threads. A thread counts
+/// as bot-authored when any of these hold: the author login matches
+/// `bot_login`; the author login ends with `[bot]` (REST-style App suffix);
+/// the GraphQL `author.__typename` is `Bot` (covers GitHub Apps whose login
+/// is returned without the `[bot]` suffix, e.g. App-installation tokens).
 pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<ReviewThread> {
     let owner_repo = match cmd_stdout(
         "gh",
@@ -806,7 +808,7 @@ pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<Revi
     // Identical query to scripts/resolve-pr-threads.sh so behaviour stays in
     // lock-step with the prototype shell script. The leading newline keeps gh
     // from interpreting the value as a file reference.
-    let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 1) {\n            nodes {\n              author { login }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
+    let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 1) {\n            nodes {\n              author { login __typename }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
     let pr_num_s = pr_num.to_string();
     let owner_arg = format!("owner={owner}");
@@ -943,7 +945,11 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("")
             .to_string();
-        let is_bot = author == bot_login || author.ends_with("[bot]");
+        let typename = c
+            .pointer("/author/__typename")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
         if !is_bot {
             continue;
         }
@@ -1019,7 +1025,7 @@ pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::Hash
         }
     };
 
-    let query = "\nquery($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequests(states: OPEN, first: 100) {\n      nodes {\n        number\n        reviewThreads(first: 100) {\n          nodes {\n            isResolved\n            comments(first: 1) {\n              nodes {\n                author { login }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}";
+    let query = "\nquery($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequests(states: OPEN, first: 100) {\n      nodes {\n        number\n        reviewThreads(first: 100) {\n          nodes {\n            isResolved\n            comments(first: 1) {\n              nodes {\n                author { login __typename }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
     let owner_arg = format!("owner={owner}");
     let repo_arg = format!("repo={repo}");
@@ -1047,8 +1053,9 @@ pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::Hash
 /// Split out from [`fetch_unresolved_thread_counts`] so it can be unit-
 /// tested against fixture JSON without needing live GitHub PRs. Mirrors
 /// the filter logic from [`parse_review_threads`] (resolved threads
-/// dropped, only `bot_login` or `[bot]`-suffixed authors counted) so the
-/// badge count and the Fix Comments agent see the same set of threads.
+/// dropped; authors qualify as bots via login match, `[bot]` suffix, or
+/// GraphQL `author.__typename == "Bot"`) so the badge count and the Fix
+/// Comments agent see the same set of threads.
 fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::HashMap<u32, u32> {
     let mut counts = std::collections::HashMap::new();
     let v: serde_json::Value = match serde_json::from_str(json) {
@@ -1088,7 +1095,11 @@ fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::Hash
                 .pointer("/comments/nodes/0/author/login")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
-            if author == bot_login || author.ends_with("[bot]") {
+            let typename = t
+                .pointer("/comments/nodes/0/author/__typename")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            if author == bot_login || author.ends_with("[bot]") || typename == "Bot" {
                 count += 1;
             }
         }
@@ -3910,6 +3921,40 @@ mod tests {
         assert_eq!(counts.get(&145), Some(&1));
     }
 
+    /// GitHub Apps surface in GraphQL as `__typename: "Bot"` even when their
+    /// login lacks the `[bot]` suffix. The batched parser must count those
+    /// threads or the badge under-reports for App-installation reviewers.
+    #[test]
+    fn parse_pr_thread_counts_accepts_bot_typename() {
+        let json = r#"{
+            "data": {
+                "repository": {
+                    "pullRequests": {
+                        "nodes": [
+                            {
+                                "number": 77,
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": false,
+                                            "comments": {"nodes": [{"author": {"login": "caretta-ai", "__typename": "Bot"}}]}
+                                        },
+                                        {
+                                            "isResolved": false,
+                                            "comments": {"nodes": [{"author": {"login": "caretta-ai", "__typename": "Bot"}}]}
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }"#;
+        let counts = parse_pr_thread_counts(json, "llm-overlord");
+        assert_eq!(counts.get(&77), Some(&2));
+    }
+
     /// PRs with no review threads at all (the common case for fresh PRs)
     /// must NOT appear in the map — callers treat absence as zero.
     #[test]
@@ -4842,6 +4887,44 @@ mod tests {
         let threads = parse_review_threads(json, "llm-overlord");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].author, "dependabot[bot]");
+    }
+
+    /// GitHub Apps acting through an installation token surface their login
+    /// in GraphQL without the `[bot]` suffix (e.g. `caretta-ai`) but always
+    /// with `__typename: "Bot"`. The parser must recognise this so reviews
+    /// posted by App identities are picked up even when the configured
+    /// `bot_login` does not match exactly.
+    #[test]
+    fn parse_review_threads_accepts_bot_typename() {
+        let json = r#"{
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "PRT_app",
+                                    "isResolved": false,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "caretta-ai", "__typename": "Bot"},
+                                                "path": "src/lib.rs",
+                                                "line": 9,
+                                                "body": "use Path not PathBuf"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }"#;
+        let threads = parse_review_threads(json, "llm-overlord");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].author, "caretta-ai");
     }
 
     /// Outdated threads can have `line: null`. The parser must fall back to
