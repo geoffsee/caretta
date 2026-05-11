@@ -121,6 +121,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: now.clone(),
             finished_at: now,
             duration_ms: 0,
+            path_constraints: None,
+            policy_violations: None,
             preset_name: resolved_preset_name,
             preset_version: resolved_preset_version,
         };
@@ -234,6 +236,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: run_started_at,
             finished_at: run_finished_at,
             duration_ms: run_duration_ms,
+            path_constraints: None,
+            policy_violations: None,
             preset_name: resolved_preset_name,
             preset_version: resolved_preset_version,
         },

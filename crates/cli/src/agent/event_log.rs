@@ -44,6 +44,10 @@ pub struct AgentRunRecord {
     pub started_at: String,
     pub finished_at: String,
     pub duration_ms: u64,
+    /// Serialised path-constraint policy active during the run (JSON).
+    pub path_constraints: Option<String>,
+    /// Number of path-policy violations recorded during the run.
+    pub policy_violations: Option<i64>,
     /// Resolved workflow preset name (e.g. `"default"`, `"xp"`).
     pub preset_name: Option<String>,
     /// Resolved semver version of the workflow preset (e.g. `"0.1.0"`).
@@ -112,6 +116,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         )?;
     }
 
+    if version < 2 {
+        conn.execute_batch(
+            "BEGIN;
+             ALTER TABLE agent_runs ADD COLUMN path_constraints  TEXT;
+             ALTER TABLE agent_runs ADD COLUMN policy_violations INTEGER;
+             UPDATE schema_version SET version = 2;
+             COMMIT;",
+        )?;
+    }
+
     if version < 3 {
         conn.execute_batch(
             "BEGIN;
@@ -150,8 +164,9 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
             issue_number, tracker_number,
             tool_calls, input_tokens, output_tokens,
             status, started_at, finished_at, duration_ms,
+            path_constraints, policy_violations,
             preset_name, preset_version
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             record.agent_id,
             record.model,
@@ -165,6 +180,8 @@ pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
             record.started_at,
             record.finished_at,
             record.duration_ms as i64,
+            record.path_constraints,
+            record.policy_violations,
             record.preset_name,
             record.preset_version,
         ],
@@ -188,9 +205,11 @@ pub fn preview_entry(record: &AgentRunRecord) -> String {
         "status":         record.status,
         "started_at":     record.started_at,
         "finished_at":    record.finished_at,
-        "duration_ms":    record.duration_ms,
-        "preset_name":    record.preset_name,
-        "preset_version": record.preset_version,
+        "duration_ms":       record.duration_ms,
+        "path_constraints":  record.path_constraints,
+        "policy_violations": record.policy_violations,
+        "preset_name":       record.preset_name,
+        "preset_version":    record.preset_version,
     });
     serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".to_string())
 }
@@ -415,6 +434,8 @@ mod tests {
             started_at: "2026-05-10T00:00:00Z".to_string(),
             finished_at: "2026-05-10T00:00:01Z".to_string(),
             duration_ms: 1000,
+            path_constraints: None,
+            policy_violations: None,
             preset_name: Some("default".to_string()),
             preset_version: Some("0.1.0".to_string()),
         };
@@ -447,6 +468,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 1000,
+            path_constraints: None,
+            policy_violations: None,
             preset_name: Some("default".to_string()),
             preset_version: Some("0.1.0".to_string()),
         };
@@ -488,6 +511,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 0,
+            path_constraints: None,
+            policy_violations: None,
             preset_name: None,
             preset_version: None,
         };
@@ -534,6 +559,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 0,
+            path_constraints: None,
+            policy_violations: None,
             preset_name: Some("xp".to_string()),
             preset_version: Some("0.1.0".to_string()),
         };
