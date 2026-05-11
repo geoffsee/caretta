@@ -52,6 +52,9 @@ serde_yaml = "0.9"
 indexmap = { version = "2", features = ["serde"] }
 tempfile = "3"
 
+# sha2 is declared separately in [dependencies] (optional, bundle-runtime feature),
+# [dev-dependencies] (for inline tests), and [build-dependencies] (for build.rs).
+# Keep versions in sync when upgrading.
 [dev-dependencies]
 sha2 = "0.10"
 

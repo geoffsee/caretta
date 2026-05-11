@@ -63,9 +63,12 @@ fn main() {
 /// `assets.rs` can include it for integrity verification.
 fn generate_asset_manifest() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
-    let manifest_dir = Path::new(".");
+    let manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
+    let manifest_dir = Path::new(&manifest_dir_str);
 
-    // Rerun when any asset file changes.
+    // Coarse guard: re-run when files are added to or removed from these dirs.
+    // Per-file rerun-if-changed lines are emitted inside collect_hashes to
+    // catch in-place edits to existing files.
     println!("cargo::rerun-if-changed=assets/skills");
     println!("cargo::rerun-if-changed=assets/workflows");
 
@@ -81,7 +84,7 @@ fn generate_asset_manifest() {
     }
 
     // Sort for deterministic output regardless of filesystem order.
-    entries.sort_by(|a, b| a.0.cmp(&b.0));
+    entries.sort();
 
     let mut source = String::from("pub static ASSET_MANIFEST: &[(&str, &str)] = &[\n");
     for (path, hash) in &entries {
@@ -95,12 +98,13 @@ fn generate_asset_manifest() {
 }
 
 fn collect_hashes(dir: &Path, prefix: &str, entries: &mut Vec<(String, String)>) -> io::Result<()> {
-    for entry in walkdir::WalkDir::new(dir)
-        .sort_by_file_name()
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().is_file())
-    {
+    for entry in walkdir::WalkDir::new(dir).into_iter() {
+        let entry = entry?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        // Per-file watch so Cargo re-runs when an existing asset is edited.
+        println!("cargo::rerun-if-changed={}", entry.path().display());
         let rel = entry
             .path()
             .strip_prefix(dir)

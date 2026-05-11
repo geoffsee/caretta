@@ -21,6 +21,129 @@ pub struct SkillAssets;
 #[folder = "assets/workflows/"]
 pub struct WorkflowAssets;
 
+/// Return the stable app-data directory for materialized assets
+/// (`~/.local/share/caretta`). Created on first call if missing.
+pub fn assets_dir() -> PathBuf {
+    #[cfg(not(target_arch = "wasm32"))]
+    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
+
+    #[cfg(target_arch = "wasm32")]
+    let base = PathBuf::from(".");
+
+    let dir = base.join("caretta");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// Verify that every embedded skill/workflow asset matches its build-time
+/// SHA-256 hash recorded in the bundle manifest, and that every embedded
+/// asset has a corresponding manifest entry.
+///
+/// Only compiled for `--features bundle-runtime` builds. Returns an error
+/// describing the first integrity failure; the caller is responsible for
+/// aborting the process.
+#[cfg(feature = "bundle-runtime")]
+pub fn verify_asset_hashes() -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
+    use std::collections::HashSet;
+
+    // Pass 1: verify each manifest entry against the embedded asset.
+    for (path, expected_hash) in manifest::ASSET_MANIFEST {
+        let data = if let Some(rest) = path.strip_prefix("skills/") {
+            SkillAssets::get(rest)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("asset integrity error — missing skill asset '{rest}'")
+                })?
+                .data
+        } else if let Some(rest) = path.strip_prefix("workflows/") {
+            WorkflowAssets::get(rest)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("asset integrity error — missing workflow asset '{rest}'")
+                })?
+                .data
+        } else {
+            anyhow::bail!("asset integrity error — unrecognized path prefix: {path}");
+        };
+
+        let actual_hash = format!("{:x}", Sha256::digest(data.as_ref()));
+        if actual_hash != *expected_hash {
+            anyhow::bail!(
+                "asset integrity check failed\n  asset:    {path}\n  expected: {expected_hash}\n  actual:   {actual_hash}\nasset manifest mismatch — rebuild required"
+            );
+        }
+    }
+
+    // Pass 2: ensure every embedded asset has a manifest entry, so that a
+    // file present in SkillAssets/WorkflowAssets but absent from the manifest
+    // does not pass silently.
+    let manifest_paths: HashSet<&str> =
+        manifest::ASSET_MANIFEST.iter().map(|(p, _)| *p).collect();
+
+    for file in SkillAssets::iter() {
+        let key = format!("skills/{}", file.as_ref());
+        if !manifest_paths.contains(key.as_str()) {
+            anyhow::bail!(
+                "asset integrity error — embedded skill '{}' has no manifest entry",
+                file.as_ref()
+            );
+        }
+    }
+
+    for file in WorkflowAssets::iter() {
+        let key = format!("workflows/{}", file.as_ref());
+        if !manifest_paths.contains(key.as_str()) {
+            anyhow::bail!(
+                "asset integrity error — embedded workflow '{}' has no manifest entry",
+                file.as_ref()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Materialize embedded AGENTS.md and skills into the app-data directory.
+/// Existing files are refreshed so the bundled guidance stays in sync with
+/// the current binary.
+/// Returns the app-data root (e.g. `~/.local/share/caretta`).
+pub fn materialize_assets() -> PathBuf {
+    #[cfg(feature = "bundle-runtime")]
+    if let Err(e) = verify_asset_hashes() {
+        eprintln!("fatal: {e}");
+        std::process::exit(1);
+    }
+
+    let dir = assets_dir();
+
+    // 1. AGENTS.md
+    let agents_md = dir.join("AGENTS.md");
+    let _ = std::fs::write(&agents_md, AGENTS_MD.as_bytes());
+
+    // 2. Skills
+    for file in SkillAssets::iter() {
+        let path = dir.join("skills").join(file.as_ref());
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Some(embedded) = SkillAssets::get(file.as_ref()) {
+            let _ = std::fs::write(&path, embedded.data);
+        }
+    }
+
+    // 3. Workflows
+    for file in WorkflowAssets::iter() {
+        let path = dir.join("workflows").join(file.as_ref());
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Some(embedded) = WorkflowAssets::get(file.as_ref()) {
+            let _ = std::fs::write(&path, embedded.data);
+        }
+    }
+
+    dir
+}
+
 #[cfg(test)]
 mod tests {
     use sha2::{Digest, Sha256};
@@ -58,94 +181,4 @@ mod tests {
             "manifest contains no workflow entries"
         );
     }
-}
-
-pub fn assets_dir() -> PathBuf {
-    #[cfg(not(target_arch = "wasm32"))]
-    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("."));
-
-    #[cfg(target_arch = "wasm32")]
-    let base = PathBuf::from(".");
-
-    let dir = base.join("caretta");
-    let _ = std::fs::create_dir_all(&dir);
-    dir
-}
-
-/// Verify that every embedded skill/workflow asset matches its build-time
-/// SHA-256 hash recorded in the bundle manifest.
-///
-/// Only compiled for `--features bundle-runtime` builds. A mismatch aborts
-/// the process with a clear error message; dev builds are unaffected.
-#[cfg(feature = "bundle-runtime")]
-pub fn verify_asset_hashes() {
-    use sha2::{Digest, Sha256};
-
-    for (path, expected_hash) in manifest::ASSET_MANIFEST {
-        let data = if let Some(rest) = path.strip_prefix("skills/") {
-            SkillAssets::get(rest)
-                .unwrap_or_else(|| {
-                    eprintln!("fatal: asset integrity error — missing skill asset '{rest}'");
-                    std::process::exit(1);
-                })
-                .data
-        } else if let Some(rest) = path.strip_prefix("workflows/") {
-            WorkflowAssets::get(rest)
-                .unwrap_or_else(|| {
-                    eprintln!("fatal: asset integrity error — missing workflow asset '{rest}'");
-                    std::process::exit(1);
-                })
-                .data
-        } else {
-            eprintln!("fatal: asset integrity error — unrecognized path prefix: {path}");
-            std::process::exit(1);
-        };
-
-        let actual_hash = format!("{:x}", Sha256::digest(data.as_ref()));
-        if actual_hash != *expected_hash {
-            eprintln!(
-                "fatal: asset integrity check failed\n  asset:    {path}\n  expected: {expected_hash}\n  actual:   {actual_hash}\nThis binary may have been tampered with."
-            );
-            std::process::exit(1);
-        }
-    }
-}
-
-/// Materialize embedded AGENTS.md and skills into the app-data directory.
-/// Existing files are refreshed so the bundled guidance stays in sync with
-/// the current binary.
-/// Returns the app-data root (e.g. `~/.local/share/caretta`).
-pub fn materialize_assets() -> PathBuf {
-    #[cfg(feature = "bundle-runtime")]
-    verify_asset_hashes();
-
-    let dir = assets_dir();
-
-    // 1. AGENTS.md
-    let agents_md = dir.join("AGENTS.md");
-    let _ = std::fs::write(&agents_md, AGENTS_MD.as_bytes());
-
-    // 2. Skills
-    for file in SkillAssets::iter() {
-        let path = dir.join("skills").join(file.as_ref());
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Some(embedded) = SkillAssets::get(file.as_ref()) {
-            let _ = std::fs::write(&path, embedded.data);
-        }
-    }
-
-    // 3. Workflows
-    for file in WorkflowAssets::iter() {
-        let path = dir.join("workflows").join(file.as_ref());
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        if let Some(embedded) = WorkflowAssets::get(file.as_ref()) {
-            let _ = std::fs::write(&path, embedded.data);
-        }
-    }
-
-    dir
 }
