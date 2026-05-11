@@ -60,23 +60,29 @@ pub fn verify_asset_hashes() -> anyhow::Result<()> {
 
     // Pass 1: verify each manifest entry against the embedded asset.
     for (path, expected_hash) in manifest::ASSET_MANIFEST {
-        let data = if let Some(rest) = path.strip_prefix("skills/") {
-            SkillAssets::get(rest)
+        if let Some(rest) = path.strip_prefix("skills/") {
+            let data = SkillAssets::get(rest)
                 .ok_or_else(|| {
                     anyhow::anyhow!("asset integrity error — missing skill asset '{rest}'")
                 })?
-                .data
+                .data;
+            check_hash(path, expected_hash, data.as_ref())?;
         } else if let Some(rest) = path.strip_prefix("workflows/") {
-            WorkflowAssets::get(rest)
+            let data = WorkflowAssets::get(rest)
                 .ok_or_else(|| {
                     anyhow::anyhow!("asset integrity error — missing workflow asset '{rest}'")
                 })?
-                .data
+                .data;
+            check_hash(path, expected_hash, data.as_ref())?;
+        } else if *path == "AGENTS.md" {
+            check_hash(path, expected_hash, AGENTS_MD.as_bytes())?;
+        } else if *path == "labels.yml" {
+            check_hash(path, expected_hash, LABELS_YML.as_bytes())?;
+        } else if *path == "available-models.json" {
+            check_hash(path, expected_hash, AVAILABLE_MODELS_JSON.as_bytes())?;
         } else {
             anyhow::bail!("asset integrity error — unrecognized path prefix: {path}");
-        };
-
-        check_hash(path, expected_hash, data.as_ref())?;
+        }
     }
 
     // Pass 2: ensure every embedded asset has a manifest entry, so that a
@@ -113,9 +119,6 @@ pub fn verify_asset_hashes() -> anyhow::Result<()> {
 /// the current binary.
 /// Returns the app-data root (e.g. `~/.local/share/caretta`).
 pub fn materialize_assets() -> PathBuf {
-    #[cfg(feature = "bundle-runtime")]
-    verify_asset_hashes().unwrap_or_else(|e| panic!("fatal: {e}"));
-
     let dir = assets_dir();
 
     // 1. AGENTS.md

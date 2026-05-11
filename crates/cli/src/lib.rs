@@ -263,6 +263,13 @@ where
             .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
 
+        // Verify embedded asset hashes once at startup, before any command
+        // dispatch, so every code path — including direct asset reads that
+        // bypass materialize_assets — is covered by the integrity check.
+        #[cfg(feature = "bundle-runtime")]
+        agent::assets::verify_asset_hashes()
+            .unwrap_or_else(|e| panic!("caretta: asset integrity: {e}"));
+
         let cli = Cli::parse();
 
         if cli.create_labels {

@@ -81,6 +81,18 @@ fn generate_asset_manifest() {
             .unwrap_or_else(|e| panic!("failed to hash asset files in {prefix}: {e}"));
     }
 
+    // Hash individual assets embedded via include_str! so they are also
+    // covered by the integrity manifest.
+    for file in ["AGENTS.md", "labels.yml", "available-models.json"] {
+        let abs = manifest_dir.join("assets").join(file);
+        println!("cargo::rerun-if-changed={}", abs.display());
+        if abs.is_file() {
+            let hash = sha256_file(&abs)
+                .unwrap_or_else(|e| panic!("failed to hash {file}: {e}"));
+            entries.push((file.to_string(), hash));
+        }
+    }
+
     // Sort for deterministic output regardless of filesystem order.
     entries.sort();
 
