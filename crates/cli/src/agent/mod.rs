@@ -8,6 +8,7 @@ pub mod checkpoint;
 pub mod cli;
 pub mod cmd;
 pub mod config_store;
+pub mod conflicts;
 pub mod interview;
 pub mod issue;
 pub mod launch;

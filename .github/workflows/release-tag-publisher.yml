@@ -138,6 +138,14 @@ jobs:
             fi
           fi
 
+          cargo_version="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          cargo_tag="v${cargo_version}"
+          if [[ "$next_tag" != "$cargo_tag" ]]; then
+            echo "Next tag $next_tag does not match Cargo.toml version $cargo_version." >&2
+            echo "Bump Cargo.toml to ${next_tag#v} before promoting this checkpoint." >&2
+            exit 1
+          fi
+
           message_file="$(mktemp)"
           {
             echo "$next_tag"
@@ -163,6 +171,7 @@ jobs:
             echo "- Checkpoint: #$CHECKPOINT_ISSUE"
             echo "- Latest tag: $latest_tag"
             echo "- Next tag: $next_tag"
+            echo "- Cargo version: $cargo_version"
             echo "- Bump: $BUMP"
             echo "- Reused existing checkpoint tag: $reused_tag"
             echo "- Dry run: $DRY_RUN"

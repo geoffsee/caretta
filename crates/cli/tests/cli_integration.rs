@@ -268,6 +268,11 @@ fn subcommand_help_fix_pr() {
 }
 
 #[test]
+fn subcommand_help_fix_conflicts() {
+    run_ok(&["fix-conflicts", "--help"]);
+}
+
+#[test]
 fn subcommand_help_auto_merge() {
     run_ok(&["auto-merge", "--help"]);
 }

@@ -35,5 +35,8 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: crates/agent-runtime
 
+      - name: Enforce per-file line limit (Rust)
+        run: ./scripts/check-rs-line-limit.sh
+
       - name: cargo test
         run: cargo test --workspace --all-targets --locked
