@@ -38,6 +38,58 @@ fn apply_workflow_path_constraints<'a>(
     }
 }
 
+fn record_workflow_run(
+    cfg: &Config,
+    workflow_phase: &str,
+    captured: Vec<AgentEvent>,
+    started_at: String,
+    finished_at: String,
+    duration_ms: u64,
+) {
+    let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
+        extract_run_data(&captured);
+    let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let policy_violations =
+        crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
+    #[cfg(target_arch = "wasm32")]
+    let policy_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
+
+    if !policy_violations.is_empty() {
+        log(&format!(
+            "Path-constraint policy: {} violation(s) detected for workflow phase '{workflow_phase}'",
+            policy_violations.len()
+        ));
+        for v in &policy_violations {
+            log(&format!(
+                "  POLICY VIOLATION: tool={} path={} reason={}",
+                v.tool, v.path, v.reason
+            ));
+        }
+    }
+    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+    append_run(
+        &AgentRunRecord {
+            agent_id: cfg.agent.to_string(),
+            model: effective_model,
+            workflow_phase: workflow_phase.to_string(),
+            issue_number: None,
+            tracker_number: None,
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            status: run_status,
+            started_at,
+            finished_at,
+            duration_ms,
+            path_constraints: cfg.path_constraints.clone(),
+            policy_violations,
+        },
+        &db_path,
+    );
+}
+
 /// Run the draft phase of any two-phase workflow loaded from YAML.
 pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     use crate::agent::workflow::{
@@ -81,48 +133,7 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
     let run_finished_at = iso8601_now();
     let captured = drain_run_capture();
-    let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
-        extract_run_data(&captured);
-    let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let policy_violations =
-        crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
-    #[cfg(target_arch = "wasm32")]
-    let policy_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
-
-    if !policy_violations.is_empty() {
-        log(&format!(
-            "Path-constraint policy: {} violation(s) detected for workflow '{workflow_id}' draft",
-            policy_violations.len()
-        ));
-        for v in &policy_violations {
-            log(&format!(
-                "  POLICY VIOLATION: tool={} path={} reason={}",
-                v.tool, v.path, v.reason
-            ));
-        }
-    }
-    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
-    append_run(
-        &AgentRunRecord {
-            agent_id: cfg.agent.to_string(),
-            model: effective_model,
-            workflow_phase: format!("{workflow_id}/draft"),
-            issue_number: None,
-            tracker_number: None,
-            tool_calls,
-            input_tokens,
-            output_tokens,
-            status: run_status,
-            started_at: run_started_at,
-            finished_at: run_finished_at,
-            duration_ms: run_duration_ms,
-            path_constraints: cfg.path_constraints.clone(),
-            policy_violations,
-        },
-        &db_path,
-    );
+    record_workflow_run(cfg, &format!("{workflow_id}/draft"), captured, run_started_at, run_finished_at, run_duration_ms);
 
     if stop_requested() {
         log(&format!("Stop requested. {} draft cancelled.", wf.name));
@@ -204,48 +215,7 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
     let run_finished_at = iso8601_now();
     let captured = drain_run_capture();
-    let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
-        extract_run_data(&captured);
-    let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let policy_violations =
-        crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
-    #[cfg(target_arch = "wasm32")]
-    let policy_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
-
-    if !policy_violations.is_empty() {
-        log(&format!(
-            "Path-constraint policy: {} violation(s) detected for workflow '{workflow_id}' finalize",
-            policy_violations.len()
-        ));
-        for v in &policy_violations {
-            log(&format!(
-                "  POLICY VIOLATION: tool={} path={} reason={}",
-                v.tool, v.path, v.reason
-            ));
-        }
-    }
-    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
-    append_run(
-        &AgentRunRecord {
-            agent_id: cfg.agent.to_string(),
-            model: effective_model,
-            workflow_phase: format!("{workflow_id}/finalize"),
-            issue_number: None,
-            tracker_number: None,
-            tool_calls,
-            input_tokens,
-            output_tokens,
-            status: run_status,
-            started_at: run_started_at,
-            finished_at: run_finished_at,
-            duration_ms: run_duration_ms,
-            path_constraints: cfg.path_constraints.clone(),
-            policy_violations,
-        },
-        &db_path,
-    );
+    record_workflow_run(cfg, &format!("{workflow_id}/finalize"), captured, run_started_at, run_finished_at, run_duration_ms);
 
     if stop_requested() {
         log(&format!(

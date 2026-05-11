@@ -155,6 +155,7 @@ fn normalize_path(path: &str) -> String {
                 parts.pop();
             }
             Component::Normal(s) => parts.push(s.to_str().unwrap_or("")),
+            // RootDir and Prefix (Windows drive letters) are intentionally dropped; remaining components are still matched.
             _ => {}
         }
     }
