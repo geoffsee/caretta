@@ -35,16 +35,27 @@ pub fn assets_dir() -> PathBuf {
     dir
 }
 
+/// Compare `data` against `expected` (a hex SHA-256 string). Returns an error
+/// on mismatch so callers can surface a clear diagnostic. Not gated on any
+/// feature so it can be unit-tested unconditionally.
+fn check_hash(path: &str, expected: &str, data: &[u8]) -> anyhow::Result<()> {
+    use sha2::{Digest, Sha256};
+    let actual = format!("{:x}", Sha256::digest(data));
+    anyhow::ensure!(
+        actual == expected,
+        "asset integrity check failed\n  asset:    {path}\n  expected: {expected}\n  actual:   {actual}\nbinary may be corrupted or tampered — obtain a fresh binary from the official release"
+    );
+    Ok(())
+}
+
 /// Verify that every embedded skill/workflow asset matches its build-time
 /// SHA-256 hash recorded in the bundle manifest, and that every embedded
 /// asset has a corresponding manifest entry.
 ///
 /// Only compiled for `--features bundle-runtime` builds. Returns an error
-/// describing the first integrity failure; the caller is responsible for
-/// aborting the process.
+/// describing the first integrity failure; callers should treat `Err` as fatal.
 #[cfg(feature = "bundle-runtime")]
 pub fn verify_asset_hashes() -> anyhow::Result<()> {
-    use sha2::{Digest, Sha256};
     use std::collections::HashSet;
 
     // Pass 1: verify each manifest entry against the embedded asset.
@@ -65,12 +76,7 @@ pub fn verify_asset_hashes() -> anyhow::Result<()> {
             anyhow::bail!("asset integrity error — unrecognized path prefix: {path}");
         };
 
-        let actual_hash = format!("{:x}", Sha256::digest(data.as_ref()));
-        if actual_hash != *expected_hash {
-            anyhow::bail!(
-                "asset integrity check failed\n  asset:    {path}\n  expected: {expected_hash}\n  actual:   {actual_hash}\nbinary may be corrupted or tampered — obtain a fresh binary from the official release"
-            );
-        }
+        check_hash(path, expected_hash, data.as_ref())?;
     }
 
     // Pass 2: ensure every embedded asset has a manifest entry, so that a
@@ -147,6 +153,19 @@ pub fn materialize_assets() -> PathBuf {
 mod tests {
     use sha2::{Digest, Sha256};
     use std::path::Path;
+
+    #[test]
+    fn check_hash_accepts_correct_hash() {
+        let data = b"hello world";
+        let hash = format!("{:x}", Sha256::digest(data));
+        assert!(super::check_hash("test/asset.md", &hash, data).is_ok());
+    }
+
+    #[test]
+    fn check_hash_rejects_wrong_hash() {
+        let err = super::check_hash("test/asset.md", "deadbeef", b"hello world").unwrap_err();
+        assert!(err.to_string().contains("asset integrity check failed"));
+    }
 
     /// Verifies that every build-time hash in the manifest matches the source
     /// file on disk. CI runs `cargo test --workspace` (no `bundle-runtime`),

@@ -4,6 +4,7 @@ resolver = "3"
 
 [workspace.dependencies]
 sha2 = "0.10"
+walkdir = "2"
 
 [workspace.package]
 version = "0.11.2"

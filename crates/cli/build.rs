@@ -66,9 +66,7 @@ fn generate_asset_manifest() {
     let manifest_dir_str = std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let manifest_dir = Path::new(&manifest_dir_str);
 
-    // Coarse guard: re-run when files are added to or removed from these dirs.
-    // Per-file rerun-if-changed lines are emitted inside collect_hashes to
-    // catch in-place edits to existing files.
+    // Re-run when files are added to, removed from, or edited in these dirs.
     println!("cargo::rerun-if-changed=assets/skills");
     println!("cargo::rerun-if-changed=assets/workflows");
 
@@ -103,8 +101,6 @@ fn collect_hashes(dir: &Path, prefix: &str, entries: &mut Vec<(String, String)>)
         if !entry.file_type().is_file() {
             continue;
         }
-        // Per-file watch so Cargo re-runs when an existing asset is edited.
-        println!("cargo::rerun-if-changed={}", entry.path().display());
         let rel = entry
             .path()
             .strip_prefix(dir)
