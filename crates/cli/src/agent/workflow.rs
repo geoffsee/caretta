@@ -8,6 +8,12 @@ use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;
 
+pub const DEFAULT_PRESET_VERSION: &str = "0.1.0";
+/// Sentinel prefix embedded in version-mismatch errors from `resolve_preset`.
+/// Used by callers to distinguish hard version violations from other failures
+/// without matching on free-form English text.
+pub const VERSION_MISMATCH_TAG: &str = "version mismatch:";
+
 // ── YAML config types ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
@@ -86,6 +92,15 @@ pub struct WorkflowEntry {
     pub requires_bot: bool,
 }
 
+/// Top-level manifest for a preset directory (`preset.yaml`).
+#[derive(Debug, Deserialize)]
+pub struct PresetManifest {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub version: String,
+}
+
 fn category_rank(category: &str) -> (u8, &str) {
     match category {
         "discovery" => (0, category),
@@ -161,6 +176,9 @@ fn preset_dir_roots(root: &str) -> Vec<PathBuf> {
     ]
 }
 
+/// Returns preset directories in low-to-high priority order: materialized, bundled, local.
+/// Callers that use last-insert-wins (e.g. `HashMap::insert`) iterate forwards.
+/// Callers that use first-match-wins iterate `.rev()` so local still wins.
 fn preset_dirs(root: &str, preset: &str) -> Vec<PathBuf> {
     vec![
         materialized_workflows_dir().join(preset),
@@ -264,6 +282,112 @@ pub fn load_template(root: &str, preset: &str, workflow_dir: &str, filename: &st
         path.display()
     ));
     String::new()
+}
+
+// ── Preset manifest ──────────────────────────────────────────────────────
+
+/// Load the `preset.yaml` manifest for `preset_name`.
+/// Searches local, bundled, and materialized directories in priority order
+/// (local overrides bundled; bundled overrides materialized).
+/// First-found wins: if the first manifest found has an empty version field,
+/// `DEFAULT_PRESET_VERSION` is applied to that manifest without falling through
+/// to lower-priority directories.
+/// Falls back to `DEFAULT_PRESET_VERSION` and logs a deprecation warning when
+/// no manifest is found at all.
+pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
+    if preset_name.contains('/') || preset_name.contains('\\') || preset_name.contains('.') {
+        log(&format!(
+            "WARNING: unsafe preset name '{preset_name}', defaulting version"
+        ));
+        return PresetManifest {
+            name: String::new(),
+            version: DEFAULT_PRESET_VERSION.to_string(),
+        };
+    }
+    for dir in preset_dirs(root, preset_name).into_iter().rev() {
+        let path = dir.join("preset.yaml");
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            match serde_yaml::from_str::<PresetManifest>(&content) {
+                Ok(m) if !m.version.trim().is_empty() => return m,
+                Ok(m) => {
+                    log(&format!(
+                        "DEPRECATION: preset '{preset_name}' preset.yaml has no version field; defaulting to {DEFAULT_PRESET_VERSION}"
+                    ));
+                    return PresetManifest {
+                        name: m.name,
+                        version: DEFAULT_PRESET_VERSION.to_string(),
+                    };
+                }
+                Err(e) => {
+                    log(&format!(
+                        "ERROR: failed to parse {} (corrupt preset.yaml — falling back to next directory): {e}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+    }
+    log(&format!(
+        "DEPRECATION: preset '{preset_name}' has no preset.yaml; defaulting to version {DEFAULT_PRESET_VERSION}"
+    ));
+    PresetManifest {
+        name: String::new(),
+        version: DEFAULT_PRESET_VERSION.to_string(),
+    }
+}
+
+/// Parse a preset reference into `(name, version_requirement_string)`.
+/// Supports bare `"name"` or `"name@req"` (e.g. `"default@0.1.0"`, `"xp@>=1.0.0"`).
+/// Returns `Err` if the name contains path-traversal characters (`/`, `\`, `.`).
+pub fn parse_preset_ref(preset_ref: &str) -> Result<(String, Option<String>), String> {
+    let (raw_name, req) = match preset_ref.split_once('@') {
+        Some((n, r)) => {
+            let req = r.trim();
+            if req.is_empty() {
+                return Err("Version requirement after '@' must not be empty".to_string());
+            }
+            (n.trim(), Some(req.to_string()))
+        }
+        None => (preset_ref.trim(), None),
+    };
+    if raw_name.is_empty() {
+        return Err("Preset name must not be empty".to_string());
+    }
+    if raw_name.contains('/') || raw_name.contains('\\') || raw_name.contains('.') {
+        return Err(format!(
+            "Invalid preset name '{raw_name}': must not contain path characters"
+        ));
+    }
+    Ok((raw_name.to_string(), req))
+}
+
+/// Resolve a preset reference, returning `(preset_name, resolved_version)`.
+///
+/// When a version requirement is present (e.g. `"default@>=0.1.0"`), the
+/// manifest version is validated against it.  A clear error is returned on
+/// mismatch, showing both the required and found versions.
+pub fn resolve_preset(root: &str, preset_ref: &str) -> Result<(String, String), String> {
+    let (name, req_str) = parse_preset_ref(preset_ref)?;
+    let manifest = load_preset_manifest(root, &name);
+
+    let found = semver::Version::parse(manifest.version.trim()).map_err(|e| {
+        format!(
+            "Preset '{name}' has invalid version '{}': {e}",
+            manifest.version
+        )
+    })?;
+
+    if let Some(req_str) = req_str {
+        let req = semver::VersionReq::parse(&req_str)
+            .map_err(|e| format!("Invalid version requirement '{req_str}': {e}"))?;
+        if !req.matches(&found) {
+            return Err(format!(
+                "Preset '{name}' {VERSION_MISMATCH_TAG} required {req_str}, found {found}"
+            ));
+        }
+    }
+
+    Ok((name, found.to_string()))
 }
 
 // ── Template rendering ───────────────────────────────────────────────────
@@ -661,6 +785,78 @@ context: none
             presets.contains(&"custom".to_string()),
             "project-local preset 'custom' should be included: {presets:?}"
         );
+    }
+
+    #[test]
+    fn parse_preset_ref_bare_name() {
+        let (name, req) = parse_preset_ref("default").unwrap();
+        assert_eq!(name, "default");
+        assert!(req.is_none());
+    }
+
+    #[test]
+    fn parse_preset_ref_with_exact_version() {
+        let (name, req) = parse_preset_ref("default@0.1.0").unwrap();
+        assert_eq!(name, "default");
+        assert_eq!(req.as_deref(), Some("0.1.0"));
+    }
+
+    #[test]
+    fn parse_preset_ref_with_range_requirement() {
+        let (name, req) = parse_preset_ref("xp@>=1.0.0").unwrap();
+        assert_eq!(name, "xp");
+        assert_eq!(req.as_deref(), Some(">=1.0.0"));
+    }
+
+    #[test]
+    fn parse_preset_ref_rejects_path_traversal() {
+        assert!(parse_preset_ref("../../etc/passwd").is_err());
+        assert!(parse_preset_ref("default/evil").is_err());
+        assert!(parse_preset_ref("preset.yaml").is_err());
+    }
+
+    #[test]
+    fn resolve_preset_without_requirement_returns_manifest_version() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let (name, ver) = resolve_preset(root, "default").expect("should resolve");
+        assert_eq!(name, "default");
+        // Version must be a valid semver string.
+        semver::Version::parse(&ver).expect("resolved version should be valid semver");
+    }
+
+    #[test]
+    fn resolve_preset_matching_version_requirement_succeeds() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        // "default@>=0.0.1" should match any real version >= 0.0.1.
+        resolve_preset(root, "default@>=0.0.1").expect(">=0.0.1 should match 0.1.0");
+    }
+
+    #[test]
+    fn resolve_preset_mismatching_version_emits_error() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let err = resolve_preset(root, "default@>=99.0.0").expect_err("99.0.0 should not match");
+        assert!(
+            err.contains("version mismatch"),
+            "error should mention version mismatch: {err}"
+        );
+        assert!(
+            err.contains("99.0.0"),
+            "error should mention required version: {err}"
+        );
+    }
+
+    #[test]
+    fn load_preset_manifest_missing_yaml_defaults_with_warning() {
+        let root = temp_root();
+        let manifest = load_preset_manifest(root.path().to_str().unwrap(), "nonexistent-preset");
+        assert_eq!(manifest.version, DEFAULT_PRESET_VERSION);
+    }
+
+    #[test]
+    fn load_preset_manifest_reads_bundled_yaml() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let manifest = load_preset_manifest(root, "default");
+        assert_eq!(manifest.version, "0.1.0");
     }
 
     #[test]
