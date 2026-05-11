@@ -1,6 +1,6 @@
 use crate::agent::checkpoint::{
-    CheckpointStatus, RunCheckpoint, checkpoint_path, load_checkpoint, new_run_id, save_checkpoint,
-    unix_secs_to_iso8601,
+    CheckpointStatus, RunCheckpoint, checkpoint_path, iso8601_now, load_checkpoint, new_run_id,
+    save_checkpoint,
 };
 use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_stdout, count_tokens, die, has_command, log, origin_default_branch,
@@ -396,13 +396,9 @@ pub fn run_loop(cfg: &Config, tracker_num: u32, resume: Option<&str>, pause_afte
         }
         None => {
             let id = new_run_id();
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
             let cp = RunCheckpoint {
                 run_id: id.clone(),
-                started_at: unix_secs_to_iso8601(now),
+                started_at: iso8601_now(),
                 tracker: tracker_num,
                 completed_phases: Vec::new(),
                 last_completed: None,

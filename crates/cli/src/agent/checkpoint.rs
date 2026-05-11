@@ -69,8 +69,16 @@ pub fn save_checkpoint(root: &str, checkpoint: &RunCheckpoint) -> Result<(), Str
     fs::rename(&tmp, &path).map_err(|e| format!("failed to rename checkpoint: {e}"))
 }
 
-/// Format Unix seconds as a human-readable ISO 8601 UTC string without external crates.
-pub fn unix_secs_to_iso8601(secs: u64) -> String {
+/// Return the current UTC time as an ISO 8601 string.
+pub fn iso8601_now() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    unix_secs_to_iso8601(secs)
+}
+
+fn unix_secs_to_iso8601(secs: u64) -> String {
     let (year, month, day) = days_to_ymd(secs / 86400);
     let rem = secs % 86400;
     let h = rem / 3600;
