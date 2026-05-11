@@ -1,6 +1,9 @@
-use crate::agent::types::{AgentEvent, EVENT_SENDER};
+use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBlock, EVENT_SENDER};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+// 512 B cap per tool-input arg to bound per-run memory growth from large Edit/Write inputs.
+const CAPTURE_MAX_TOOL_INPUT_BYTES: usize = 512;
 
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
 static ACTIVE_CHILD_PID: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
@@ -12,6 +15,11 @@ fn run_event_capture_slot() -> &'static Mutex<Option<Vec<AgentEvent>>> {
 
 /// Begin collecting all emitted events into an in-memory buffer.
 /// Call [`drain_run_capture`] after the agent run to retrieve them.
+///
+/// # Invariant
+/// Only one capture may be active at a time per process — this module uses a
+/// single global slot. Calling `start_run_capture` while a prior capture is
+/// active silently discards the buffered events from the earlier capture.
 pub fn start_run_capture() {
     if let Ok(mut capture) = run_event_capture_slot().lock() {
         *capture = Some(Vec::new());
@@ -64,7 +72,47 @@ pub fn emit_event(ev: AgentEvent) {
     if let Ok(mut capture) = run_event_capture_slot().lock()
         && let Some(events) = capture.as_mut()
     {
-        events.push(ev.clone());
+        match &ev {
+            AgentEvent::Claude(ClaudeEvent::System { .. })
+            | AgentEvent::Claude(ClaudeEvent::Result { .. }) => {
+                events.push(ev.clone());
+            }
+            AgentEvent::Claude(ClaudeEvent::Assistant { message }) => {
+                // Truncate large ToolUse inputs before buffering to bound
+                // per-run memory growth (large Edit/Write inputs can be tens of KB).
+                let content = message
+                    .content
+                    .iter()
+                    .map(|block| {
+                        if let ContentBlock::ToolUse { id, name, input } = block {
+                            let s = input.to_string();
+                            if s.len() > CAPTURE_MAX_TOOL_INPUT_BYTES {
+                                let mut end = CAPTURE_MAX_TOOL_INPUT_BYTES;
+                                while !s.is_char_boundary(end) {
+                                    end -= 1;
+                                }
+                                ContentBlock::ToolUse {
+                                    id: id.clone(),
+                                    name: name.clone(),
+                                    input: serde_json::Value::String(format!(
+                                        "{}…[truncated]",
+                                        &s[..end]
+                                    )),
+                                }
+                            } else {
+                                block.clone()
+                            }
+                        } else {
+                            block.clone()
+                        }
+                    })
+                    .collect();
+                events.push(AgentEvent::Claude(ClaudeEvent::Assistant {
+                    message: AssistantMessage { content },
+                }));
+            }
+            _ => {}
+        }
     }
     if let Some(tx) = EVENT_SENDER.get() {
         let _ = tx.send(ev);

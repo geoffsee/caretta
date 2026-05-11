@@ -6,14 +6,13 @@ use crate::agent::event_log::{
 };
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::{drain_run_capture, start_run_capture, stop_requested};
-use crate::agent::review::run_pr_review_fix;
+use crate::agent::review::run_issue_pr_review_resume;
 use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
 use crate::agent::tracker::{
-    DEFAULT_REVIEW_BOT_LOGIN, build_prompt, build_test_fix_prompt, fetch_issue,
-    fetch_unresolved_review_threads, find_upstream_branch, get_tracker_body,
-    open_pr_number_for_head_branch, parse_pending, pending_issues_execution_order,
-    pr_review_decision,
+    build_prompt, build_test_fix_prompt, fetch_all_unresolved_review_threads, fetch_issue,
+    find_upstream_branch, get_tracker_body, open_pr_number_for_head_branch, parse_pending,
+    pending_issues_execution_order, pr_review_decision,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config, MAX_COMMIT_ATTEMPTS, MAX_PUSH_ATTEMPTS};
 use crate::timed;
@@ -125,7 +124,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     let branch = format!("{BRANCH_PREFIX}{issue_num}");
     if let Some(pr_num) = open_pr_number_for_head_branch(&branch) {
         let decision = pr_review_decision(pr_num).unwrap_or_default();
-        let thread_count = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN).len();
+        let thread_count = fetch_all_unresolved_review_threads(pr_num).len();
         match pr_open_action(&decision, thread_count) {
             PrOpenAction::SkipApproved => {
                 log(&format!(
@@ -135,9 +134,38 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             }
             PrOpenAction::FixComments => {
                 log(&format!(
-                    "Open PR #{pr_num} has {thread_count} unresolved review thread(s) — running fix-comments flow on that branch instead of a full implementation pass."
+                    "Open PR #{pr_num} has {thread_count} unresolved inline review thread(s) — pseudo-resuming fix-comments on that branch (skipping a full implementation pass)."
                 ));
-                run_pr_review_fix(cfg, pr_num);
+                let review_started_at = iso8601_now();
+                let review_wall_clock = Instant::now();
+                start_run_capture();
+                run_issue_pr_review_resume(cfg, pr_num);
+                let review_duration_ms = review_wall_clock.elapsed().as_millis() as u64;
+                let review_finished_at = iso8601_now();
+                let captured = drain_run_capture();
+                let (tool_calls, input_tokens, output_tokens, review_status, event_model) =
+                    extract_run_data(&captured);
+                let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+                let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+                append_run(
+                    &AgentRunRecord {
+                        agent_id: cfg.agent.to_string(),
+                        model: effective_model,
+                        workflow_phase: "review-fix".to_string(),
+                        issue_number: Some(issue_num),
+                        tracker_number: (tracker_num != 0).then_some(tracker_num),
+                        tool_calls,
+                        input_tokens,
+                        output_tokens,
+                        status: review_status,
+                        started_at: review_started_at,
+                        finished_at: review_finished_at,
+                        duration_ms: review_duration_ms,
+                        path_constraints: cfg.path_constraints.clone(),
+                        policy_violations: vec![],
+                    },
+                    &db_path,
+                );
                 return;
             }
             PrOpenAction::SkipDeferToReview => {
@@ -147,7 +175,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     decision.as_str()
                 };
                 log(&format!(
-                    "Open PR #{pr_num} for branch '{branch}' (review decision: {decision_label}) has no unresolved threads — skipping redundant implementation pass for issue #{issue_num}; deferring to code-review and fix-review-comments follow-up."
+                    "Open PR #{pr_num} for branch '{branch}' (review decision: {decision_label}) has no unresolved inline review threads — skipping redundant implementation pass for issue #{issue_num}; deferring to code-review and fix-review-comments follow-up."
                 ));
                 return;
             }
@@ -185,6 +213,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     log(&format!(
         "Launching agent for issue #{issue_num} on branch '{branch}'..."
     ));
+    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     let run_started_at = iso8601_now();
     let run_wall_clock = Instant::now();
     start_run_capture();
@@ -205,6 +234,13 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     let captured = drain_run_capture();
     let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
         extract_run_data(&captured);
+    let final_status = if run_status != "unknown" {
+        run_status
+    } else if agent_ok {
+        "completed".to_string()
+    } else {
+        "failed".to_string()
+    };
     let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
 
     // Check path constraints and log any violations.
@@ -225,8 +261,6 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             ));
         }
     }
-
-    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     append_run(
         &AgentRunRecord {
             agent_id: cfg.agent.to_string(),
@@ -237,7 +271,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             tool_calls,
             input_tokens,
             output_tokens,
-            status: run_status,
+            status: final_status,
             started_at: run_started_at,
             finished_at: run_finished_at,
             duration_ms: run_duration_ms,
@@ -271,7 +305,42 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     "Tests failed for #{issue_num} — invoking agent to fix..."
                 ));
                 let fix_prompt = build_test_fix_prompt(issue_num, &out);
-                run_agent(cfg, &fix_prompt);
+                let fix_started_at = iso8601_now();
+                let fix_wall_clock = Instant::now();
+                start_run_capture();
+                let fix_ok = run_agent(cfg, &fix_prompt);
+                let fix_duration_ms = fix_wall_clock.elapsed().as_millis() as u64;
+                let fix_finished_at = iso8601_now();
+                let fix_captured = drain_run_capture();
+                let (fix_tool_calls, fix_input_tokens, fix_output_tokens, fix_run_status, fix_event_model) =
+                    extract_run_data(&fix_captured);
+                let fix_final_status = if fix_run_status != "unknown" {
+                    fix_run_status
+                } else if fix_ok {
+                    "completed".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                let fix_effective_model = fix_event_model.unwrap_or_else(|| cfg.model.clone());
+                append_run(
+                    &AgentRunRecord {
+                        agent_id: cfg.agent.to_string(),
+                        model: fix_effective_model,
+                        workflow_phase: "test-fix".to_string(),
+                        issue_number: Some(issue_num),
+                        tracker_number: (tracker_num != 0).then_some(tracker_num),
+                        tool_calls: fix_tool_calls,
+                        input_tokens: fix_input_tokens,
+                        output_tokens: fix_output_tokens,
+                        status: fix_final_status,
+                        started_at: fix_started_at,
+                        finished_at: fix_finished_at,
+                        duration_ms: fix_duration_ms,
+                        path_constraints: cfg.path_constraints.clone(),
+                        policy_violations: vec![],
+                    },
+                    &db_path,
+                );
                 if let Some((fmt_program, fmt_args)) = cfg.test.format_command.split_first() {
                     let fmt_arg_refs: Vec<&str> = fmt_args.iter().map(String::as_str).collect();
                     cmd_run(fmt_program, &fmt_arg_refs);
@@ -497,7 +566,7 @@ pub fn run_single_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers
 pub(crate) enum PrOpenAction {
     /// PR is approved; nothing to do.
     SkipApproved,
-    /// Bot-authored review threads are unresolved; run the fix-comments flow.
+    /// Unresolved inline review threads (any author); run the fix-comments flow.
     FixComments,
     /// PR is open but neither approved nor blocked on bot threads; skip the
     /// implementation pass and let the downstream code-review /
@@ -507,7 +576,8 @@ pub(crate) enum PrOpenAction {
 
 /// Decide what `work_on_issue` should do when a PR for the issue's branch is
 /// already open. Pure: takes the GitHub review decision string and the count
-/// of unresolved bot-authored review threads.
+/// of unresolved inline review threads (human and bot; see
+/// [`crate::agent::tracker::fetch_all_unresolved_review_threads`]).
 pub(crate) fn pr_open_action(decision: &str, unresolved_thread_count: usize) -> PrOpenAction {
     if decision.eq_ignore_ascii_case("APPROVED") {
         return PrOpenAction::SkipApproved;
@@ -530,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_bot_threads_trigger_fix_comments() {
+    fn unresolved_threads_trigger_fix_comments() {
         assert_eq!(
             pr_open_action("CHANGES_REQUESTED", 1),
             PrOpenAction::FixComments

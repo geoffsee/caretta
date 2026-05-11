@@ -1,24 +1,25 @@
-/// Append-only SQLite event log for agent runs.
-///
-/// Each invocation of the agent (via `work_on_issue`, `run_pr_review_fix`, etc.)
-/// appends one row capturing the agent identifier, model, workflow phase, tool
-/// calls, token counts, status, and wall-clock timestamps.
-///
-/// # Location resolution (highest priority first)
-/// 1. `CARETTA_EVENT_LOG` environment variable
-/// 2. `event_log_path` field in `caretta.toml`
-/// 3. `~/.local/share/caretta/event_log.db` (platform data-local dir)
-///
-/// # Schema versioning
-/// A `schema_version` table tracks the integer schema version. `migrate()` runs
-/// forward migrations so that future schema additions only need a new `if version < N`
-/// block — existing data is never destructively altered.
+//! Append-only SQLite event log for agent runs.
+//!
+//! Each invocation of the agent (via `work_on_issue`, `run_pr_review_fix`, etc.)
+//! appends one row capturing the agent identifier, model, workflow phase, tool
+//! calls, token counts, status, and wall-clock timestamps.
+//!
+//! # Location resolution (highest priority first)
+//! 1. `CARETTA_EVENT_LOG` environment variable
+//! 2. `event_log_path` field in `caretta.toml`
+//! 3. `~/.local/share/caretta/event_log.db` (platform data-local dir)
+//!
+//! # Schema versioning
+//! A `schema_version` table tracks the integer schema version. `migrate()` runs
+//! forward migrations so that future schema additions only need a new `if version < N`
+//! block — existing data is never destructively altered.
 use crate::agent::types::{AgentEvent, ClaudeEvent, ContentBlock};
+use cli_common::latest_event_model;
 use cli_common::PathConstraints;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 2;
@@ -68,7 +69,7 @@ pub fn resolve_db_path(configured: Option<&str>) -> PathBuf {
     if let Ok(p) = std::env::var("CARETTA_EVENT_LOG")
         && !p.trim().is_empty()
     {
-        return PathBuf::from(p.trim().to_string());
+        return PathBuf::from(p.trim());
     }
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -78,7 +79,7 @@ pub fn resolve_db_path(configured: Option<&str>) -> PathBuf {
 
 // ── Database management ───────────────────────────────────────────────────────
 
-fn open_db(path: &PathBuf) -> rusqlite::Result<Connection> {
+fn open_db(path: &Path) -> rusqlite::Result<Connection> {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
@@ -150,7 +151,7 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 
 /// Append `record` to the SQLite event log at `db_path`.
 /// Logs a warning and returns without panicking on any database error.
-pub fn append_run(record: &AgentRunRecord, db_path: &PathBuf) {
+pub fn append_run(record: &AgentRunRecord, db_path: &Path) {
     let conn = match open_db(db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -224,6 +225,13 @@ pub fn preview_entry(record: &AgentRunRecord) -> String {
 
 /// Distil a sequence of captured [`AgentEvent`]s into the fields needed for an
 /// [`AgentRunRecord`]. Returns `(tool_calls, input_tokens, output_tokens, status, model)`.
+///
+/// `status` defaults to `"unknown"` when no terminal `Result` event is present
+/// (e.g. the agent was killed mid-run). Callers should override with a definitive
+/// value when they have one (see `agent_ok` in `work_on_issue`).
+///
+/// Events in the capture buffer are already truncated by `emit_event` in `process.rs`
+/// before reaching here, so no additional truncation is applied.
 pub fn extract_run_data(
     events: &[AgentEvent],
 ) -> (
@@ -236,16 +244,10 @@ pub fn extract_run_data(
     let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut input_tokens: Option<u32> = None;
     let mut output_tokens: Option<u32> = None;
-    let mut status = "completed".to_string();
-    let mut model: Option<String> = None;
+    let mut status = "unknown".to_string();
 
     for ev in events {
         match ev {
-            AgentEvent::Claude(ClaudeEvent::System { model: Some(m), .. })
-                if !m.trim().is_empty() =>
-            {
-                model = Some(m.clone());
-            }
             AgentEvent::Claude(ClaudeEvent::Assistant { message }) => {
                 for block in &message.content {
                     if let ContentBlock::ToolUse { name, input, .. } = block {
@@ -274,6 +276,7 @@ pub fn extract_run_data(
         }
     }
 
+    let model = latest_event_model(events);
     (tool_calls, input_tokens, output_tokens, status, model)
 }
 
@@ -343,14 +346,18 @@ fn is_leap_year(year: u64) -> bool {
 mod tests {
     use super::{
         AgentRunRecord, PolicyViolation, ToolCallRecord, append_run, extract_run_data,
-        is_leap_year, iso8601_now, preview_entry, resolve_db_path,
+        is_leap_year, iso8601_now, preview_entry, resolve_db_path, unix_secs_to_utc,
     };
     use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBlock};
     use std::path::PathBuf;
 
+    // Serialises env-var mutation tests so concurrent test threads can't race
+    // on the CARETTA_EVENT_LOG process-global.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn resolve_db_path_uses_env_var() {
-        // SAFETY: single-threaded test; no concurrent env reads.
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { std::env::set_var("CARETTA_EVENT_LOG", "/tmp/test_event_log.db") };
         let path = resolve_db_path(None);
         unsafe { std::env::remove_var("CARETTA_EVENT_LOG") };
@@ -359,7 +366,7 @@ mod tests {
 
     #[test]
     fn resolve_db_path_prefers_configured_over_env() {
-        // SAFETY: single-threaded test; no concurrent env reads.
+        let _guard = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         unsafe { std::env::set_var("CARETTA_EVENT_LOG", "/tmp/env_log.db") };
         let path = resolve_db_path(Some("/tmp/config_log.db"));
         unsafe { std::env::remove_var("CARETTA_EVENT_LOG") };
@@ -373,6 +380,16 @@ mod tests {
         assert_eq!(ts.len(), 20);
         assert!(ts.ends_with('Z'));
         assert!(ts.contains('T'));
+    }
+
+    #[test]
+    fn unix_epoch_converts_correctly() {
+        assert_eq!(unix_secs_to_utc(0), (1970, 1, 1, 0, 0, 0));
+    }
+
+    #[test]
+    fn one_day_after_epoch_converts_correctly() {
+        assert_eq!(unix_secs_to_utc(86400), (1970, 1, 2, 0, 0, 0));
     }
 
     #[test]
@@ -487,13 +504,11 @@ mod tests {
             .expect("count query");
         assert_eq!(count, 1);
 
-        let (agent_id, schema_ver): (String, i64) = conn
+        let agent_id: String = conn
             .query_row("SELECT agent_id FROM agent_runs LIMIT 1", [], |row| {
                 row.get(0)
             })
-            .map(|a: String| (a, 0))
-            .unwrap_or_default();
-        let _ = schema_ver;
+            .expect("agent_id query");
         assert_eq!(agent_id, "claude");
     }
 

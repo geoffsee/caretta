@@ -1,6 +1,7 @@
 //! Lineage-aware batch merge for `agent/issue-N` stacked pull requests.
 
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, cmd_stdout_or_die, has_command};
+use crate::agent::conflicts::CONFLICT_RESOLUTION_MARKER;
 use crate::agent::shell::log;
 use crate::agent::tracker::{
     enable_auto_merge, find_tracker, find_upstream_branch, get_tracker_body, is_auto_merge_enabled,
@@ -13,7 +14,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct GhPrMergeRow {
     number: u32,
+    #[serde(rename = "headRefName")]
     head_ref: String,
+    #[serde(rename = "baseRefName")]
     base_ref: String,
     is_draft: bool,
     merge_state_status: Option<String>,
@@ -26,6 +29,18 @@ struct PrStatusRefresh {
     merge_state_status: Option<String>,
     review_decision: Option<String>,
     is_draft: bool,
+}
+
+fn parse_gh_pr_merge_rows(raw: &str) -> Vec<GhPrMergeRow> {
+    match serde_json::from_str(raw) {
+        Ok(rows) => rows,
+        Err(err) => {
+            log(&format!(
+                "auto-merge (lineage): failed to parse `gh pr list` output: {err}"
+            ));
+            Vec::new()
+        }
+    }
 }
 
 fn gh_list_merge_candidate_prs() -> Vec<GhPrMergeRow> {
@@ -43,7 +58,7 @@ fn gh_list_merge_candidate_prs() -> Vec<GhPrMergeRow> {
         ],
         "failed to list open PRs for auto-merge",
     );
-    serde_json::from_str(&out).unwrap_or_default()
+    parse_gh_pr_merge_rows(&out)
 }
 
 fn issue_num_from_agent_head(branch: &str) -> Option<u32> {
@@ -84,6 +99,20 @@ fn merge_order_tracker(pr_by_issue: &HashMap<u32, GhPrMergeRow>, tracker_id: u32
     let body = get_tracker_body(tracker_id);
     let keys: HashSet<u32> = pr_by_issue.keys().copied().collect();
     tracker_merge_candidates_order(&body, &keys)
+}
+
+fn append_missing_topological_order(
+    mut order: Vec<u32>,
+    pr_by_issue: &HashMap<u32, GhPrMergeRow>,
+    trunk: &str,
+) -> Vec<u32> {
+    let mut seen: HashSet<u32> = order.iter().copied().collect();
+    for issue in merge_order_topological(pr_by_issue, trunk) {
+        if seen.insert(issue) {
+            order.push(issue);
+        }
+    }
+    order
 }
 
 pub(crate) fn merge_order_topological(
@@ -203,10 +232,18 @@ fn eligible_for_automerge_queue(row: &GhPrMergeRow) -> bool {
         )
 }
 
+fn is_dirty(row: &GhPrMergeRow) -> bool {
+    matches!(
+        row.merge_state_status.as_deref(),
+        Some(s) if s.eq_ignore_ascii_case("DIRTY")
+    )
+}
+
 #[derive(Clone, Copy, Debug)]
 enum MergePassMode {
     SquashMergeWhenEligible,
     UpdateBranchThenAutomergeQueue,
+    SyncBranchesOnly,
 }
 
 fn pr_update_branch(pr_num: u32, dry_run: bool) -> bool {
@@ -306,6 +343,96 @@ pub fn run_automerge_queue(cfg: &Config, tracker_override: Option<u32>) {
     );
 }
 
+fn build_conflict_resolution_comment_body(
+    issue: u32,
+    row: &GhPrMergeRow,
+    expected_base_branch: &str,
+    reason: &str,
+) -> String {
+    format!(
+        r#"{CONFLICT_RESOLUTION_MARKER}
+@caretta fix: this PR needs branch conflict resolution before it can be reviewed or queued.
+
+Context:
+- Issue: #{issue}
+- PR: #{pr}
+- Head branch: `{head}`
+- Current base: `{base}`
+- Expected base: `{expected_base_branch}`
+- Merge state: `{merge_state}`
+- Sync reason: {reason}
+
+Please merge `{expected_base_branch}` into `{head}`, resolve the conflicts, run the relevant checks, and push the result back to `{head}`."#,
+        pr = row.number,
+        head = row.head_ref.as_str(),
+        base = row.base_ref.as_str(),
+        merge_state = row.merge_state_status.as_deref().unwrap_or("UNKNOWN"),
+    )
+}
+
+fn conflict_marker_already_present(pr_num: u32) -> bool {
+    let num_s = pr_num.to_string();
+    cmd_stdout(
+        "gh",
+        &[
+            "pr",
+            "view",
+            &num_s,
+            "--json",
+            "comments",
+            "--jq",
+            ".comments[].body",
+        ],
+    )
+    .is_some_and(|comments| comments.contains(CONFLICT_RESOLUTION_MARKER))
+}
+
+fn post_conflict_resolution_marker(
+    issue: u32,
+    row: &GhPrMergeRow,
+    expected_base_branch: &str,
+    reason: &str,
+    dry_run: bool,
+) -> bool {
+    let body = build_conflict_resolution_comment_body(issue, row, expected_base_branch, reason);
+    if dry_run {
+        log(&format!(
+            "[dry-run] Would comment on PR #{} with conflict-resolution marker:\n{body}",
+            row.number
+        ));
+        return true;
+    }
+    if conflict_marker_already_present(row.number) {
+        log(&format!(
+            "PR #{} already has a caretta conflict-resolution marker; not commenting again.",
+            row.number
+        ));
+        return true;
+    }
+
+    let num_s = row.number.to_string();
+    let (ok, out) = cmd_capture("gh", &["pr", "comment", &num_s, "--body", &body]);
+    if ok {
+        log(&format!(
+            "Posted caretta conflict-resolution marker on PR #{}.",
+            row.number
+        ));
+    } else {
+        log(&format!(
+            "WARNING: failed to post conflict-resolution marker on PR #{}: {out}",
+            row.number
+        ));
+    }
+    ok
+}
+
+/// Align all open non-draft `agent/issue-*` PR bases, update each branch from
+/// its expected base, and mark conflicted PRs for follow-up. Does not merge,
+/// approve, or enable GitHub auto-merge.
+pub fn run_branch_sync(cfg: &Config, tracker_override: Option<u32>) {
+    run_lineage_pass(cfg, tracker_override, MergePassMode::SyncBranchesOnly);
+}
+
 fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePassMode) {
     if !cfg.dry_run && !has_command("gh") {
         log("auto-merge: `gh` CLI not installed — abort.");
@@ -315,6 +442,7 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
     let pass_label = match mode {
         MergePassMode::SquashMergeWhenEligible => "lineage (immediate squash)",
         MergePassMode::UpdateBranchThenAutomergeQueue => "queue (update-branch + auto-merge)",
+        MergePassMode::SyncBranchesOnly => "sync (update branches)",
     };
     log(&format!("auto-merge ({pass_label}): trunk base '{trunk}'"));
 
@@ -335,7 +463,7 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
                 "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
             ],
         ) {
-            Some(raw) => serde_json::from_str(&raw).unwrap_or_default(),
+            Some(raw) => parse_gh_pr_merge_rows(&raw),
             None => Vec::new(),
         }
     } else {
@@ -350,7 +478,10 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
     }
 
     let hint = tracker_override.or_else(tracker_from_env);
-    let order = resolve_execution_order(&pr_by_issue, &trunk, hint);
+    let mut order = resolve_execution_order(&pr_by_issue, &trunk, hint);
+    if matches!(mode, MergePassMode::SyncBranchesOnly) {
+        order = append_missing_topological_order(order, &pr_by_issue, &trunk);
+    }
 
     let pending_by_issue: HashMap<u32, _> = if let Some(tid) =
         tracker_override.or_else(tracker_from_env).or_else(|| {
@@ -466,11 +597,45 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
             }
         }
 
+        if matches!(mode, MergePassMode::SyncBranchesOnly) {
+            if is_dirty(&row_snapshot) {
+                log(&format!(
+                    "PR #{} (#{issue}) is DIRTY against '{}'; marking for conflict resolution.",
+                    row_snapshot.number, row_snapshot.base_ref,
+                ));
+                post_conflict_resolution_marker(
+                    issue,
+                    &row_snapshot,
+                    &expected_base_branch,
+                    "GitHub reports `mergeStateStatus=DIRTY`.",
+                    cfg.dry_run,
+                );
+                continue;
+            }
+
+            if !pr_update_branch(row_snapshot.number, cfg.dry_run) {
+                post_conflict_resolution_marker(
+                    issue,
+                    &row_snapshot,
+                    &expected_base_branch,
+                    "`gh pr update-branch` failed while syncing this branch.",
+                    cfg.dry_run,
+                );
+                continue;
+            }
+            if !cfg.dry_run {
+                refreshed = gh_list_merge_candidate_prs();
+                by_issue_cursor = agent_issue_pull_rows(&refreshed);
+            }
+            continue;
+        }
+
         let eligible = match mode {
             MergePassMode::SquashMergeWhenEligible => eligible_for_immediate_merge(&row_snapshot),
             MergePassMode::UpdateBranchThenAutomergeQueue => {
                 eligible_for_automerge_queue(&row_snapshot)
             }
+            MergePassMode::SyncBranchesOnly => unreachable!("sync mode handled above"),
         };
         if !eligible {
             log(&format!(
@@ -508,6 +673,7 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
                     }
                 }
             }
+            MergePassMode::SyncBranchesOnly => unreachable!("sync mode handled above"),
         }
 
         if !cfg.dry_run {
@@ -600,5 +766,61 @@ mod tests {
             vec![99],
             "only issues with pulls remain in deterministic slice"
         );
+    }
+
+    #[test]
+    fn gh_pr_list_json_fields_deserialize_into_merge_rows() {
+        let raw = r#"[
+            {
+                "number": 77,
+                "headRefName": "agent/issue-70",
+                "baseRefName": "master",
+                "isDraft": false,
+                "mergeStateStatus": "BEHIND",
+                "reviewDecision": "APPROVED"
+            }
+        ]"#;
+
+        let rows = parse_gh_pr_merge_rows(raw);
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].head_ref, "agent/issue-70");
+        assert_eq!(rows[0].base_ref, "master");
+
+        let matches = agent_issue_pull_rows(&rows);
+        assert!(matches.contains_key(&70));
+    }
+
+    #[test]
+    fn sync_order_appends_open_prs_missing_from_tracker_slice() {
+        let trunk = "main";
+        let mut m = HashMap::new();
+        m.insert(10, fixture_row(1000, 10, trunk));
+        m.insert(11, fixture_row(1001, 11, branch_for_issue(10)));
+
+        let order = append_missing_topological_order(vec![10], &m, trunk);
+
+        assert_eq!(order, vec![10, 11]);
+    }
+
+    #[test]
+    fn conflict_resolution_comment_has_caretta_marker_and_context() {
+        let mut row = fixture_row(77, 70, "master");
+        row.merge_state_status = Some("DIRTY".to_string());
+
+        let body = build_conflict_resolution_comment_body(
+            70,
+            &row,
+            "master",
+            "GitHub reports `mergeStateStatus=DIRTY`.",
+        );
+
+        assert!(body.contains(CONFLICT_RESOLUTION_MARKER));
+        assert!(body.contains("@caretta fix"));
+        assert!(body.contains("Issue: #70"));
+        assert!(body.contains("PR: #77"));
+        assert!(body.contains("Head branch: `agent/issue-70`"));
+        assert!(body.contains("Expected base: `master`"));
+        assert!(body.contains("mergeStateStatus=DIRTY"));
     }
 }

@@ -690,7 +690,7 @@ pub struct Config {
     pub bot_credentials: Option<BotCredentials>,
     pub test: TestCommands,
     /// Override path for the agent event log SQLite database.
-    /// Defaults to the `CARETTA_EVENT_LOG` env var, then `~/.local/share/caretta/event_log.db`.
+    /// When `None`, falls back to the `CARETTA_EVENT_LOG` env var, then the platform data-local dir.
     pub event_log_path: Option<String>,
     /// Path allowlist/denylist enforced for every agent tool call in this run.
     pub path_constraints: PathConstraints,
@@ -878,7 +878,7 @@ pub struct DevConfig {
     #[serde(default, skip_serializing_if = "is_default")]
     pub test: TestCommands,
     /// Override path for the SQLite event log (also: CARETTA_EVENT_LOG env var).
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_log_path: Option<String>,
     /// Path allowlist/denylist for this project. Applied to every agent run.
     #[serde(default, skip_serializing_if = "is_default")]

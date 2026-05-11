@@ -27,11 +27,12 @@ pub mod ui;
 pub use agent::types::{Agent, Config, SkillPaths};
 
 use agent::actions::{ActionContext, lookup_action};
-use agent::auto_merge::{run_auto_merge_stack, run_automerge_queue};
+use agent::auto_merge::{run_auto_merge_stack, run_automerge_queue, run_branch_sync};
 use agent::config_store::{
     clear_bot_private_key_pem, clear_bot_token, clear_local_inference_api_key,
     store_bot_private_key_pem, store_bot_token, store_local_inference_api_key,
 };
+use agent::conflicts::run_pr_conflict_fix;
 use agent::shell::{
     clear_stop_request, list_all_files, parse_args, preflight, record_agent_response, request_stop,
     reset_chat_history, run_chat_send, run_code_review, run_interview_draft, run_interview_respond,
@@ -120,6 +121,12 @@ enum Commands {
         #[arg(value_name = "PR")]
         pr: u32,
     },
+    /// Resolve merge conflicts on a PR branch after a caretta branch-sync marker
+    FixConflicts {
+        /// Pull request number to inspect and update
+        #[arg(value_name = "PR")]
+        pr: u32,
+    },
     /// Approve a PR if all bot-authored review threads are resolved
     /// and the current reviewDecision is CHANGES_REQUESTED.
     ApprovePr {
@@ -134,8 +141,11 @@ enum Commands {
         #[arg(long, value_name = "NUMBER")]
         tracker: Option<u32>,
         /// Merge each approved PR's base into its branch, then enable squash auto-merge (GitHub `--auto`) instead of merging immediately.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "sync_branches")]
         automerge_queue: bool,
+        /// Align bases and update all open non-draft agent/issue-* PR branches without merging.
+        #[arg(long, conflicts_with = "automerge_queue")]
+        sync_branches: bool,
     },
     /// Run ideation draft
     Ideation,
@@ -153,8 +163,12 @@ enum Commands {
     Housekeeping,
     /// Run user interview
     Interview,
-    /// Run code review
-    CodeReview,
+    /// Run code review on every open PR, or a single PR when a number is given
+    CodeReview {
+        /// Pull request number (omit to review all open PRs)
+        #[arg(value_name = "PR")]
+        pr: Option<u32>,
+    },
     /// Run security code review
     SecurityReview,
     /// Refresh agent files
@@ -303,14 +317,20 @@ where
             Some(Commands::FixPr { pr }) => {
                 run_pr_review_fix(&config, pr);
             }
+            Some(Commands::FixConflicts { pr }) => {
+                run_pr_conflict_fix(&config, pr);
+            }
             Some(Commands::ApprovePr { pr }) => {
                 try_approve_pr(&config, pr);
             }
             Some(Commands::AutoMerge {
                 tracker,
                 automerge_queue,
+                sync_branches,
             }) => {
-                if automerge_queue {
+                if sync_branches {
+                    run_branch_sync(&config, tracker);
+                } else if automerge_queue {
                     run_automerge_queue(&config, tracker);
                 } else {
                     run_auto_merge_stack(&config, tracker);
@@ -324,7 +344,7 @@ where
             Some(Commands::Retrospective) => run_workflow_draft(&config, "retrospective"),
             Some(Commands::Housekeeping) => run_workflow_draft(&config, "housekeeping"),
             Some(Commands::Interview) => run_interview_draft(&config),
-            Some(Commands::CodeReview) => run_code_review(&config),
+            Some(Commands::CodeReview { pr }) => run_code_review(&config, pr),
             Some(Commands::SecurityReview) => run_security_code_review(&config),
             Some(Commands::RefreshAgents) => run_refresh_agents(&config),
             Some(Commands::RefreshDocs) => run_refresh_docs(&config),

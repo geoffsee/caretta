@@ -22,7 +22,7 @@ path = "src/main.rs"
 # release / distribution builds that must ship a self-contained binary with
 # the agent runtime archive embedded.
 default = []
-bundle-runtime = ["agent-runtime/bundle-runtime"]
+bundle-runtime = ["agent-runtime/bundle-runtime", "rusqlite/bundled"]
 
 [dependencies]
 agent-common = { path = "../agent-common" }
@@ -59,7 +59,7 @@ keyring = "3"
 dirs = "6"
 axum = "0.7"
 mime_guess = "2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.32" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { version = "0.6", features = ["web"] }

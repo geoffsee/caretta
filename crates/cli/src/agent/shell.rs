@@ -33,7 +33,7 @@ pub fn action_code_review(
     cfg: &Config,
     _ctx: &mut crate::agent::actions::ActionContext,
 ) -> Result<(), String> {
-    run_code_review(cfg);
+    run_code_review(cfg, None);
     Ok(())
 }
 

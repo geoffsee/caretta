@@ -841,6 +841,174 @@ pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<Revi
     parse_review_threads(&out, bot_login)
 }
 
+/// Every unresolved inline review thread on a PR (any author). Used only when
+/// [`crate::agent::issue::work_on_issue`] re-enters an open PR so requested
+/// changes are not missed when the review did not come from the configured bot
+/// login.
+///
+/// Resolved threads and comments without a file path are still omitted (see
+/// [`parse_all_unresolved_review_threads`]).
+pub fn fetch_all_unresolved_review_threads(pr_num: u32) -> Vec<ReviewThread> {
+    let owner_repo = match cmd_stdout(
+        "gh",
+        &[
+            "repo",
+            "view",
+            "--json",
+            "nameWithOwner",
+            "-q",
+            ".nameWithOwner",
+        ],
+    ) {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            log("WARNING: could not resolve owner/repo via `gh repo view`");
+            return Vec::new();
+        }
+    };
+    let (owner, repo) = match owner_repo.split_once('/') {
+        Some((o, r)) => (o.to_string(), r.to_string()),
+        None => {
+            log(&format!(
+                "WARNING: unexpected repo identifier '{owner_repo}'"
+            ));
+            return Vec::new();
+        }
+    };
+
+    let query = r#"
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes {
+              author { login }
+              path
+              line
+              originalLine
+              body
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
+
+    let pr_num_s = pr_num.to_string();
+    let owner_arg = format!("owner={owner}");
+    let repo_arg = format!("repo={repo}");
+    let number_arg = format!("number={pr_num_s}");
+    let query_arg = format!("query={query}");
+
+    let out = match cmd_stdout(
+        "gh",
+        &[
+            "api",
+            "graphql",
+            "-F",
+            &owner_arg,
+            "-F",
+            &repo_arg,
+            "-F",
+            &number_arg,
+            "-f",
+            &query_arg,
+        ],
+    ) {
+        Some(s) => s,
+        None => {
+            log(&format!(
+                "WARNING: failed to fetch review threads for PR #{pr_num}"
+            ));
+            return Vec::new();
+        }
+    };
+
+    parse_all_unresolved_review_threads(&out)
+}
+
+fn parse_all_unresolved_review_threads(json: &str) -> Vec<ReviewThread> {
+    let v: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            log(&format!("WARNING: review-threads JSON parse failed: {e}"));
+            return Vec::new();
+        }
+    };
+    let nodes = v
+        .pointer("/data/repository/pullRequest/reviewThreads/nodes")
+        .and_then(|n| n.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    if nodes.len() == 100 {
+        log("WARNING: fetch_all_unresolved_review_threads: result hit the 100-node page limit — some threads may be missing. Consider adding cursor-based pagination.");
+    }
+
+    let mut out = Vec::new();
+    for thread in nodes {
+        let resolved = thread
+            .get("isResolved")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if resolved {
+            continue;
+        }
+        let id = thread
+            .get("id")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if id.is_empty() {
+            continue;
+        }
+        let comments = thread
+            .pointer("/comments/nodes")
+            .and_then(|n| n.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let Some(c) = comments.first() else {
+            continue;
+        };
+        let author = c
+            .pointer("/author/login")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let body = c
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let path = c
+            .get("path")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        if path.is_empty() {
+            continue;
+        }
+        let line = c
+            .get("line")
+            .and_then(serde_json::Value::as_u64)
+            .or_else(|| c.get("originalLine").and_then(serde_json::Value::as_u64))
+            .unwrap_or(0) as u32;
+        out.push(ReviewThread {
+            id,
+            path,
+            line,
+            body,
+            author,
+        });
+    }
+    out
+}
+
 /// GraphQL mutation that marks one review thread as resolved on a pull
 /// request. Mirrors the mutation in `scripts/resolve-pr-threads.sh` so the
 /// Rust call path stays in lock-step with the prototype shell script.
