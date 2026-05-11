@@ -10,9 +10,9 @@ use crate::agent::review::run_issue_pr_review_resume;
 use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
 use crate::agent::tracker::{
-    build_prompt, build_test_fix_prompt, fetch_all_unresolved_review_threads, fetch_issue,
-    find_upstream_branch, get_tracker_body, open_pr_number_for_head_branch, parse_pending,
-    pending_issues_execution_order, pr_review_decision,
+    ReviewThread, build_prompt, build_test_fix_prompt, fetch_all_unresolved_review_threads,
+    fetch_issue, find_upstream_branch, get_tracker_body, open_pr_number_for_head_branch,
+    parse_pending, pending_issues_execution_order, pr_review_decision,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config, MAX_COMMIT_ATTEMPTS, MAX_PUSH_ATTEMPTS};
 use crate::timed;
@@ -140,7 +140,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     let branch = format!("{BRANCH_PREFIX}{issue_num}");
     if let Some(pr_num) = open_pr_number_for_head_branch(&branch) {
         let decision = pr_review_decision(pr_num).unwrap_or_default();
-        let thread_count = fetch_all_unresolved_review_threads(pr_num).len();
+        let threads: Vec<ReviewThread> = fetch_all_unresolved_review_threads(pr_num);
+        let thread_count = threads.len();
         match pr_open_action(&decision, thread_count) {
             PrOpenAction::SkipApproved => {
                 log(&format!(
@@ -155,7 +156,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                 let review_started_at = iso8601_now();
                 let review_wall_clock = Instant::now();
                 start_run_capture();
-                run_issue_pr_review_resume(cfg, pr_num);
+                run_issue_pr_review_resume(cfg, pr_num, threads);
                 let review_duration_ms = review_wall_clock.elapsed().as_millis() as u64;
                 let review_finished_at = iso8601_now();
                 let captured = drain_run_capture();
