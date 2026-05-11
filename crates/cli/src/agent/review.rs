@@ -150,17 +150,23 @@ fn review_threads_for_fix(pr_num: u32, scope: PrReviewFixThreadScope) -> Vec<Rev
 }
 
 pub fn run_pr_review_fix(cfg: &Config, pr_num: u32) {
-    run_pr_review_fix_scoped(cfg, pr_num, PrReviewFixThreadScope::ActionableBot);
+    run_pr_review_fix_scoped(cfg, pr_num, PrReviewFixThreadScope::ActionableBot, true);
 }
 
 /// Fix-comments path for [`crate::agent::issue::work_on_issue`] when an `agent/issue-*` PR
 /// is already open: same worktree + verification flow as [`run_pr_review_fix`], but threads
-/// are all unresolved inline comments (not restricted to the review bot).
+/// are all unresolved inline comments (not restricted to the review bot). Never submits an
+/// approving review — that remains for the bot `code-review` step.
 pub(crate) fn run_issue_pr_review_resume(cfg: &Config, pr_num: u32) {
-    run_pr_review_fix_scoped(cfg, pr_num, PrReviewFixThreadScope::AllInline);
+    run_pr_review_fix_scoped(cfg, pr_num, PrReviewFixThreadScope::AllInline, false);
 }
 
-fn run_pr_review_fix_scoped(cfg: &Config, pr_num: u32, scope: PrReviewFixThreadScope) {
+fn run_pr_review_fix_scoped(
+    cfg: &Config,
+    pr_num: u32,
+    scope: PrReviewFixThreadScope,
+    try_approve_if_fully_resolved: bool,
+) {
     preflight(cfg);
     log(&format!("Starting Fix Comments run for PR #{pr_num}..."));
 
@@ -284,7 +290,13 @@ fn run_pr_review_fix_scoped(cfg: &Config, pr_num: u32, scope: PrReviewFixThreadS
     ));
 
     if resolved == threads.len() {
-        try_approve_pr(cfg, pr_num);
+        if try_approve_if_fully_resolved {
+            try_approve_pr(cfg, pr_num);
+        } else {
+            log(&format!(
+                "PR #{pr_num}: all targeted threads resolved — leaving approval to the code-review flow (issue runner does not approve its own PR)."
+            ));
+        }
     } else {
         log(&format!(
             "Skipping auto-approve for PR #{pr_num}: {} thread(s) still unresolved.",
