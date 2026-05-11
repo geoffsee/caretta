@@ -13,6 +13,13 @@ set -euo pipefail
 cargo fmt --all
 git add -A
 
+echo "==> Checking per-file Rust line limit..."
+if ! ./scripts/check-rs-line-limit.sh; then
+    echo ""
+    echo "Split the offending file(s) into directory modules."
+    exit 1
+fi
+
 echo "==> Running cargo fmt --check (all crates)..."
 if ! cargo fmt --all -- --check; then
     echo ""

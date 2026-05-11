@@ -5,16 +5,16 @@ use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::{emit_event, stop_requested};
 use crate::agent::run::{run_agent_with_env, run_agent_with_env_in_dir};
 use crate::agent::tracker::{
-    DEFAULT_REVIEW_BOT_LOGIN, build_code_review_prompt, build_pr_review_fix_prompt,
+    DEFAULT_REVIEW_BOT_LOGIN, ReviewThread, build_code_review_prompt, build_pr_review_fix_prompt,
     build_pr_review_verification_prompt, build_review_followup_code_review_prompt,
-    build_security_review_prompt, fetch_unresolved_review_threads, list_open_prs,
-    parse_verification_verdict, pr_body, pr_diff, pr_head_branch, pr_review_decision,
-    resolve_review_thread,
+    build_security_review_prompt, fetch_all_unresolved_review_threads,
+    fetch_unresolved_review_threads, list_open_prs, parse_verification_verdict, pr_body, pr_diff,
+    pr_head_branch, pr_review_decision, resolve_review_thread,
 };
 use crate::agent::types::{AgentEvent, Config};
 use std::path::{Path, PathBuf};
 
-pub fn run_code_review(cfg: &Config) {
+pub fn run_code_review(cfg: &Config, only_pr: Option<u32>) {
     preflight(cfg);
     log("Starting code review...");
 
@@ -36,9 +36,17 @@ pub fn run_code_review(cfg: &Config) {
         .map(|t| vec![("GH_TOKEN".to_string(), t.to_string())])
         .unwrap_or_default();
 
-    let prs = list_open_prs();
+    let mut prs = list_open_prs();
+    if let Some(n) = only_pr {
+        prs.retain(|pr| pr.number == n);
+    }
     if prs.is_empty() {
-        log("No open PRs to review.");
+        let msg = if only_pr.is_some() {
+            "No open pull request matched the requested number for code review."
+        } else {
+            "No open PRs to review."
+        };
+        log(msg);
         emit_event(AgentEvent::Done);
         return;
     }
@@ -121,7 +129,44 @@ impl Drop for WorktreeGuard {
     }
 }
 
+/// Which unresolved threads to load for fix-comments (`run_pr_review_fix` vs
+/// [`run_issue_pr_review_resume`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PrReviewFixThreadScope {
+    /// Bot / `[bot]` / `@caretta fix` marker (same filter as before #146-style tooling).
+    #[default]
+    ActionableBot,
+    /// Every unresolved inline thread on the PR (for tracker `issue` pseudo-resume).
+    AllInline,
+}
+
+fn review_threads_for_fix(pr_num: u32, scope: PrReviewFixThreadScope) -> Vec<ReviewThread> {
+    match scope {
+        PrReviewFixThreadScope::ActionableBot => {
+            fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN)
+        }
+        PrReviewFixThreadScope::AllInline => fetch_all_unresolved_review_threads(pr_num),
+    }
+}
+
 pub fn run_pr_review_fix(cfg: &Config, pr_num: u32) {
+    run_pr_review_fix_scoped(cfg, pr_num, PrReviewFixThreadScope::ActionableBot, true);
+}
+
+/// Fix-comments path for [`crate::agent::issue::work_on_issue`] when an `agent/issue-*` PR
+/// is already open: same worktree + verification flow as [`run_pr_review_fix`], but threads
+/// are all unresolved inline comments (not restricted to the review bot). Never submits an
+/// approving review — that remains for the bot `code-review` step.
+pub(crate) fn run_issue_pr_review_resume(cfg: &Config, pr_num: u32) {
+    run_pr_review_fix_scoped(cfg, pr_num, PrReviewFixThreadScope::AllInline, false);
+}
+
+fn run_pr_review_fix_scoped(
+    cfg: &Config,
+    pr_num: u32,
+    scope: PrReviewFixThreadScope,
+    try_approve_if_fully_resolved: bool,
+) {
     preflight(cfg);
     log(&format!("Starting Fix Comments run for PR #{pr_num}..."));
 
@@ -133,11 +178,15 @@ pub fn run_pr_review_fix(cfg: &Config, pr_num: u32) {
         return;
     }
 
-    let threads = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN);
+    let threads = review_threads_for_fix(pr_num, scope);
     if threads.is_empty() {
-        log(&format!(
-            "No unresolved bot-authored review threads found for PR #{pr_num}."
-        ));
+        let detail = match scope {
+            PrReviewFixThreadScope::ActionableBot => {
+                "No unresolved bot-authored review threads found"
+            }
+            PrReviewFixThreadScope::AllInline => "No unresolved inline review threads found",
+        };
+        log(&format!("{detail} for PR #{pr_num}."));
         emit_event(AgentEvent::Done);
         return;
     }
@@ -241,7 +290,13 @@ pub fn run_pr_review_fix(cfg: &Config, pr_num: u32) {
     ));
 
     if resolved == threads.len() {
-        try_approve_pr(cfg, pr_num);
+        if try_approve_if_fully_resolved {
+            try_approve_pr(cfg, pr_num);
+        } else {
+            log(&format!(
+                "PR #{pr_num}: all targeted threads resolved — leaving approval to the code-review flow (issue runner does not approve its own PR)."
+            ));
+        }
     } else {
         log(&format!(
             "Skipping auto-approve for PR #{pr_num}: {} thread(s) still unresolved.",

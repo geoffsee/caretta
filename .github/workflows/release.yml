@@ -102,8 +102,68 @@ jobs:
             ${{ matrix.artifact }}.tar.gz
             ${{ matrix.artifact }}.zip
 
-  release:
+  publish-crate:
     needs: build
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          expected_tag="v${version}"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "Release tag $RELEASE_TAG does not match Cargo.toml version $version." >&2
+            echo "Update Cargo.toml so the workspace version matches $RELEASE_TAG before publishing." >&2
+            exit 1
+          fi
+
+          user_agent="caretta-release-workflow (https://github.com/geoffsee/caretta)"
+          http_code="$(
+            curl -sS \
+              -A "$user_agent" \
+              -H "Accept: application/json" \
+              -o /tmp/caretta-crate-version.json \
+              -w "%{http_code}" \
+              "https://crates.io/api/v1/crates/caretta/${version}"
+          )"
+          case "$http_code" in
+            200)
+              echo "caretta ${version} is already published on crates.io; skipping."
+              exit 0
+              ;;
+            404)
+              ;;
+            *)
+              echo "Unexpected crates.io API response while checking caretta ${version}: HTTP ${http_code}" >&2
+              cat /tmp/caretta-crate-version.json >&2 || true
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "CARGO_REGISTRY_TOKEN secret is required to publish caretta ${version}." >&2
+            exit 1
+          fi
+
+          ./scripts/stage-crates-io.sh
+          cargo publish --manifest-path publish/caretta/Cargo.toml --no-verify
+
+  release:
+    needs: [build, publish-crate]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

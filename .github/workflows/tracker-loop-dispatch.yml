@@ -72,15 +72,146 @@ jobs:
           CARETTA_MODEL: ${{ inputs.model }}
           GH_TOKEN: ${{ github.token }}
 
-  code-review:
+  # Keep tracker PRs current with their intended stack bases before review.
+  # This runs for every open non-draft agent/issue-* PR in tracker/stack order;
+  # conflicted PRs get a @caretta marker comment for conflict follow-up.
+  sync-branches-before-review:
     needs: [tracker-matrix-plan, tracker-issue]
     if: >-
       !failure() && !cancelled() &&
       (needs.tracker-matrix-plan.outputs.issue-count == '0' ||
        needs.tracker-issue.result == 'success')
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync tracker PR branches
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: auto-merge
+          args: --tracker ${{ inputs.tracker }} --sync-branches
+          preset: software-factory
+          agent: claude
+          auto: "false"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  conflict-resolution-plan-before-review:
+    needs: [sync-branches-before-review]
+    if: ${{ needs.sync-branches-before-review.result == 'success' }}
+    runs-on: ubuntu-latest
     outputs:
-      prs: ${{ steps.open-prs.outputs.prs }}
+      prs: ${{ steps.list.outputs.prs }}
+      pr-count: ${{ steps.list.outputs.pr-count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List dirty tracker PRs
+        id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --state open --limit 100 --json number,headRefName,isDraft,mergeStateStatus \
+            --jq '[.[] | select(.isDraft == false and .mergeStateStatus == "DIRTY" and (.headRefName | test("^agent/issue-[0-9]+$"))) | .number]')"
+          prs="$(printf '%s' "$prs" | jq -c .)"
+          count="$(jq 'length' <<<"$prs")"
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+          echo "pr-count=$count" >> "$GITHUB_OUTPUT"
+
+  fix-conflicts-before-review:
+    needs: [conflict-resolution-plan-before-review]
+    if: >-
+      needs.conflict-resolution-plan-before-review.result == 'success' &&
+      needs.conflict-resolution-plan-before-review.outputs.pr-count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        pr: ${{ fromJson(needs.conflict-resolution-plan-before-review.outputs.prs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve merge conflicts
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: fix-conflicts
+          args: ${{ matrix.pr }}
+          agent: claude
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CARETTA_CONTEXT: ${{ inputs.context }}
+          CARETTA_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
+
+  # Lists open PRs whose head is agent/issue-N for pending tracker children (or every agent/issue-* PR when the pending list is empty).
+  # Requires caretta >= version with `caretta code-review <PR>` for matrix review jobs.
+  code-review-plan:
+    needs:
+      [
+        tracker-matrix-plan,
+        tracker-issue,
+        sync-branches-before-review,
+        fix-conflicts-before-review,
+      ]
+    if: >-
+      always() && !failure() && !cancelled() &&
+      (needs.tracker-matrix-plan.outputs.issue-count == '0' ||
+       needs.tracker-issue.result == 'success') &&
+      needs.sync-branches-before-review.result == 'success' &&
+      (needs.fix-conflicts-before-review.result == 'success' ||
+       needs.fix-conflicts-before-review.result == 'skipped')
+    runs-on: ubuntu-latest
+    outputs:
+      prs: ${{ steps.resolve-prs.outputs.prs }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve tracker-scoped open PRs
+        id: resolve-prs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUES_JSON: ${{ needs.tracker-matrix-plan.outputs.issues }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$(jq 'length' <<< "$ISSUES_JSON")" -eq 0 ]]; then
+            prs_json="$(gh pr list --state open --limit 50 --json number,headRefName,isDraft,mergeStateStatus \
+              --jq '[.[] | select(.isDraft == false and .mergeStateStatus != "DIRTY" and (.headRefName | test("^agent/issue-[0-9]+$"))) | .number]')"
+          else
+            mapfile -t nums < <(jq -r '.[]' <<< "$ISSUES_JSON")
+            found=()
+            for n in "${nums[@]}"; do
+              num="$(gh pr list --head "agent/issue-${n}" --state open --json number,isDraft,mergeStateStatus \
+                -q '.[0] | select(.isDraft == false and .mergeStateStatus != "DIRTY") | .number // empty')"
+              if [[ -n "$num" ]]; then
+                found+=("$num")
+              fi
+            done
+            if [[ ${#found[@]} -eq 0 ]]; then
+              prs_json='[]'
+            else
+              prs_json="$(printf '%s\n' "${found[@]}" | jq -c -R -s 'split("\n") | map(select(length>0)) | unique | map(tonumber)')"
+            fi
+          fi
+          [[ -z "$prs_json" ]] && prs_json='[]'
+          # GITHUB_OUTPUT is line-oriented: pretty-printed JSON would break parsing (e.g. "Invalid format ' 77,'").
+          prs_json="$(printf '%s' "$prs_json" | jq -c .)"
+          echo "prs=$prs_json" >> "$GITHUB_OUTPUT"
+
+  code-review:
+    needs: [code-review-plan]
+    if: >-
+      needs.code-review-plan.result == 'success' &&
+      needs.code-review-plan.outputs.prs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJson(needs.code-review-plan.outputs.prs) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -88,6 +219,7 @@ jobs:
         uses: geoffsee/caretta-action@v0.0.6
         with:
           task: code-review
+          args: ${{ matrix.pr }}
           agent: claude
         env:
           DEV_BOT_TOKEN: ${{ secrets.DEV_BOT_TOKEN }}
@@ -99,26 +231,18 @@ jobs:
           CARETTA_MODEL: ${{ inputs.model }}
           GH_TOKEN: ${{ github.token }}
 
-      - name: List open PRs for follow-up
-        id: open-prs
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          prs="$(gh pr list --state open --limit 50 --json number --jq '[.[].number]')"
-          echo "prs=$prs" >> "$GITHUB_OUTPUT"
-
   fix-review-comments:
-    needs: code-review
-    if: ${{ needs.code-review.result == 'success' && needs.code-review.outputs.prs != '[]' }}
+    needs: [code-review-plan, code-review]
+    if: >-
+      needs.code-review-plan.result == 'success' &&
+      needs.code-review-plan.outputs.prs != '[]' &&
+      needs.code-review.result == 'success'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
-        pr: ${{ fromJson(needs.code-review.outputs.prs) }}
+        pr: ${{ fromJson(needs.code-review-plan.outputs.prs) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -134,16 +258,102 @@ jobs:
           CARETTA_MODEL: ${{ inputs.model }}
           GH_TOKEN: ${{ github.token }}
 
+  # Fix-comment pushes can make stacked children stale again, so sync once more
+  # before deciding whether any approved PRs can enter GitHub auto-merge.
+  sync-branches-after-fix:
+    needs: [code-review-plan, code-review, fix-review-comments]
+    if: >-
+      always() && !cancelled() &&
+      needs.code-review-plan.result == 'success' &&
+      (needs.code-review.result == 'success' || needs.code-review.result == 'skipped') &&
+      (needs.fix-review-comments.result == 'success' ||
+       needs.fix-review-comments.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync tracker PR branches after fixes
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: auto-merge
+          args: --tracker ${{ inputs.tracker }} --sync-branches
+          preset: software-factory
+          agent: claude
+          auto: "false"
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  conflict-resolution-plan-after-fix:
+    needs: [sync-branches-after-fix]
+    if: ${{ needs.sync-branches-after-fix.result == 'success' }}
+    runs-on: ubuntu-latest
+    outputs:
+      prs: ${{ steps.list.outputs.prs }}
+      pr-count: ${{ steps.list.outputs.pr-count }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: List dirty tracker PRs after fixes
+        id: list
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --state open --limit 100 --json number,headRefName,isDraft,mergeStateStatus \
+            --jq '[.[] | select(.isDraft == false and .mergeStateStatus == "DIRTY" and (.headRefName | test("^agent/issue-[0-9]+$"))) | .number]')"
+          prs="$(printf '%s' "$prs" | jq -c .)"
+          count="$(jq 'length' <<<"$prs")"
+          echo "prs=$prs" >> "$GITHUB_OUTPUT"
+          echo "pr-count=$count" >> "$GITHUB_OUTPUT"
+
+  fix-conflicts-after-fix:
+    needs: [conflict-resolution-plan-after-fix]
+    if: >-
+      needs.conflict-resolution-plan-after-fix.result == 'success' &&
+      needs.conflict-resolution-plan-after-fix.outputs.pr-count != '0'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        pr: ${{ fromJson(needs.conflict-resolution-plan-after-fix.outputs.prs) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve merge conflicts after fixes
+        uses: geoffsee/caretta-action@v0.0.6
+        with:
+          task: fix-conflicts
+          args: ${{ matrix.pr }}
+          agent: claude
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          CARETTA_CONTEXT: ${{ inputs.context }}
+          CARETTA_MODEL: ${{ inputs.model }}
+          GH_TOKEN: ${{ github.token }}
+
   # For approved agent/issue-* PRs: merge latest base into each branch, then enable squash auto-merge.
   # Runs after review follow-up so fixes land before the queue step. Requires a caretta build with
   # `caretta auto-merge --automerge-queue`.
   prepare-automerge:
-    needs: [code-review, fix-review-comments]
+    needs:
+      [
+        code-review-plan,
+        code-review,
+        fix-review-comments,
+        sync-branches-after-fix,
+        fix-conflicts-after-fix,
+      ]
     if: >-
       always() && !cancelled() &&
-      needs.code-review.result == 'success' &&
+      needs.code-review-plan.result == 'success' &&
+      (needs.code-review.result == 'success' || needs.code-review.result == 'skipped') &&
       (needs.fix-review-comments.result == 'success' ||
-       needs.fix-review-comments.result == 'skipped')
+       needs.fix-review-comments.result == 'skipped') &&
+      needs.sync-branches-after-fix.result == 'success' &&
+      (needs.fix-conflicts-after-fix.result == 'success' ||
+       needs.fix-conflicts-after-fix.result == 'skipped')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

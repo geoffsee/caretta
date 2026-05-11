@@ -3,14 +3,13 @@ use crate::agent::cmd::{
 };
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::stop_requested;
-use crate::agent::review::run_pr_review_fix;
+use crate::agent::review::run_issue_pr_review_resume;
 use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
 use crate::agent::tracker::{
-    DEFAULT_REVIEW_BOT_LOGIN, build_prompt, build_test_fix_prompt, fetch_issue,
-    fetch_unresolved_review_threads, find_upstream_branch, get_tracker_body,
-    open_pr_number_for_head_branch, parse_pending, pending_issues_execution_order,
-    pr_review_decision,
+    build_prompt, build_test_fix_prompt, fetch_all_unresolved_review_threads, fetch_issue,
+    find_upstream_branch, get_tracker_body, open_pr_number_for_head_branch, parse_pending,
+    pending_issues_execution_order, pr_review_decision,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config, MAX_COMMIT_ATTEMPTS, MAX_PUSH_ATTEMPTS};
 use crate::timed;
@@ -101,7 +100,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     let branch = format!("{BRANCH_PREFIX}{issue_num}");
     if let Some(pr_num) = open_pr_number_for_head_branch(&branch) {
         let decision = pr_review_decision(pr_num).unwrap_or_default();
-        let thread_count = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN).len();
+        let thread_count = fetch_all_unresolved_review_threads(pr_num).len();
         match pr_open_action(&decision, thread_count) {
             PrOpenAction::SkipApproved => {
                 log(&format!(
@@ -111,9 +110,9 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             }
             PrOpenAction::FixComments => {
                 log(&format!(
-                    "Open PR #{pr_num} has {thread_count} unresolved review thread(s) — running fix-comments flow on that branch instead of a full implementation pass."
+                    "Open PR #{pr_num} has {thread_count} unresolved inline review thread(s) — pseudo-resuming fix-comments on that branch (skipping a full implementation pass)."
                 ));
-                run_pr_review_fix(cfg, pr_num);
+                run_issue_pr_review_resume(cfg, pr_num);
                 return;
             }
             PrOpenAction::SkipDeferToReview => {
@@ -123,7 +122,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     decision.as_str()
                 };
                 log(&format!(
-                    "Open PR #{pr_num} for branch '{branch}' (review decision: {decision_label}) has no unresolved threads — skipping redundant implementation pass for issue #{issue_num}; deferring to code-review and fix-review-comments follow-up."
+                    "Open PR #{pr_num} for branch '{branch}' (review decision: {decision_label}) has no unresolved inline review threads — skipping redundant implementation pass for issue #{issue_num}; deferring to code-review and fix-review-comments follow-up."
                 ));
                 return;
             }
@@ -424,7 +423,7 @@ pub fn run_single_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers
 pub(crate) enum PrOpenAction {
     /// PR is approved; nothing to do.
     SkipApproved,
-    /// Bot-authored review threads are unresolved; run the fix-comments flow.
+    /// Unresolved inline review threads (any author); run the fix-comments flow.
     FixComments,
     /// PR is open but neither approved nor blocked on bot threads; skip the
     /// implementation pass and let the downstream code-review /
@@ -434,7 +433,8 @@ pub(crate) enum PrOpenAction {
 
 /// Decide what `work_on_issue` should do when a PR for the issue's branch is
 /// already open. Pure: takes the GitHub review decision string and the count
-/// of unresolved bot-authored review threads.
+/// of unresolved inline review threads (human and bot; see
+/// [`crate::agent::tracker::fetch_all_unresolved_review_threads`]).
 pub(crate) fn pr_open_action(decision: &str, unresolved_thread_count: usize) -> PrOpenAction {
     if decision.eq_ignore_ascii_case("APPROVED") {
         return PrOpenAction::SkipApproved;
@@ -457,7 +457,7 @@ mod tests {
     }
 
     #[test]
-    fn unresolved_bot_threads_trigger_fix_comments() {
+    fn unresolved_threads_trigger_fix_comments() {
         assert_eq!(
             pr_open_action("CHANGES_REQUESTED", 1),
             PrOpenAction::FixComments
