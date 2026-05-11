@@ -876,7 +876,28 @@ pub fn fetch_all_unresolved_review_threads(pr_num: u32) -> Vec<ReviewThread> {
         }
     };
 
-    let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 1) {\n            nodes {\n              author { login }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
+    let query = r#"
+query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes {
+              author { login }
+              path
+              line
+              originalLine
+              body
+            }
+          }
+        }
+      }
+    }
+  }
+}"#;
 
     let pr_num_s = pr_num.to_string();
     let owner_arg = format!("owner={owner}");
@@ -924,6 +945,10 @@ fn parse_all_unresolved_review_threads(json: &str) -> Vec<ReviewThread> {
         .and_then(|n| n.as_array())
         .cloned()
         .unwrap_or_default();
+
+    if nodes.len() == 100 {
+        log("WARNING: fetch_all_unresolved_review_threads: result hit the 100-node page limit — some threads may be missing. Consider adding cursor-based pagination.");
+    }
 
     let mut out = Vec::new();
     for thread in nodes {

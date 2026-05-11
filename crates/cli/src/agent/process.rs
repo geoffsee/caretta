@@ -2,7 +2,7 @@ use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBloc
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
-/// Matches `MAX_TOOL_ARGS_BYTES` in `event_log`; caps buffer growth from large Edit/Write inputs.
+// 512 B cap per tool-input arg to bound per-run memory growth from large Edit/Write inputs.
 const CAPTURE_MAX_TOOL_INPUT_BYTES: usize = 512;
 
 static STOP_REQUESTED: AtomicBool = AtomicBool::new(false);
