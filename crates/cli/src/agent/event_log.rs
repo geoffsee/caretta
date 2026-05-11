@@ -546,6 +546,61 @@ mod tests {
     }
 
     #[test]
+    fn migrate_v1_to_v2_adds_path_columns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("v1_upgrade.db");
+
+        // Manually create a v1-era schema (no path_constraints / policy_violations columns).
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER NOT NULL);
+             INSERT INTO schema_version VALUES (1);
+             CREATE TABLE agent_runs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 agent_id TEXT NOT NULL, model TEXT NOT NULL,
+                 workflow_phase TEXT NOT NULL, issue_number INTEGER,
+                 tracker_number INTEGER, tool_calls TEXT NOT NULL DEFAULT '[]',
+                 input_tokens INTEGER, output_tokens INTEGER,
+                 status TEXT NOT NULL, started_at TEXT NOT NULL,
+                 finished_at TEXT NOT NULL, duration_ms INTEGER
+             );",
+        )
+        .expect("setup v1");
+        drop(conn);
+
+        let record = AgentRunRecord {
+            agent_id: "claude".to_string(),
+            model: "test-model".to_string(),
+            workflow_phase: "issue".to_string(),
+            issue_number: None,
+            tracker_number: None,
+            tool_calls: vec![],
+            input_tokens: None,
+            output_tokens: None,
+            status: "completed".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: "2026-01-01T00:00:01Z".to_string(),
+            duration_ms: 0,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
+        };
+        append_run(&record, &db_path);
+
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |r| r.get(0))
+            .expect("version");
+        assert_eq!(version, 2);
+        let _: String = conn
+            .query_row(
+                "SELECT path_constraints FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("path_constraints column should exist after v1->v2 migration");
+    }
+
+    #[test]
     fn migrate_is_idempotent() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("idempotent.db");

@@ -133,7 +133,14 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
     let run_finished_at = iso8601_now();
     let captured = drain_run_capture();
-    record_workflow_run(cfg, &format!("{workflow_id}/draft"), captured, run_started_at, run_finished_at, run_duration_ms);
+    record_workflow_run(
+        cfg,
+        &format!("{workflow_id}/draft"),
+        captured,
+        run_started_at,
+        run_finished_at,
+        run_duration_ms,
+    );
 
     if stop_requested() {
         log(&format!("Stop requested. {} draft cancelled.", wf.name));
@@ -215,7 +222,14 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
     let run_finished_at = iso8601_now();
     let captured = drain_run_capture();
-    record_workflow_run(cfg, &format!("{workflow_id}/finalize"), captured, run_started_at, run_finished_at, run_duration_ms);
+    record_workflow_run(
+        cfg,
+        &format!("{workflow_id}/finalize"),
+        captured,
+        run_started_at,
+        run_finished_at,
+        run_duration_ms,
+    );
 
     if stop_requested() {
         log(&format!(

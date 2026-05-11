@@ -180,7 +180,10 @@ fn normalize_path(path: &str) -> String {
 fn path_matches(path: &str, prefix: &str) -> bool {
     let norm_prefix = normalize_path(prefix);
     if norm_prefix.is_empty() {
-        return true;
+        // A prefix that normalizes to "" (e.g. ".", "./", "") would match
+        // everything; treat it as non-matching so a degenerate entry cannot
+        // accidentally bypass constraints.
+        return false;
     }
     // Exact match or path is inside the prefix directory.
     path == norm_prefix || path.starts_with(&format!("{norm_prefix}/"))

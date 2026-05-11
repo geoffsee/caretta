@@ -800,8 +800,8 @@ mod tests {
                 deny_paths: vec![],
             },
         );
-        // Non-Claude agents don't support system-prompt append; a tracing::warn
-        // is emitted but the return value is None.
+        // Codex has no base system-prompt to append to, so the function returns None
+        // regardless of path constraints (a tracing::warn is still emitted above).
         assert!(build_appended_system_prompt(&cfg).is_none());
     }
 
