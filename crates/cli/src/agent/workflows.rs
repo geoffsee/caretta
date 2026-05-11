@@ -4,6 +4,7 @@ use crate::agent::event_log::{
 };
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
+// start_run_capture / drain_run_capture are provided by #70 (event-capture infrastructure).
 use crate::agent::process::{drain_run_capture, start_run_capture, stop_requested};
 use crate::agent::run::run_agent;
 use crate::agent::types::{AgentEvent, Config, EVENT_SENDER, Workflow};

@@ -147,6 +147,11 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     extract_run_data(&captured);
                 let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
                 let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+                #[cfg(not(target_arch = "wasm32"))]
+                let review_violations =
+                    crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
+                #[cfg(target_arch = "wasm32")]
+                let review_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
                 append_run(
                     &AgentRunRecord {
                         agent_id: cfg.agent.to_string(),
@@ -162,7 +167,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                         finished_at: review_finished_at,
                         duration_ms: review_duration_ms,
                         path_constraints: cfg.path_constraints.clone(),
-                        policy_violations: vec![],
+                        policy_violations: review_violations,
                     },
                     &db_path,
                 );
@@ -322,6 +327,13 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     "failed".to_string()
                 };
                 let fix_effective_model = fix_event_model.unwrap_or_else(|| cfg.model.clone());
+                #[cfg(not(target_arch = "wasm32"))]
+                let fix_violations = crate::agent::path_constraint::check_run(
+                    &fix_tool_calls,
+                    &cfg.path_constraints,
+                );
+                #[cfg(target_arch = "wasm32")]
+                let fix_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
                 append_run(
                     &AgentRunRecord {
                         agent_id: cfg.agent.to_string(),
@@ -337,7 +349,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                         finished_at: fix_finished_at,
                         duration_ms: fix_duration_ms,
                         path_constraints: cfg.path_constraints.clone(),
-                        policy_violations: vec![],
+                        policy_violations: fix_violations,
                     },
                     &db_path,
                 );
