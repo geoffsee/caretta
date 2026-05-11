@@ -31,6 +31,11 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     });
 
     preflight(cfg);
+    // Soft validation: a version mismatch logs a warning but does not abort.
+    // This is intentional for v0.1 — version pins are advisory, not enforced.
+    // TODO: preset_name/preset_version are not persisted to the event log here;
+    // these workflow phases do not call append_run (follow-up: propagate preset
+    // metadata through the two-phase workflow paths).
     match resolve_preset(&cfg.root, &cfg.workflow_preset) {
         Ok((name, ver)) => log(&format!("Preset resolved: {name} v{ver}")),
         Err(e) => log(&format!("WARNING: {e}")),
@@ -115,6 +120,7 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     });
 
     preflight(cfg);
+    // See run_workflow_draft for notes on soft validation and the event-log gap.
     match resolve_preset(&cfg.root, &cfg.workflow_preset) {
         Ok((name, ver)) => log(&format!("Preset resolved: {name} v{ver}")),
         Err(e) => log(&format!("WARNING: {e}")),

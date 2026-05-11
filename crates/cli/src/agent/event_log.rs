@@ -20,7 +20,7 @@ use serde_json::Value;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -112,14 +112,13 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         )?;
     }
 
-    if version < 2 {
+    if version < 3 {
         conn.execute_batch(
-            "ALTER TABLE agent_runs ADD COLUMN preset_name    TEXT;
-             ALTER TABLE agent_runs ADD COLUMN preset_version TEXT;",
-        )?;
-        conn.execute(
-            "UPDATE schema_version SET version = ?1",
-            params![CURRENT_SCHEMA_VERSION],
+            "BEGIN;
+             ALTER TABLE agent_runs ADD COLUMN preset_name    TEXT;
+             ALTER TABLE agent_runs ADD COLUMN preset_version TEXT;
+             UPDATE schema_version SET version = 3;
+             COMMIT;",
         )?;
     }
 

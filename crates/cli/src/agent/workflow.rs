@@ -89,10 +89,8 @@ pub struct WorkflowEntry {
 }
 
 /// Top-level manifest for a preset directory (`preset.yaml`).
-/// Carries the preset's human-readable name and semver version.
 #[derive(Debug, Deserialize)]
 pub struct PresetManifest {
-    pub name: String,
     #[serde(default)]
     pub version: String,
 }
@@ -284,8 +282,12 @@ pub fn load_template(root: &str, preset: &str, workflow_dir: &str, filename: &st
 /// Falls back to `DEFAULT_PRESET_VERSION` and logs a deprecation warning when
 /// no manifest is found or the version field is absent.
 pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
-    for dir in preset_dirs(root, preset_name) {
-        let path = dir.join("preset.yaml");
+    for base in [
+        local_workflows_dir(root),
+        bundled_workflows_dir(root),
+        materialized_workflows_dir(),
+    ] {
+        let path = base.join(preset_name).join("preset.yaml");
         if let Ok(content) = std::fs::read_to_string(&path) {
             match serde_yaml::from_str::<PresetManifest>(&content) {
                 Ok(m) if !m.version.trim().is_empty() => return m,
@@ -293,10 +295,7 @@ pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
                     log(&format!(
                         "DEPRECATION: preset '{preset_name}' preset.yaml has no version field; defaulting to {DEFAULT_PRESET_VERSION}"
                     ));
-                    return PresetManifest {
-                        name: preset_name.to_string(),
-                        version: DEFAULT_PRESET_VERSION.to_string(),
-                    };
+                    // Continue searching lower-priority dirs for a versioned manifest.
                 }
                 Err(e) => {
                     log(&format!("WARNING: failed to parse {}: {e}", path.display()));
@@ -308,18 +307,24 @@ pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
         "DEPRECATION: preset '{preset_name}' has no preset.yaml; defaulting to version {DEFAULT_PRESET_VERSION}"
     ));
     PresetManifest {
-        name: preset_name.to_string(),
         version: DEFAULT_PRESET_VERSION.to_string(),
     }
 }
 
 /// Parse a preset reference into `(name, version_requirement_string)`.
 /// Supports bare `"name"` or `"name@req"` (e.g. `"default@0.1.0"`, `"xp@>=1.0.0"`).
-pub fn parse_preset_ref(preset_ref: &str) -> (String, Option<String>) {
-    match preset_ref.split_once('@') {
-        Some((name, req)) => (name.trim().to_string(), Some(req.trim().to_string())),
-        None => (preset_ref.trim().to_string(), None),
+/// Returns `Err` if the name contains path-traversal characters (`/`, `\`, `.`).
+pub fn parse_preset_ref(preset_ref: &str) -> Result<(String, Option<String>), String> {
+    let (raw_name, req) = match preset_ref.split_once('@') {
+        Some((n, r)) => (n.trim(), Some(r.trim().to_string())),
+        None => (preset_ref.trim(), None),
+    };
+    if raw_name.contains('/') || raw_name.contains('\\') || raw_name.contains('.') {
+        return Err(format!(
+            "Invalid preset name '{raw_name}': must not contain path characters"
+        ));
     }
+    Ok((raw_name.to_string(), req))
 }
 
 /// Resolve a preset reference, returning `(preset_name, resolved_version)`.
@@ -328,7 +333,7 @@ pub fn parse_preset_ref(preset_ref: &str) -> (String, Option<String>) {
 /// manifest version is validated against it.  A clear error is returned on
 /// mismatch, showing both the required and found versions.
 pub fn resolve_preset(root: &str, preset_ref: &str) -> Result<(String, String), String> {
-    let (name, req_str) = parse_preset_ref(preset_ref);
+    let (name, req_str) = parse_preset_ref(preset_ref)?;
     let manifest = load_preset_manifest(root, &name);
 
     let found = semver::Version::parse(manifest.version.trim()).map_err(|e| {
@@ -750,23 +755,30 @@ context: none
 
     #[test]
     fn parse_preset_ref_bare_name() {
-        let (name, req) = parse_preset_ref("default");
+        let (name, req) = parse_preset_ref("default").unwrap();
         assert_eq!(name, "default");
         assert!(req.is_none());
     }
 
     #[test]
     fn parse_preset_ref_with_exact_version() {
-        let (name, req) = parse_preset_ref("default@0.1.0");
+        let (name, req) = parse_preset_ref("default@0.1.0").unwrap();
         assert_eq!(name, "default");
         assert_eq!(req.as_deref(), Some("0.1.0"));
     }
 
     #[test]
     fn parse_preset_ref_with_range_requirement() {
-        let (name, req) = parse_preset_ref("xp@>=1.0.0");
+        let (name, req) = parse_preset_ref("xp@>=1.0.0").unwrap();
         assert_eq!(name, "xp");
         assert_eq!(req.as_deref(), Some(">=1.0.0"));
+    }
+
+    #[test]
+    fn parse_preset_ref_rejects_path_traversal() {
+        assert!(parse_preset_ref("../../etc/passwd").is_err());
+        assert!(parse_preset_ref("default/evil").is_err());
+        assert!(parse_preset_ref("preset.yaml").is_err());
     }
 
     #[test]
@@ -811,7 +823,6 @@ context: none
         let root = env!("CARGO_MANIFEST_DIR");
         let manifest = load_preset_manifest(root, "default");
         assert_eq!(manifest.version, "0.1.0");
-        assert!(!manifest.name.is_empty());
     }
 
     #[test]

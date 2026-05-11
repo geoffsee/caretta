@@ -77,7 +77,9 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             Ok((name, ver)) => (Some(name), Some(ver)),
             Err(e) => {
                 log(&format!("WARNING: preset resolution failed: {e}"));
-                (Some(cfg.workflow_preset.clone()), None)
+                let (name, _) = crate::agent::workflow::parse_preset_ref(&cfg.workflow_preset)
+                    .unwrap_or_else(|_| (cfg.workflow_preset.clone(), None));
+                (Some(name), None)
             }
         }
     };
