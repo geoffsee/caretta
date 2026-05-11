@@ -282,8 +282,11 @@ pub fn load_template(root: &str, preset: &str, workflow_dir: &str, filename: &st
 /// Load the `preset.yaml` manifest for `preset_name`.
 /// Searches local, bundled, and materialized directories in priority order
 /// (local overrides bundled; bundled overrides materialized).
+/// First-found wins: if the first manifest found has an empty version field,
+/// `DEFAULT_PRESET_VERSION` is applied to that manifest without falling through
+/// to lower-priority directories.
 /// Falls back to `DEFAULT_PRESET_VERSION` and logs a deprecation warning when
-/// no manifest is found or the version field is absent.
+/// no manifest is found at all.
 pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
     if preset_name.contains('/') || preset_name.contains('\\') || preset_name.contains('.') {
         log(&format!(
@@ -303,11 +306,14 @@ pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
         if let Ok(content) = std::fs::read_to_string(&path) {
             match serde_yaml::from_str::<PresetManifest>(&content) {
                 Ok(m) if !m.version.trim().is_empty() => return m,
-                Ok(_) => {
+                Ok(m) => {
                     log(&format!(
                         "DEPRECATION: preset '{preset_name}' preset.yaml has no version field; defaulting to {DEFAULT_PRESET_VERSION}"
                     ));
-                    // Continue searching lower-priority dirs for a versioned manifest.
+                    return PresetManifest {
+                        name: m.name,
+                        version: DEFAULT_PRESET_VERSION.to_string(),
+                    };
                 }
                 Err(e) => {
                     log(&format!("WARNING: failed to parse {}: {e}", path.display()));
