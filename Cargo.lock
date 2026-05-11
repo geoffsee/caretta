@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-common"
-version = "0.11.6"
+version = "0.11.7"
 
 [[package]]
 name = "aho-corasick"
@@ -422,7 +422,7 @@ dependencies = [
 
 [[package]]
 name = "caretta"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
  "anyhow",
@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "caretta-agent-runtime"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
  "caretta-claude",
@@ -485,56 +485,56 @@ dependencies = [
 
 [[package]]
 name = "caretta-claude"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-cline"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-codex"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-copilot"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-gemini"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-grok"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-junie"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
 
 [[package]]
 name = "caretta-xai"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]
@@ -670,7 +670,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cli-common"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
  "anyhow",
@@ -1619,7 +1619,7 @@ dependencies = [
 
 [[package]]
 name = "dummy-agent"
-version = "0.11.6"
+version = "0.11.7"
 dependencies = [
  "agent-common",
 ]

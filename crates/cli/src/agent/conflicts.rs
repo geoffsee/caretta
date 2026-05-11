@@ -5,6 +5,7 @@ use crate::agent::run::run_agent_with_env_in_dir;
 use crate::agent::tracker::{list_open_prs, pr_diff};
 use crate::agent::types::{AgentEvent, Config};
 use crate::agent::{launch::log_resolved_agent_launch, process::emit_event};
+use std::fs;
 use std::path::Path;
 
 pub const CONFLICT_RESOLUTION_MARKER: &str = "<!-- caretta:branch-sync-conflict -->";
@@ -169,6 +170,33 @@ fn unresolved_merge_paths(worktree: &Path) -> Vec<String> {
     .collect()
 }
 
+fn has_conflict_marker_line(path: &Path) -> bool {
+    let Ok(bytes) = fs::read(path) else {
+        return false;
+    };
+    String::from_utf8_lossy(&bytes).lines().any(|line| {
+        line.starts_with("<<<<<<<") || line.starts_with("=======") || line.starts_with(">>>>>>>")
+    })
+}
+
+fn paths_with_conflict_markers(worktree: &Path, paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|path| has_conflict_marker_line(&worktree.join(path)))
+        .cloned()
+        .collect()
+}
+
+fn stage_resolved_merge_paths(worktree: &Path, paths: &[String]) -> bool {
+    let worktree_str = worktree.to_string_lossy().to_string();
+    paths.iter().all(|path| {
+        cmd_run(
+            "git",
+            &["-C", &worktree_str, "add", "-A", "--", path.as_str()],
+        )
+    })
+}
+
 fn worktree_status(worktree: &Path) -> String {
     let worktree_str = worktree.to_string_lossy().to_string();
     cmd_stdout("git", &["-C", &worktree_str, "status", "--porcelain"]).unwrap_or_default()
@@ -330,13 +358,37 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
     }
 
     let unresolved = unresolved_merge_paths(&worktree_path);
-    if !unresolved.is_empty() {
+    let still_marked = paths_with_conflict_markers(&worktree_path, &unresolved);
+    if !still_marked.is_empty() {
         log(&format!(
-            "Conflict-resolution run left unresolved merge path(s) for PR #{pr_num}: {}",
-            unresolved.join(", ")
+            "Conflict-resolution run left conflict marker(s) in PR #{pr_num}: {}",
+            still_marked.join(", ")
         ));
         emit_event(AgentEvent::Done);
         return;
+    }
+    if !unresolved.is_empty() {
+        log(&format!(
+            "Staging resolved merge path(s) for PR #{pr_num}: {}",
+            unresolved.join(", ")
+        ));
+        if !stage_resolved_merge_paths(&worktree_path, &unresolved) {
+            log(&format!(
+                "Failed to stage resolved merge path(s) for PR #{pr_num}."
+            ));
+            emit_event(AgentEvent::Done);
+            return;
+        }
+
+        let unresolved = unresolved_merge_paths(&worktree_path);
+        if !unresolved.is_empty() {
+            log(&format!(
+                "Conflict-resolution run left unresolved merge path(s) for PR #{pr_num}: {}",
+                unresolved.join(", ")
+            ));
+            emit_event(AgentEvent::Done);
+            return;
+        }
     }
 
     if worktree_status(&worktree_path).trim().is_empty() {
@@ -388,6 +440,18 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::{Command, Stdio};
+
+    fn git(root: &Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .expect("git command should run")
+            .success()
+    }
 
     #[test]
     fn parses_conflict_marker_context() {
@@ -442,5 +506,77 @@ Context:
         assert!(prompt.contains("agent/issue-70"));
         assert!(prompt.contains("git status"));
         assert!(prompt.contains("Do NOT run `git checkout`"));
+    }
+
+    #[test]
+    fn conflict_marker_detection_finds_git_marker_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("conflicted.rs");
+        std::fs::write(
+            &file,
+            "fn main() {}\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n",
+        )
+        .expect("write fixture");
+
+        assert!(has_conflict_marker_line(&file));
+    }
+
+    #[test]
+    fn conflict_marker_detection_ignores_inline_text() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let file = dir.path().join("resolved.rs");
+        std::fs::write(
+            &file,
+            "let comparison = \"a >>>>>>> b\";\nlet divider = \"=======\";\n",
+        )
+        .expect("write fixture");
+
+        assert!(!has_conflict_marker_line(&file));
+    }
+
+    #[test]
+    fn paths_with_conflict_markers_filters_clean_paths() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir_all(dir.path().join("src")).expect("create src");
+        std::fs::write(dir.path().join("src/a.rs"), "<<<<<<< HEAD\n").expect("write conflict");
+        std::fs::write(dir.path().join("src/b.rs"), "resolved\n").expect("write clean");
+        let paths = vec!["src/a.rs".to_string(), "src/b.rs".to_string()];
+
+        assert_eq!(
+            paths_with_conflict_markers(dir.path(), &paths),
+            vec!["src/a.rs".to_string()]
+        );
+    }
+
+    #[test]
+    fn stage_resolved_merge_paths_clears_unmerged_index_entries() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        assert!(git(root, &["init"]));
+        assert!(git(root, &["branch", "-M", "main"]));
+        assert!(git(root, &["config", "user.email", "test@example.com"]));
+        assert!(git(root, &["config", "user.name", "Test"]));
+        assert!(git(root, &["config", "commit.gpgsign", "false"]));
+
+        std::fs::write(root.join("file.txt"), "base\n").expect("write base");
+        assert!(git(root, &["add", "file.txt"]));
+        assert!(git(root, &["commit", "-m", "base"]));
+
+        assert!(git(root, &["checkout", "-b", "feature"]));
+        std::fs::write(root.join("file.txt"), "feature\n").expect("write feature");
+        assert!(git(root, &["commit", "-am", "feature"]));
+
+        assert!(git(root, &["checkout", "main"]));
+        std::fs::write(root.join("file.txt"), "main\n").expect("write main");
+        assert!(git(root, &["commit", "-am", "main"]));
+        assert!(!git(root, &["merge", "--no-ff", "--no-commit", "feature"]));
+
+        std::fs::write(root.join("file.txt"), "resolved\n").expect("write resolved");
+        let unresolved = unresolved_merge_paths(root);
+        assert_eq!(unresolved, vec!["file.txt".to_string()]);
+        assert!(paths_with_conflict_markers(root, &unresolved).is_empty());
+
+        assert!(stage_resolved_merge_paths(root, &unresolved));
+        assert!(unresolved_merge_paths(root).is_empty());
     }
 }
