@@ -403,8 +403,10 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
         "resolve merge conflicts for PR #{pr_num}\n\n{}",
         cfg.agent.co_author()
     );
-    let committed = cmd_run("git", &["-C", &worktree_str, "add", "."])
-        && cmd_run("git", &["-C", &worktree_str, "commit", "-m", &message]);
+    for path in &unresolved {
+        cmd_run("git", &["-C", &worktree_str, "add", "--", path]);
+    }
+    let committed = cmd_run("git", &["-C", &worktree_str, "commit", "-m", &message]);
     if !committed {
         log(&format!(
             "Failed to commit conflict-resolution changes for PR #{pr_num}."
