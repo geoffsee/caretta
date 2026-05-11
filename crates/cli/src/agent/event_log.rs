@@ -23,10 +23,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 1;
 
-/// Maximum byte length stored for a single tool-call `args` field.
-/// Inputs exceeding this limit are replaced with a truncated string to bound
-/// DB row size against large content such as file bodies passed to tool calls.
-const MAX_TOOL_ARGS_BYTES: usize = 512;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -89,8 +85,8 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         })
         .unwrap_or(0);
 
-    if version < 1 {
-        conn.execute_batch(
+    if version < CURRENT_SCHEMA_VERSION {
+        conn.execute_batch(&format!(
             "BEGIN;
             CREATE TABLE IF NOT EXISTS agent_runs (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,9 +104,9 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
                 duration_ms     INTEGER
             );
             DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (1);
-            COMMIT;",
-        )?;
+            INSERT INTO schema_version (version) VALUES ({CURRENT_SCHEMA_VERSION});
+            COMMIT;"
+        ))?;
     }
 
     Ok(())
@@ -190,8 +186,8 @@ pub fn preview_entry(record: &AgentRunRecord) -> String {
 /// (e.g. the agent was killed mid-run). Callers should override with a definitive
 /// value when they have one (see `agent_ok` in `work_on_issue`).
 ///
-/// Tool-call `args` are capped at [`MAX_TOOL_ARGS_BYTES`] bytes to bound DB growth
-/// and avoid persisting sensitive content verbatim.
+/// Events in the capture buffer are already truncated by `emit_event` in `process.rs`
+/// before reaching here, so no additional truncation is applied.
 pub fn extract_run_data(
     events: &[AgentEvent],
 ) -> (
@@ -211,20 +207,9 @@ pub fn extract_run_data(
             AgentEvent::Claude(ClaudeEvent::Assistant { message }) => {
                 for block in &message.content {
                     if let ContentBlock::ToolUse { name, input, .. } = block {
-                        let args_str = input.to_string();
-                        let args = if args_str.len() > MAX_TOOL_ARGS_BYTES {
-                            // find a safe char boundary at or before the limit
-                            let mut end = MAX_TOOL_ARGS_BYTES;
-                            while !args_str.is_char_boundary(end) {
-                                end -= 1;
-                            }
-                            Value::String(format!("{}…[truncated]", &args_str[..end]))
-                        } else {
-                            input.clone()
-                        };
                         tool_calls.push(ToolCallRecord {
                             name: name.clone(),
-                            args,
+                            args: input.clone(),
                         });
                     }
                 }

@@ -210,6 +210,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     log(&format!(
         "Launching agent for issue #{issue_num} on branch '{branch}'..."
     ));
+    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     let run_started_at = iso8601_now();
     let run_wall_clock = Instant::now();
     start_run_capture();
@@ -238,7 +239,6 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
         "failed".to_string()
     };
     let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
-    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     append_run(
         &AgentRunRecord {
             agent_id: cfg.agent.to_string(),
@@ -298,7 +298,6 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     "failed".to_string()
                 };
                 let fix_effective_model = fix_event_model.unwrap_or_else(|| cfg.model.clone());
-                let fix_db_path = resolve_db_path(cfg.event_log_path.as_deref());
                 append_run(
                     &AgentRunRecord {
                         agent_id: cfg.agent.to_string(),
@@ -314,7 +313,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                         finished_at: fix_finished_at,
                         duration_ms: fix_duration_ms,
                     },
-                    &fix_db_path,
+                    &db_path,
                 );
                 if let Some((fmt_program, fmt_args)) = cfg.test.format_command.split_first() {
                     let fmt_arg_refs: Vec<&str> = fmt_args.iter().map(String::as_str).collect();
