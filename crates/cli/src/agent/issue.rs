@@ -135,7 +135,34 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                 log(&format!(
                     "Open PR #{pr_num} has {thread_count} unresolved review thread(s) — running fix-comments flow on that branch instead of a full implementation pass."
                 ));
+                let review_started_at = iso8601_now();
+                let review_wall_clock = Instant::now();
+                start_run_capture();
                 run_pr_review_fix(cfg, pr_num);
+                let review_duration_ms = review_wall_clock.elapsed().as_millis() as u64;
+                let review_finished_at = iso8601_now();
+                let captured = drain_run_capture();
+                let (tool_calls, input_tokens, output_tokens, review_status, event_model) =
+                    extract_run_data(&captured);
+                let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+                let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+                append_run(
+                    &AgentRunRecord {
+                        agent_id: cfg.agent.to_string(),
+                        model: effective_model,
+                        workflow_phase: "review-fix".to_string(),
+                        issue_number: Some(issue_num),
+                        tracker_number: (tracker_num != 0).then_some(tracker_num),
+                        tool_calls,
+                        input_tokens,
+                        output_tokens,
+                        status: review_status,
+                        started_at: review_started_at,
+                        finished_at: review_finished_at,
+                        duration_ms: review_duration_ms,
+                    },
+                    &db_path,
+                );
                 return;
             }
             PrOpenAction::SkipDeferToReview => {
@@ -203,6 +230,13 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     let captured = drain_run_capture();
     let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
         extract_run_data(&captured);
+    let final_status = if run_status != "unknown" {
+        run_status
+    } else if agent_ok {
+        "completed".to_string()
+    } else {
+        "failed".to_string()
+    };
     let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
     let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     append_run(
@@ -215,7 +249,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             tool_calls,
             input_tokens,
             output_tokens,
-            status: run_status,
+            status: final_status,
             started_at: run_started_at,
             finished_at: run_finished_at,
             duration_ms: run_duration_ms,

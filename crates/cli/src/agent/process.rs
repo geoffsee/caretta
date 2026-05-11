@@ -1,4 +1,4 @@
-use crate::agent::types::{AgentEvent, EVENT_SENDER};
+use crate::agent::types::{AgentEvent, ClaudeEvent, EVENT_SENDER};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -12,6 +12,11 @@ fn run_event_capture_slot() -> &'static Mutex<Option<Vec<AgentEvent>>> {
 
 /// Begin collecting all emitted events into an in-memory buffer.
 /// Call [`drain_run_capture`] after the agent run to retrieve them.
+///
+/// # Invariant
+/// Only one capture may be active at a time per process — this module uses a
+/// single global slot. Calling `start_run_capture` while a prior capture is
+/// active silently discards the buffered events from the earlier capture.
 pub fn start_run_capture() {
     if let Ok(mut capture) = run_event_capture_slot().lock() {
         *capture = Some(Vec::new());
@@ -63,6 +68,12 @@ pub fn request_stop() {
 pub fn emit_event(ev: AgentEvent) {
     if let Ok(mut capture) = run_event_capture_slot().lock()
         && let Some(events) = capture.as_mut()
+        && matches!(
+            &ev,
+            AgentEvent::Claude(ClaudeEvent::System { .. })
+                | AgentEvent::Claude(ClaudeEvent::Assistant { .. })
+                | AgentEvent::Claude(ClaudeEvent::Result { .. })
+        )
     {
         events.push(ev.clone());
     }
