@@ -1,3 +1,4 @@
+use crate::agent::cmd::log;
 use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBlock, EVENT_SENDER};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -19,9 +20,12 @@ fn run_event_capture_slot() -> &'static Mutex<Option<Vec<AgentEvent>>> {
 /// # Invariant
 /// Only one capture may be active at a time per process — this module uses a
 /// single global slot. Calling `start_run_capture` while a prior capture is
-/// active silently discards the buffered events from the earlier capture.
+/// active logs a warning and discards the buffered events from the earlier capture.
 pub fn start_run_capture() {
     if let Ok(mut capture) = run_event_capture_slot().lock() {
+        if capture.is_some() {
+            log("[event_log] start_run_capture called while capture already active; prior events discarded");
+        }
         *capture = Some(Vec::new());
     }
 }

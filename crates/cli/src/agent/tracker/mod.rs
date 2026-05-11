@@ -766,6 +766,11 @@ pub struct ReviewThread {
 /// a named fallback. Set to the GitHub App that posts reviews on this repo.
 pub const DEFAULT_REVIEW_BOT_LOGIN: &str = "caretta-ai";
 
+/// Former bot login, accepted as a fallback so repositories that were set up
+/// with the old GitHub App name continue to have their review threads routed
+/// correctly without requiring a data migration.
+pub const LEGACY_REVIEW_BOT_LOGIN: &str = "llm-overlord";
+
 /// Opt-in marker a human can place in a review-thread comment body to request
 /// that the Fix Comments agent treat that thread as actionable. Matched
 /// case-insensitively against the first comment of each thread. Human
@@ -983,7 +988,10 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
             .and_then(serde_json::Value::as_str)
             .unwrap_or("")
             .to_string();
-        let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
+        let is_bot = author == bot_login
+            || author == LEGACY_REVIEW_BOT_LOGIN
+            || author.ends_with("[bot]")
+            || typename == "Bot";
         if !is_bot && !has_human_fix_marker(&body) {
             continue;
         }
@@ -1208,7 +1216,10 @@ fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::Hash
                 .pointer("/comments/nodes/0/body")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
-            let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
+            let is_bot = author == bot_login
+                || author == LEGACY_REVIEW_BOT_LOGIN
+                || author.ends_with("[bot]")
+                || typename == "Bot";
             if is_bot || has_human_fix_marker(body) {
                 count += 1;
             }
