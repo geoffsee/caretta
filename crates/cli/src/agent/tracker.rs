@@ -762,21 +762,37 @@ pub struct ReviewThread {
     pub author: String,
 }
 
-/// Default bot login that owns automated review threads. Mirrors the default
-/// in `scripts/resolve-pr-threads.sh` so a Fix Comments run only acts on
-/// findings the dev agent itself raised, not human review comments.
-pub const DEFAULT_REVIEW_BOT_LOGIN: &str = "llm-overlord";
+/// Default bot login that owns automated review threads. This is matched
+/// alongside two more general signals — the `[bot]` REST-style suffix and
+/// the GraphQL `__typename: "Bot"` field — so the constant exists mainly as
+/// a named fallback. Set to the GitHub App that posts reviews on this repo.
+pub const DEFAULT_REVIEW_BOT_LOGIN: &str = "caretta-ai";
+
+/// Opt-in marker a human can place in a review-thread comment body to request
+/// that the Fix Comments agent treat that thread as actionable. Matched
+/// case-insensitively against the first comment of each thread. Human
+/// authors are otherwise excluded so the agent does not turn questions or
+/// requests for discussion into unrequested code edits.
+pub const HUMAN_FIX_MARKER: &str = "@caretta fix";
+
+/// Returns `true` when `body` contains the [`HUMAN_FIX_MARKER`] opt-in
+/// marker, case-insensitively. Pulled out so both parsers share the rule.
+fn has_human_fix_marker(body: &str) -> bool {
+    body.to_lowercase().contains(HUMAN_FIX_MARKER)
+}
 
 /// Fetch all unresolved bot-authored review threads on a PR via the GitHub
 /// GraphQL API.
 ///
-/// Mirrors `scripts/resolve-pr-threads.sh` — uses `gh api graphql` so we
-/// inherit whatever credentials are in the parent process's environment.
-/// Filters out resolved threads and human-authored threads. A thread counts
-/// as bot-authored when any of these hold: the author login matches
-/// `bot_login`; the author login ends with `[bot]` (REST-style App suffix);
-/// the GraphQL `author.__typename` is `Bot` (covers GitHub Apps whose login
-/// is returned without the `[bot]` suffix, e.g. App-installation tokens).
+/// Uses `gh api graphql` so we inherit whatever credentials are in the
+/// parent process's environment.
+/// Filters out resolved threads. A thread is kept when any of these hold:
+/// the author login matches `bot_login`; the author login ends with
+/// `[bot]` (REST-style App suffix); the GraphQL `author.__typename` is
+/// `Bot` (covers GitHub Apps whose login is returned without the `[bot]`
+/// suffix, e.g. App-installation tokens); or the first comment's body
+/// contains [`HUMAN_FIX_MARKER`] (a human opt-in so the agent can act on
+/// specific human-authored review comments without blanket-trusting them).
 pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<ReviewThread> {
     let owner_repo = match cmd_stdout(
         "gh",
@@ -805,9 +821,7 @@ pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<Revi
         }
     };
 
-    // Identical query to scripts/resolve-pr-threads.sh so behaviour stays in
-    // lock-step with the prototype shell script. The leading newline keeps gh
-    // from interpreting the value as a file reference.
+    // Leading newline keeps gh from interpreting the value as a file reference.
     let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 1) {\n            nodes {\n              author { login __typename }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
     let pr_num_s = pr_num.to_string();
@@ -844,8 +858,7 @@ pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<Revi
 }
 
 /// GraphQL mutation that marks one review thread as resolved on a pull
-/// request. Mirrors the mutation in `scripts/resolve-pr-threads.sh` so the
-/// Rust call path stays in lock-step with the prototype shell script.
+/// request.
 const RESOLVE_REVIEW_THREAD_MUTATION: &str = "\nmutation($threadId: ID!) {\n  resolveReviewThread(input: {threadId: $threadId}) {\n    thread { id isResolved }\n  }\n}";
 
 /// Phase 3 (#145): mark a single review thread as resolved on GitHub via the
@@ -949,8 +962,13 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
             .pointer("/author/__typename")
             .and_then(serde_json::Value::as_str)
             .unwrap_or("");
+        let body = c
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("")
+            .to_string();
         let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
-        if !is_bot {
+        if !is_bot && !has_human_fix_marker(&body) {
             continue;
         }
         let path = c
@@ -968,11 +986,6 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
             .and_then(serde_json::Value::as_u64)
             .or_else(|| c.get("originalLine").and_then(serde_json::Value::as_u64))
             .unwrap_or(0) as u32;
-        let body = c
-            .get("body")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
         out.push(ReviewThread {
             id,
             path,
@@ -1025,7 +1038,7 @@ pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::Hash
         }
     };
 
-    let query = "\nquery($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequests(states: OPEN, first: 100) {\n      nodes {\n        number\n        reviewThreads(first: 100) {\n          nodes {\n            isResolved\n            comments(first: 1) {\n              nodes {\n                author { login __typename }\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}";
+    let query = "\nquery($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequests(states: OPEN, first: 100) {\n      nodes {\n        number\n        reviewThreads(first: 100) {\n          nodes {\n            isResolved\n            comments(first: 1) {\n              nodes {\n                author { login __typename }\n                body\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
     let owner_arg = format!("owner={owner}");
     let repo_arg = format!("repo={repo}");
@@ -1052,10 +1065,11 @@ pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::Hash
 ///
 /// Split out from [`fetch_unresolved_thread_counts`] so it can be unit-
 /// tested against fixture JSON without needing live GitHub PRs. Mirrors
-/// the filter logic from [`parse_review_threads`] (resolved threads
-/// dropped; authors qualify as bots via login match, `[bot]` suffix, or
-/// GraphQL `author.__typename == "Bot"`) so the badge count and the Fix
-/// Comments agent see the same set of threads.
+/// the filter logic from [`parse_review_threads`]: resolved threads are
+/// dropped; a thread counts when its first comment is bot-authored (login
+/// match, `[bot]` suffix, or GraphQL `author.__typename == "Bot"`) OR its
+/// body contains [`HUMAN_FIX_MARKER`]. Badge count and Fix Comments agent
+/// must see the same set of threads.
 fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::HashMap<u32, u32> {
     let mut counts = std::collections::HashMap::new();
     let v: serde_json::Value = match serde_json::from_str(json) {
@@ -1099,7 +1113,12 @@ fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::Hash
                 .pointer("/comments/nodes/0/author/__typename")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("");
-            if author == bot_login || author.ends_with("[bot]") || typename == "Bot" {
+            let body = t
+                .pointer("/comments/nodes/0/body")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("");
+            let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
+            if is_bot || has_human_fix_marker(body) {
                 count += 1;
             }
         }
@@ -3921,6 +3940,46 @@ mod tests {
         assert_eq!(counts.get(&145), Some(&1));
     }
 
+    /// Human-authored threads opt in via [`HUMAN_FIX_MARKER`] in the body.
+    /// The batched count and the per-PR parser must agree on this rule, so
+    /// the sidebar badge does not under-report human opt-in threads.
+    #[test]
+    fn parse_pr_thread_counts_accepts_human_with_fix_marker() {
+        let json = r#"{
+            "data": {
+                "repository": {
+                    "pullRequests": {
+                        "nodes": [
+                            {
+                                "number": 99,
+                                "reviewThreads": {
+                                    "nodes": [
+                                        {
+                                            "isResolved": false,
+                                            "comments": {"nodes": [{
+                                                "author": {"login": "geoffsee", "__typename": "User"},
+                                                "body": "@caretta fix: please rename this"
+                                            }]}
+                                        },
+                                        {
+                                            "isResolved": false,
+                                            "comments": {"nodes": [{
+                                                "author": {"login": "geoffsee", "__typename": "User"},
+                                                "body": "thoughts?"
+                                            }]}
+                                        }
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+        }"#;
+        let counts = parse_pr_thread_counts(json, "llm-overlord");
+        assert_eq!(counts.get(&99), Some(&1));
+    }
+
     /// GitHub Apps surface in GraphQL as `__typename: "Bot"` even when their
     /// login lacks the `[bot]` suffix. The batched parser must count those
     /// threads or the badge under-reports for App-installation reviewers.
@@ -4783,9 +4842,10 @@ mod tests {
     }
 
     /// Fixture mirrors the shape of `gh api graphql` output for the
-    /// `reviewThreads` query in `scripts/resolve-pr-threads.sh`. Resolved
-    /// threads and human-authored threads must be filtered out so a Fix
-    /// Comments run only acts on findings the project's review bot raised.
+    /// `reviewThreads` query used by [`fetch_unresolved_review_threads`].
+    /// Resolved threads and human-authored threads (without the opt-in
+    /// marker) must be filtered out so a Fix Comments run only acts on
+    /// findings the project's review bot raised.
     #[test]
     fn parse_review_threads_filters_resolved_and_human_authors() {
         let json = r#"{
@@ -4887,6 +4947,91 @@ mod tests {
         let threads = parse_review_threads(json, "llm-overlord");
         assert_eq!(threads.len(), 1);
         assert_eq!(threads[0].author, "dependabot[bot]");
+    }
+
+    /// Human review comments are excluded by default, but a human can opt in
+    /// per-comment by including [`HUMAN_FIX_MARKER`] in the body. Without
+    /// the marker the same author is still dropped.
+    #[test]
+    fn parse_review_threads_accepts_human_with_fix_marker() {
+        let json = r#"{
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "PRT_human_opt_in",
+                                    "isResolved": false,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "geoffsee", "__typename": "User"},
+                                                "path": "src/lib.rs",
+                                                "line": 3,
+                                                "body": "@caretta fix: rename foo to bar"
+                                            }
+                                        ]
+                                    }
+                                },
+                                {
+                                    "id": "PRT_human_plain",
+                                    "isResolved": false,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "geoffsee", "__typename": "User"},
+                                                "path": "src/lib.rs",
+                                                "line": 4,
+                                                "body": "should we benchmark this first?"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }"#;
+        let threads = parse_review_threads(json, "llm-overlord");
+        assert_eq!(threads.len(), 1);
+        assert_eq!(threads[0].id, "PRT_human_opt_in");
+        assert_eq!(threads[0].author, "geoffsee");
+    }
+
+    /// The marker check must be case-insensitive so e.g. `@Caretta Fix` or
+    /// `@CARETTA FIX` at the start of a sentence still opts the thread in.
+    #[test]
+    fn parse_review_threads_marker_is_case_insensitive() {
+        let json = r#"{
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "PRT_case",
+                                    "isResolved": false,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "geoffsee", "__typename": "User"},
+                                                "path": "src/lib.rs",
+                                                "line": 3,
+                                                "body": "@Caretta Fix please address this"
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }"#;
+        let threads = parse_review_threads(json, "llm-overlord");
+        assert_eq!(threads.len(), 1);
     }
 
     /// GitHub Apps acting through an installation token surface their login
