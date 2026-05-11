@@ -278,7 +278,8 @@ pub fn load_template(root: &str, preset: &str, workflow_dir: &str, filename: &st
 // ── Preset manifest ──────────────────────────────────────────────────────
 
 /// Load the `preset.yaml` manifest for `preset_name`.
-/// Searches materialized, bundled, and local directories in priority order.
+/// Searches local, bundled, and materialized directories in priority order
+/// (local overrides bundled; bundled overrides materialized).
 /// Falls back to `DEFAULT_PRESET_VERSION` and logs a deprecation warning when
 /// no manifest is found or the version field is absent.
 pub fn load_preset_manifest(root: &str, preset_name: &str) -> PresetManifest {
@@ -319,6 +320,9 @@ pub fn parse_preset_ref(preset_ref: &str) -> Result<(String, Option<String>), St
         Some((n, r)) => (n.trim(), Some(r.trim().to_string())),
         None => (preset_ref.trim(), None),
     };
+    if raw_name.is_empty() {
+        return Err("Preset name must not be empty".to_string());
+    }
     if raw_name.contains('/') || raw_name.contains('\\') || raw_name.contains('.') {
         return Err(format!(
             "Invalid preset name '{raw_name}': must not contain path characters"

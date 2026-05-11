@@ -9,4 +9,4 @@
 | Adapter Capability Negotiation (#72) | 🔴 Not Started | |
 | Deterministic Asset Hash Pinning (#73) | 🔴 Not Started | |
 | Workflow Preset Versioning (#74) | ✅ Done | `preset.yaml` manifests with semver version; `name@req` resolution; v2 DB schema records preset name+version per run |
-| Path-Constraint Capability (#75) | ✅ Done | Path allow/deny rules enforced at runtime; violations recorded per run |
+| Path-Constraint Capability (#75) | 🟡 In Progress | DB schema columns (`path_constraints`, `policy_violations`) added; enforcement logic not yet implemented |
