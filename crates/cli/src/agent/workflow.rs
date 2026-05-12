@@ -15,12 +15,6 @@ pub const DEFAULT_PRESET_VERSION: &str = "0.1.0";
 /// without matching on free-form English text.
 pub const VERSION_MISMATCH_TAG: &str = "version mismatch:";
 
-pub const DEFAULT_PRESET_VERSION: &str = "0.1.0";
-/// Sentinel prefix embedded in version-mismatch errors from `resolve_preset`.
-/// Used by callers to distinguish hard version violations from other failures
-/// without matching on free-form English text.
-pub const VERSION_MISMATCH_TAG: &str = "version mismatch:";
-
 // ── YAML config types ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
