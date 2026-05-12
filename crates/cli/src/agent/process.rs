@@ -24,7 +24,9 @@ fn run_event_capture_slot() -> &'static Mutex<Option<Vec<AgentEvent>>> {
 pub fn start_run_capture() {
     if let Ok(mut capture) = run_event_capture_slot().lock() {
         if capture.is_some() {
-            log("[event_log] start_run_capture called while capture already active; prior events discarded");
+            log(
+                "[event_log] start_run_capture called while capture already active; prior events discarded",
+            );
         }
         *capture = Some(Vec::new());
     }
