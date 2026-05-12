@@ -764,6 +764,11 @@ pub struct ReviewThread {
 /// alongside two more general signals — the `[bot]` REST-style suffix and
 /// the GraphQL `__typename: "Bot"` field — so the constant exists mainly as
 /// a named fallback. Set to the GitHub App that posts reviews on this repo.
+///
+/// Deployments that were configured with the previous app name are not
+/// affected by this rename: [`LEGACY_REVIEW_BOT_LOGIN`] (`"llm-overlord"`) is
+/// accepted as a fallback in all thread-parsing code paths, so no data
+/// migration is required.
 pub const DEFAULT_REVIEW_BOT_LOGIN: &str = "caretta-ai";
 
 /// Former bot login, accepted as a fallback so repositories that were set up

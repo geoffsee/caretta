@@ -636,9 +636,11 @@ mod tests {
             .expect("version");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
         let _: String = conn
-            .query_row("SELECT path_constraints FROM agent_runs LIMIT 1", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT path_constraints FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
             .expect("path_constraints column should exist after migration");
         let _: String = conn
             .query_row(
@@ -699,9 +701,11 @@ mod tests {
             .expect("version");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
         let _: String = conn
-            .query_row("SELECT path_constraints FROM agent_runs LIMIT 1", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT path_constraints FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
             .expect("path_constraints column should exist after v2→v3 migration");
         let _: String = conn
             .query_row(
