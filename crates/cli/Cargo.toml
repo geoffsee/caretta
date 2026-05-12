@@ -23,6 +23,9 @@ path = "src/main.rs"
 # the agent runtime archive embedded.
 default = []
 bundle-runtime = ["agent-runtime/bundle-runtime", "rusqlite/bundled"]
+# Enable the Dioxus desktop GUI. Requires the `javascriptcoregtk-4.1` system
+# library (webkit2gtk). Off by default so `cargo test` works without GTK deps.
+desktop = ["dioxus"]
 
 [dependencies]
 agent-common = { path = "../agent-common" }
@@ -53,7 +56,7 @@ indexmap = { version = "2", features = ["serde"] }
 tempfile = "3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-dioxus = { version = "0.6", features = ["desktop"] }
+dioxus = { version = "0.6", features = ["desktop"], optional = true }
 tokio = { version = "1", features = ["full"] }
 toak-rs = { version = "6.0.3", default-features = false }
 keyring = "3"

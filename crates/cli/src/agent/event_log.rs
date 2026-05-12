@@ -14,8 +14,8 @@
 //! forward migrations so that future schema additions only need a new `if version < N`
 //! block — existing data is never destructively altered.
 use crate::agent::types::{AgentEvent, ClaudeEvent, ContentBlock};
-use cli_common::latest_event_model;
 use cli_common::PathConstraints;
+use cli_common::latest_event_model;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -636,11 +636,9 @@ mod tests {
             .expect("version");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
         let _: String = conn
-            .query_row(
-                "SELECT path_constraints FROM agent_runs LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT path_constraints FROM agent_runs LIMIT 1", [], |r| {
+                r.get(0)
+            })
             .expect("path_constraints column should exist after migration");
         let _: String = conn
             .query_row(
@@ -701,11 +699,9 @@ mod tests {
             .expect("version");
         assert_eq!(version, CURRENT_SCHEMA_VERSION);
         let _: String = conn
-            .query_row(
-                "SELECT path_constraints FROM agent_runs LIMIT 1",
-                [],
-                |r| r.get(0),
-            )
+            .query_row("SELECT path_constraints FROM agent_runs LIMIT 1", [], |r| {
+                r.get(0)
+            })
             .expect("path_constraints column should exist after v2→v3 migration");
         let _: String = conn
             .query_row(

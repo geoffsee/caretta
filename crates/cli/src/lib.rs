@@ -22,6 +22,7 @@
 
 pub mod agent;
 pub mod custom_themes;
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 pub mod ui;
 
 pub use agent::types::{Agent, Config, SkillPaths};
@@ -50,13 +51,20 @@ use agent::types::{
 };
 use agent::workflow::{list_presets, load_sidebar_entries, load_workflows};
 use clap::{Parser, Subcommand};
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use custom_themes::Theme;
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use dioxus::prelude::*;
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use std::collections::HashMap;
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use tokio::sync::mpsc;
 use tracing::info;
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use ui::components::BASE_CSS;
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use ui::security::{SecurityFinding, run_security_scan};
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 use ui::{Editor, Sidebar, Statusbar};
 
 #[cfg(target_arch = "wasm32")]
@@ -309,6 +317,7 @@ where
         // Eagerly populate the issue-comment trigger cache from the (possibly
         // overridden) skill path so the sidebar reminder is non-empty before the
         // first render. Done after `overrides` so consumers' custom paths win.
+        #[cfg(feature = "desktop")]
         ui::sidebar::init_issue_comment_triggers(std::path::Path::new(
             &config.skill_paths.issue_tracking,
         ));
@@ -461,6 +470,7 @@ where
                     }
                 }
             },
+            #[cfg(feature = "desktop")]
             Some(Commands::Serve { port }) => {
                 info!(
                     "Launching API/web server for root={} with requested_port={}",
@@ -474,6 +484,12 @@ where
                     }
                 });
             }
+            #[cfg(not(feature = "desktop"))]
+            Some(Commands::Serve { .. }) => {
+                eprintln!("The 'serve' command requires the 'desktop' feature.");
+                std::process::exit(1);
+            }
+            #[cfg(feature = "desktop")]
             Some(Commands::Gui) | None => {
                 // Stash the finalised Config so the Dioxus App component can pick
                 // it up via `parse_args` (which already loads from caretta.toml). The
@@ -489,6 +505,11 @@ where
                     .expect("CONFIG_OVERRIDE set twice");
                 dioxus::launch(App);
             }
+            #[cfg(not(feature = "desktop"))]
+            Some(Commands::Gui) | None => {
+                eprintln!("The GUI requires the 'desktop' feature (needs webkit2gtk).");
+                std::process::exit(1);
+            }
         }
     }
 }
@@ -497,6 +518,7 @@ where
 /// component reads from this on first render so library consumers' overrides
 /// (e.g. custom `skill_paths`) survive into the GUI rather than being
 /// re-derived from `caretta.toml` alone.
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 static CONFIG_OVERRIDE: std::sync::OnceLock<Config> = std::sync::OnceLock::new();
 
 fn apply_nonempty_model_trim(into: &mut String, candidate: Option<&str>) {
@@ -516,6 +538,7 @@ fn apply_caretta_model_env_and_cli(config: &mut Config, cli_model: Option<&str>)
     apply_nonempty_model_trim(&mut config.model, cli_model);
 }
 
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 fn ensure_default_workflow_preset_first(mut presets: Vec<String>) -> Vec<String> {
     if !presets.iter().any(|preset| preset == "default") {
         presets.push("default".to_string());
@@ -528,6 +551,7 @@ fn ensure_default_workflow_preset_first(mut presets: Vec<String>) -> Vec<String>
     presets
 }
 
+#[cfg(any(feature = "desktop", target_arch = "wasm32"))]
 #[component]
 fn App() -> Element {
     let mut config = use_signal(|| {

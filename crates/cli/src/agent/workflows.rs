@@ -69,6 +69,26 @@ fn record_workflow_run(
             ));
         }
     }
+
+    let (resolved_preset_name, resolved_preset_version) = {
+        use crate::agent::workflow::{VERSION_MISMATCH_TAG, parse_preset_ref, resolve_preset};
+        match resolve_preset(&cfg.root, &cfg.workflow_preset) {
+            Ok((name, ver)) => (Some(name), Some(ver)),
+            Err(e) if e.contains(VERSION_MISMATCH_TAG) => {
+                log(&format!("WARNING: preset version mismatch: {e}"));
+                let (name, _) = parse_preset_ref(&cfg.workflow_preset)
+                    .unwrap_or_else(|_| (cfg.workflow_preset.clone(), None));
+                (Some(name), None)
+            }
+            Err(e) => {
+                log(&format!("WARNING: preset resolution failed: {e}"));
+                let (name, _) = parse_preset_ref(&cfg.workflow_preset)
+                    .unwrap_or_else(|_| (cfg.workflow_preset.clone(), None));
+                (Some(name), None)
+            }
+        }
+    };
+
     let db_path = resolve_db_path(cfg.event_log_path.as_deref());
     append_run(
         &AgentRunRecord {
@@ -86,8 +106,8 @@ fn record_workflow_run(
             duration_ms,
             path_constraints: cfg.path_constraints.clone(),
             policy_violations,
-            preset_name: None,
-            preset_version: None,
+            preset_name: resolved_preset_name,
+            preset_version: resolved_preset_version,
         },
         &db_path,
     );
@@ -111,7 +131,11 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     log(&phase_cfg.log_start);
 
     let mut effective_cfg_storage: Option<Config> = None;
-    let cfg = apply_workflow_path_constraints(cfg, &mut effective_cfg_storage, wf.path_constraints.as_ref());
+    let cfg = apply_workflow_path_constraints(
+        cfg,
+        &mut effective_cfg_storage,
+        wf.path_constraints.as_ref(),
+    );
 
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);
@@ -208,7 +232,11 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     log(&phase_cfg.log_start);
 
     let mut effective_cfg_storage: Option<Config> = None;
-    let cfg = apply_workflow_path_constraints(cfg, &mut effective_cfg_storage, wf.path_constraints.as_ref());
+    let cfg = apply_workflow_path_constraints(
+        cfg,
+        &mut effective_cfg_storage,
+        wf.path_constraints.as_ref(),
+    );
 
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);

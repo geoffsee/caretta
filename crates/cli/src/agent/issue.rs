@@ -170,7 +170,9 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                 let review_violations =
                     crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
                 #[cfg(target_arch = "wasm32")]
-                let review_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
+                let review_violations: Vec<
+                    crate::agent::event_log::PolicyViolation,
+                > = vec![];
                 append_run(
                     &AgentRunRecord {
                         agent_id: cfg.agent.to_string(),

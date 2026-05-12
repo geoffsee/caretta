@@ -646,13 +646,13 @@ pub fn local_inference_overrides(cfg: &Config) -> crate::agent::types::AgentLaun
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(target_arch = "wasm32"))]
+    use super::build_appended_system_prompt;
     use super::{
         appended_system_prompt_for_agent, args_with_append_system_prompt_file,
         codex_events_from_json_line, native_command, run_claude_native_with_env,
         run_codex_native_with_env,
     };
-    #[cfg(not(target_arch = "wasm32"))]
-    use super::build_appended_system_prompt;
     use crate::agent::types::{Agent, AgentEvent, ClaudeEvent, Config, PathConstraints};
     use std::fs;
     use std::path::PathBuf;
@@ -783,11 +783,18 @@ mod tests {
         );
         let prompt = build_appended_system_prompt(&cfg)
             .expect("Claude with constraints should produce a prompt");
-        assert!(prompt.contains("caretta's autonomous repository agent"),
-            "base guidance missing");
-        assert!(prompt.contains("Allowed path prefixes"),
-            "path-constraint fragment missing");
-        assert!(prompt.contains("src/"), "allow_paths value missing from fragment");
+        assert!(
+            prompt.contains("caretta's autonomous repository agent"),
+            "base guidance missing"
+        );
+        assert!(
+            prompt.contains("Allowed path prefixes"),
+            "path-constraint fragment missing"
+        );
+        assert!(
+            prompt.contains("src/"),
+            "allow_paths value missing from fragment"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -820,8 +827,10 @@ mod tests {
         // The base prompt ends with "\n" and the format adds one separator "\n",
         // yielding a blank line between sections ("\n\n"). A triple newline would
         // indicate unintended extra whitespace in the assembly logic.
-        assert!(!prompt.contains("\n\n\n"),
-            "unexpected triple newline in assembled prompt");
+        assert!(
+            !prompt.contains("\n\n\n"),
+            "unexpected triple newline in assembled prompt"
+        );
     }
 
     #[test]

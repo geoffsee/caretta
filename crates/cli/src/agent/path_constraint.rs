@@ -389,8 +389,9 @@ mod tests {
         // An absolute path like /src/main.rs must not pass allow_paths = ["src/"].
         // Without the sentinel fix, "/src/main.rs" would normalize to "src/main.rs"
         // and falsely satisfy the allow-list.
-        let v = check_tool_call(&tc("Read", "file_path", "/src/main.rs"), &c)
-            .expect("absolute path should be a violation even when it looks like an allowed prefix");
+        let v = check_tool_call(&tc("Read", "file_path", "/src/main.rs"), &c).expect(
+            "absolute path should be a violation even when it looks like an allowed prefix",
+        );
         assert!(v.reason.contains("allow_paths"));
     }
 
