@@ -1,9 +1,15 @@
 use crate::agent::cmd::{die, log};
+use crate::agent::event_log::{
+    AgentRunRecord, append_run, extract_run_data, iso8601_now, resolve_db_path,
+};
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
-use crate::agent::process::stop_requested;
+// start_run_capture / drain_run_capture are provided by #70 (event-capture infrastructure).
+use crate::agent::process::{drain_run_capture, start_run_capture, stop_requested};
 use crate::agent::run::run_agent;
 use crate::agent::types::{AgentEvent, Config, EVENT_SENDER, Workflow};
+use cli_common::PathConstraints;
+use std::time::Instant;
 
 /// Inject standard variables that all workflows may need.
 fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
@@ -13,6 +19,78 @@ fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
         serde_json::Value::String(cfg.skill_paths.user_personas.clone());
     vars["issue_tracking_skill_path"] =
         serde_json::Value::String(cfg.skill_paths.issue_tracking.clone());
+}
+
+/// Apply per-workflow path constraints when declared in workflow.yaml, returning
+/// either the modified config (stored in `storage`) or the original `cfg`.
+fn apply_workflow_path_constraints<'a>(
+    cfg: &'a Config,
+    storage: &'a mut Option<Config>,
+    wf_constraints: Option<&PathConstraints>,
+) -> &'a Config {
+    if let Some(c) = wf_constraints {
+        *storage = Some(Config {
+            path_constraints: c.clone(),
+            ..cfg.clone()
+        });
+        storage.as_ref().unwrap()
+    } else {
+        cfg
+    }
+}
+
+fn record_workflow_run(
+    cfg: &Config,
+    workflow_phase: &str,
+    captured: Vec<AgentEvent>,
+    started_at: String,
+    finished_at: String,
+    duration_ms: u64,
+) {
+    let (tool_calls, input_tokens, output_tokens, run_status, event_model) =
+        extract_run_data(&captured);
+    let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let policy_violations =
+        crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
+    #[cfg(target_arch = "wasm32")]
+    let policy_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
+
+    if !policy_violations.is_empty() {
+        log(&format!(
+            "Path-constraint policy: {} violation(s) detected for workflow phase '{workflow_phase}'",
+            policy_violations.len()
+        ));
+        for v in &policy_violations {
+            log(&format!(
+                "  POLICY VIOLATION: tool={} path={} reason={}",
+                v.tool, v.path, v.reason
+            ));
+        }
+    }
+    let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+    append_run(
+        &AgentRunRecord {
+            agent_id: cfg.agent.to_string(),
+            model: effective_model,
+            workflow_phase: workflow_phase.to_string(),
+            issue_number: None,
+            tracker_number: None,
+            tool_calls,
+            input_tokens,
+            output_tokens,
+            status: run_status,
+            started_at,
+            finished_at,
+            duration_ms,
+            path_constraints: cfg.path_constraints.clone(),
+            policy_violations,
+            preset_name: None,
+            preset_version: None,
+        },
+        &db_path,
+    );
 }
 
 /// Run the draft phase of any two-phase workflow loaded from YAML.
@@ -32,6 +110,9 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     preflight(cfg);
     log(&phase_cfg.log_start);
 
+    let mut effective_cfg_storage: Option<Config> = None;
+    let cfg = apply_workflow_path_constraints(cfg, &mut effective_cfg_storage, wf.path_constraints.as_ref());
+
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);
     fetch_extra_context(wf, &mut vars);
@@ -48,7 +129,22 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
         return;
     }
 
+    let run_started_at = iso8601_now();
+    let run_wall_clock = Instant::now();
+    start_run_capture();
     run_agent(cfg, &prompt);
+    let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
+    let run_finished_at = iso8601_now();
+    let captured = drain_run_capture();
+    record_workflow_run(
+        cfg,
+        &format!("{workflow_id}/draft"),
+        captured,
+        run_started_at,
+        run_finished_at,
+        run_duration_ms,
+    );
+
     if stop_requested() {
         log(&format!("Stop requested. {} draft cancelled.", wf.name));
         if let Some(tx) = EVENT_SENDER.get() {
@@ -111,6 +207,9 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     preflight(cfg);
     log(&phase_cfg.log_start);
 
+    let mut effective_cfg_storage: Option<Config> = None;
+    let cfg = apply_workflow_path_constraints(cfg, &mut effective_cfg_storage, wf.path_constraints.as_ref());
+
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);
     fetch_extra_context(wf, &mut vars);
@@ -119,7 +218,22 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     let prompt = load_and_render(&cfg.root, &cfg.workflow_preset, wf, "finalize", &vars)
         .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
 
+    let run_started_at = iso8601_now();
+    let run_wall_clock = Instant::now();
+    start_run_capture();
     run_agent(cfg, &prompt);
+    let run_duration_ms = run_wall_clock.elapsed().as_millis() as u64;
+    let run_finished_at = iso8601_now();
+    let captured = drain_run_capture();
+    record_workflow_run(
+        cfg,
+        &format!("{workflow_id}/finalize"),
+        captured,
+        run_started_at,
+        run_finished_at,
+        run_duration_ms,
+    );
+
     if stop_requested() {
         log(&format!(
             "Stop requested. {} finalization cancelled.",

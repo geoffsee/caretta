@@ -7,6 +7,13 @@ use crate::agent::assets::assets_dir;
 use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;
+use cli_common::PathConstraints;
+
+pub const DEFAULT_PRESET_VERSION: &str = "0.1.0";
+/// Sentinel prefix embedded in version-mismatch errors from `resolve_preset`.
+/// Used by callers to distinguish hard version violations from other failures
+/// without matching on free-form English text.
+pub const VERSION_MISMATCH_TAG: &str = "version mismatch:";
 
 pub const DEFAULT_PRESET_VERSION: &str = "0.1.0";
 /// Sentinel prefix embedded in version-mismatch errors from `resolve_preset`.
@@ -39,6 +46,11 @@ pub struct WorkflowConfig {
     pub phases: IndexMap<String, PhaseConfig>,
     #[serde(default)]
     pub fragments: HashMap<String, String>,
+    /// Optional per-workflow path constraints. When set, these override the
+    /// project-level `[path_constraints]` from `caretta.toml` for this
+    /// workflow's runs. Omitting this field inherits the project-level config.
+    #[serde(default)]
+    pub path_constraints: Option<PathConstraints>,
 }
 
 /// Fetch the body of a GitHub issue by its label and inject it as a template variable.

@@ -123,8 +123,10 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: now.clone(),
             finished_at: now,
             duration_ms: 0,
-            preset_name: resolved_preset_name,
-            preset_version: resolved_preset_version,
+            path_constraints: cfg.path_constraints.clone(),
+            policy_violations: vec![],
+            preset_name: resolved_preset_name.clone(),
+            preset_version: resolved_preset_version.clone(),
         };
         log(&format!(
             "[dry-run] Prompt ({prompt_tokens} tokens). Would work on #{issue_num}, then open PR.\n\n---\n{}",
@@ -164,6 +166,11 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     extract_run_data(&captured);
                 let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
                 let db_path = resolve_db_path(cfg.event_log_path.as_deref());
+                #[cfg(not(target_arch = "wasm32"))]
+                let review_violations =
+                    crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
+                #[cfg(target_arch = "wasm32")]
+                let review_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
                 append_run(
                     &AgentRunRecord {
                         agent_id: cfg.agent.to_string(),
@@ -178,8 +185,10 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                         started_at: review_started_at,
                         finished_at: review_finished_at,
                         duration_ms: review_duration_ms,
-                        preset_name: resolved_preset_name,
-                        preset_version: resolved_preset_version,
+                        path_constraints: cfg.path_constraints.clone(),
+                        policy_violations: review_violations,
+                        preset_name: resolved_preset_name.clone(),
+                        preset_version: resolved_preset_version.clone(),
                     },
                     &db_path,
                 );
@@ -259,6 +268,25 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
         "failed".to_string()
     };
     let effective_model = event_model.unwrap_or_else(|| cfg.model.clone());
+
+    // Check path constraints and log any violations.
+    #[cfg(not(target_arch = "wasm32"))]
+    let policy_violations =
+        crate::agent::path_constraint::check_run(&tool_calls, &cfg.path_constraints);
+    #[cfg(target_arch = "wasm32")]
+    let policy_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
+    if !policy_violations.is_empty() {
+        log(&format!(
+            "Path-constraint policy: {} violation(s) detected for issue #{issue_num}",
+            policy_violations.len()
+        ));
+        for v in &policy_violations {
+            log(&format!(
+                "  POLICY VIOLATION: tool={} path={} reason={}",
+                v.tool, v.path, v.reason
+            ));
+        }
+    }
     append_run(
         &AgentRunRecord {
             agent_id: cfg.agent.to_string(),
@@ -273,6 +301,8 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             started_at: run_started_at,
             finished_at: run_finished_at,
             duration_ms: run_duration_ms,
+            path_constraints: cfg.path_constraints.clone(),
+            policy_violations,
             preset_name: resolved_preset_name.clone(),
             preset_version: resolved_preset_version.clone(),
         },
@@ -325,6 +355,13 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                     "failed".to_string()
                 };
                 let fix_effective_model = fix_event_model.unwrap_or_else(|| cfg.model.clone());
+                #[cfg(not(target_arch = "wasm32"))]
+                let fix_violations = crate::agent::path_constraint::check_run(
+                    &fix_tool_calls,
+                    &cfg.path_constraints,
+                );
+                #[cfg(target_arch = "wasm32")]
+                let fix_violations: Vec<crate::agent::event_log::PolicyViolation> = vec![];
                 append_run(
                     &AgentRunRecord {
                         agent_id: cfg.agent.to_string(),
@@ -339,8 +376,10 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
                         started_at: fix_started_at,
                         finished_at: fix_finished_at,
                         duration_ms: fix_duration_ms,
-                        preset_name: resolved_preset_name,
-                        preset_version: resolved_preset_version,
+                        path_constraints: cfg.path_constraints.clone(),
+                        policy_violations: fix_violations,
+                        preset_name: resolved_preset_name.clone(),
+                        preset_version: resolved_preset_version.clone(),
                     },
                     &db_path,
                 );

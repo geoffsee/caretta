@@ -15,13 +15,14 @@
 //! block — existing data is never destructively altered.
 use crate::agent::types::{AgentEvent, ClaudeEvent, ContentBlock};
 use cli_common::latest_event_model;
+use cli_common::PathConstraints;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 // ── Public types ─────────────────────────────────────────────────────────────
 
@@ -29,6 +30,14 @@ pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 pub struct ToolCallRecord {
     pub name: String,
     pub args: Value,
+}
+
+/// A tool call that targeted a path outside the active `PathConstraints`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PolicyViolation {
+    pub tool: String,
+    pub path: String,
+    pub reason: String,
 }
 
 /// All data captured for a single agent run, ready to persist or preview.
@@ -45,6 +54,10 @@ pub struct AgentRunRecord {
     pub started_at: String,
     pub finished_at: String,
     pub duration_ms: u64,
+    /// Path constraints that were active during this run (empty = unconstrained).
+    pub path_constraints: PathConstraints,
+    /// Policy violations detected in this run (path accesses outside constraints).
+    pub policy_violations: Vec<PolicyViolation>,
     /// Resolved workflow preset name (e.g. `"default"`, `"xp"`).
     pub preset_name: Option<String>,
     /// Resolved semver version of the workflow preset (e.g. `"0.1.0"`).
@@ -89,35 +102,57 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         .unwrap_or(0);
 
     if version < 1 {
+        // Fresh installs: create complete table with all columns, jump straight to v3.
+        conn.execute_batch(&format!(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS agent_runs (
+                 id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                 agent_id          TEXT    NOT NULL,
+                 model             TEXT    NOT NULL,
+                 workflow_phase    TEXT    NOT NULL,
+                 issue_number      INTEGER,
+                 tracker_number    INTEGER,
+                 tool_calls        TEXT    NOT NULL DEFAULT '[]',
+                 input_tokens      INTEGER,
+                 output_tokens     INTEGER,
+                 status            TEXT    NOT NULL,
+                 started_at        TEXT    NOT NULL,
+                 finished_at       TEXT    NOT NULL,
+                 duration_ms       INTEGER,
+                 preset_name       TEXT,
+                 preset_version    TEXT,
+                 path_constraints  TEXT    NOT NULL DEFAULT '{{}}',
+                 policy_violations TEXT    NOT NULL DEFAULT '[]'
+             );
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES ({CURRENT_SCHEMA_VERSION});
+             COMMIT;"
+        ))?;
+    }
+
+    if version >= 1 && version < 2 {
+        // Upgrade v1 databases: add both preset and path-constraint columns in one step.
         conn.execute_batch(
             "BEGIN;
-            CREATE TABLE IF NOT EXISTS agent_runs (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                agent_id        TEXT    NOT NULL,
-                model           TEXT    NOT NULL,
-                workflow_phase  TEXT    NOT NULL,
-                issue_number    INTEGER,
-                tracker_number  INTEGER,
-                tool_calls      TEXT    NOT NULL DEFAULT '[]',
-                input_tokens    INTEGER,
-                output_tokens   INTEGER,
-                status          TEXT    NOT NULL,
-                started_at      TEXT    NOT NULL,
-                finished_at     TEXT    NOT NULL,
-                duration_ms     INTEGER
-            );
-            DELETE FROM schema_version;
-            INSERT INTO schema_version (version) VALUES (1);
-            COMMIT;",
+             ALTER TABLE agent_runs ADD COLUMN preset_name TEXT;
+             ALTER TABLE agent_runs ADD COLUMN preset_version TEXT;
+             ALTER TABLE agent_runs ADD COLUMN path_constraints TEXT NOT NULL DEFAULT '{}';
+             ALTER TABLE agent_runs ADD COLUMN policy_violations TEXT NOT NULL DEFAULT '[]';
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES (3);
+             COMMIT;",
         )?;
     }
 
-    if version < 2 {
+    if version >= 2 && version < 3 {
+        // Upgrade v2 databases (from #74/issue-70: have preset columns but no
+        // path-constraint columns): add the path-constraint audit columns.
         conn.execute_batch(
             "BEGIN;
-             ALTER TABLE agent_runs ADD COLUMN preset_name    TEXT;
-             ALTER TABLE agent_runs ADD COLUMN preset_version TEXT;
-             UPDATE schema_version SET version = 2;
+             ALTER TABLE agent_runs ADD COLUMN path_constraints TEXT NOT NULL DEFAULT '{}';
+             ALTER TABLE agent_runs ADD COLUMN policy_violations TEXT NOT NULL DEFAULT '[]';
+             DELETE FROM schema_version;
+             INSERT INTO schema_version (version) VALUES (3);
              COMMIT;",
         )?;
     }
@@ -143,6 +178,10 @@ pub fn append_run(record: &AgentRunRecord, db_path: &Path) {
 
     let tool_calls_json =
         serde_json::to_string(&record.tool_calls).unwrap_or_else(|_| "[]".to_string());
+    let path_constraints_json =
+        serde_json::to_string(&record.path_constraints).unwrap_or_else(|_| "{}".to_string());
+    let policy_violations_json =
+        serde_json::to_string(&record.policy_violations).unwrap_or_else(|_| "[]".to_string());
 
     if let Err(e) = conn.execute(
         "INSERT INTO agent_runs (
@@ -150,8 +189,9 @@ pub fn append_run(record: &AgentRunRecord, db_path: &Path) {
             issue_number, tracker_number,
             tool_calls, input_tokens, output_tokens,
             status, started_at, finished_at, duration_ms,
+            path_constraints, policy_violations,
             preset_name, preset_version
-        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+        ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             record.agent_id,
             record.model,
@@ -165,6 +205,8 @@ pub fn append_run(record: &AgentRunRecord, db_path: &Path) {
             record.started_at,
             record.finished_at,
             record.duration_ms as i64,
+            path_constraints_json,
+            policy_violations_json,
             record.preset_name,
             record.preset_version,
         ],
@@ -177,20 +219,22 @@ pub fn append_run(record: &AgentRunRecord, db_path: &Path) {
 /// Used by `--dry-run` to show what *would* be written.
 pub fn preview_entry(record: &AgentRunRecord) -> String {
     let entry = serde_json::json!({
-        "agent_id":       record.agent_id,
-        "model":          record.model,
-        "workflow_phase": record.workflow_phase,
-        "issue_number":   record.issue_number,
-        "tracker_number": record.tracker_number,
-        "tool_calls":     record.tool_calls,
-        "input_tokens":   record.input_tokens,
-        "output_tokens":  record.output_tokens,
-        "status":         record.status,
-        "started_at":     record.started_at,
-        "finished_at":    record.finished_at,
-        "duration_ms":    record.duration_ms,
-        "preset_name":    record.preset_name,
-        "preset_version": record.preset_version,
+        "agent_id":          record.agent_id,
+        "model":             record.model,
+        "workflow_phase":    record.workflow_phase,
+        "issue_number":      record.issue_number,
+        "tracker_number":    record.tracker_number,
+        "tool_calls":        record.tool_calls,
+        "input_tokens":      record.input_tokens,
+        "output_tokens":     record.output_tokens,
+        "status":            record.status,
+        "started_at":        record.started_at,
+        "finished_at":       record.finished_at,
+        "duration_ms":       record.duration_ms,
+        "path_constraints":  record.path_constraints,
+        "policy_violations": record.policy_violations,
+        "preset_name":       record.preset_name,
+        "preset_version":    record.preset_version,
     });
     serde_json::to_string_pretty(&entry).unwrap_or_else(|_| "{}".to_string())
 }
@@ -319,8 +363,9 @@ fn is_leap_year(year: u64) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentRunRecord, CURRENT_SCHEMA_VERSION, ToolCallRecord, append_run, extract_run_data,
-        is_leap_year, iso8601_now, preview_entry, resolve_db_path, unix_secs_to_utc,
+        AgentRunRecord, CURRENT_SCHEMA_VERSION, PolicyViolation, ToolCallRecord, append_run,
+        extract_run_data, is_leap_year, iso8601_now, preview_entry, resolve_db_path,
+        unix_secs_to_utc,
     };
     use crate::agent::types::{AgentEvent, AssistantMessage, ClaudeEvent, ContentBlock};
     use std::path::PathBuf;
@@ -431,6 +476,11 @@ mod tests {
             started_at: "2026-05-10T00:00:00Z".to_string(),
             finished_at: "2026-05-10T00:00:01Z".to_string(),
             duration_ms: 1000,
+            path_constraints: cli_common::PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+            policy_violations: vec![],
             preset_name: Some("default".to_string()),
             preset_version: Some("0.1.0".to_string()),
         };
@@ -441,6 +491,8 @@ mod tests {
         assert_eq!(parsed["agent_id"], "claude");
         assert_eq!(parsed["issue_number"], 42);
         assert_eq!(parsed["status"], "dry-run");
+        assert!(parsed["path_constraints"]["allow_paths"].is_array());
+        assert!(parsed["policy_violations"].is_array());
         assert_eq!(parsed["preset_name"], "default");
         assert_eq!(parsed["preset_version"], "0.1.0");
     }
@@ -463,6 +515,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 1000,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
             preset_name: Some("default".to_string()),
             preset_version: Some("0.1.0".to_string()),
         };
@@ -484,6 +538,185 @@ mod tests {
     }
 
     #[test]
+    fn append_run_stores_path_constraints_and_violations() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("pc_test.db");
+
+        let record = AgentRunRecord {
+            agent_id: "claude".to_string(),
+            model: "test-model".to_string(),
+            workflow_phase: "issue".to_string(),
+            issue_number: Some(99),
+            tracker_number: None,
+            tool_calls: vec![],
+            input_tokens: None,
+            output_tokens: None,
+            status: "completed".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: "2026-01-01T00:00:01Z".to_string(),
+            duration_ms: 0,
+            path_constraints: cli_common::PathConstraints {
+                allow_paths: vec!["src/".to_string()],
+                deny_paths: vec![],
+            },
+            policy_violations: vec![PolicyViolation {
+                tool: "Read".to_string(),
+                path: "vendor/foo.rs".to_string(),
+                reason: "path is outside allow_paths: [src/]".to_string(),
+            }],
+            preset_name: None,
+            preset_version: None,
+        };
+
+        append_run(&record, &db_path);
+
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        let (pc_json, pv_json): (String, String) = conn
+            .query_row(
+                "SELECT path_constraints, policy_violations FROM agent_runs LIMIT 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("query");
+
+        let pc: serde_json::Value = serde_json::from_str(&pc_json).expect("valid json");
+        let pv: serde_json::Value = serde_json::from_str(&pv_json).expect("valid json");
+
+        assert_eq!(pc["allow_paths"][0], "src/");
+        assert_eq!(pv[0]["tool"], "Read");
+        assert_eq!(pv[0]["path"], "vendor/foo.rs");
+    }
+
+    #[test]
+    fn migrate_v1_to_v3_adds_path_columns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("v1_upgrade.db");
+
+        // Manually create a v1-era schema (no path_constraints / policy_violations columns).
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER NOT NULL);
+             INSERT INTO schema_version VALUES (1);
+             CREATE TABLE agent_runs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 agent_id TEXT NOT NULL, model TEXT NOT NULL,
+                 workflow_phase TEXT NOT NULL, issue_number INTEGER,
+                 tracker_number INTEGER, tool_calls TEXT NOT NULL DEFAULT '[]',
+                 input_tokens INTEGER, output_tokens INTEGER,
+                 status TEXT NOT NULL, started_at TEXT NOT NULL,
+                 finished_at TEXT NOT NULL, duration_ms INTEGER
+             );",
+        )
+        .expect("setup v1");
+        drop(conn);
+
+        let record = AgentRunRecord {
+            agent_id: "claude".to_string(),
+            model: "test-model".to_string(),
+            workflow_phase: "issue".to_string(),
+            issue_number: None,
+            tracker_number: None,
+            tool_calls: vec![],
+            input_tokens: None,
+            output_tokens: None,
+            status: "completed".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: "2026-01-01T00:00:01Z".to_string(),
+            duration_ms: 0,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
+            preset_name: None,
+            preset_version: None,
+        };
+        append_run(&record, &db_path);
+
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |r| r.get(0))
+            .expect("version");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+        let _: String = conn
+            .query_row(
+                "SELECT path_constraints FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("path_constraints column should exist after migration");
+        let _: String = conn
+            .query_row(
+                "SELECT policy_violations FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("policy_violations column should exist after migration");
+    }
+
+    #[test]
+    fn migrate_v2_to_v3_adds_path_columns() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("v2_upgrade.db");
+
+        // Manually create a v2-era schema (preset columns present, no path columns).
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        conn.execute_batch(
+            "CREATE TABLE schema_version (version INTEGER NOT NULL);
+             INSERT INTO schema_version VALUES (2);
+             CREATE TABLE agent_runs (
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 agent_id TEXT NOT NULL, model TEXT NOT NULL,
+                 workflow_phase TEXT NOT NULL, issue_number INTEGER,
+                 tracker_number INTEGER, tool_calls TEXT NOT NULL DEFAULT '[]',
+                 input_tokens INTEGER, output_tokens INTEGER,
+                 status TEXT NOT NULL, started_at TEXT NOT NULL,
+                 finished_at TEXT NOT NULL, duration_ms INTEGER,
+                 preset_name TEXT, preset_version TEXT
+             );",
+        )
+        .expect("setup v2");
+        drop(conn);
+
+        let record = AgentRunRecord {
+            agent_id: "claude".to_string(),
+            model: "test-model".to_string(),
+            workflow_phase: "issue".to_string(),
+            issue_number: None,
+            tracker_number: None,
+            tool_calls: vec![],
+            input_tokens: None,
+            output_tokens: None,
+            status: "completed".to_string(),
+            started_at: "2026-01-01T00:00:00Z".to_string(),
+            finished_at: "2026-01-01T00:00:01Z".to_string(),
+            duration_ms: 0,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
+            preset_name: Some("default".to_string()),
+            preset_version: Some("0.1.0".to_string()),
+        };
+        append_run(&record, &db_path);
+
+        let conn = rusqlite::Connection::open(&db_path).expect("db");
+        let version: i64 = conn
+            .query_row("SELECT version FROM schema_version", [], |r| r.get(0))
+            .expect("version");
+        assert_eq!(version, CURRENT_SCHEMA_VERSION);
+        let _: String = conn
+            .query_row(
+                "SELECT path_constraints FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("path_constraints column should exist after v2→v3 migration");
+        let _: String = conn
+            .query_row(
+                "SELECT policy_violations FROM agent_runs LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .expect("policy_violations column should exist after v2→v3 migration");
+    }
+
+    #[test]
     fn migrate_is_idempotent() {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("idempotent.db");
@@ -502,6 +735,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 0,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
             preset_name: None,
             preset_version: None,
         };
@@ -548,6 +783,8 @@ mod tests {
             started_at: "2026-01-01T00:00:00Z".to_string(),
             finished_at: "2026-01-01T00:00:01Z".to_string(),
             duration_ms: 0,
+            path_constraints: cli_common::PathConstraints::default(),
+            policy_violations: vec![],
             preset_name: Some("xp".to_string()),
             preset_version: Some("0.1.0".to_string()),
         };

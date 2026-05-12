@@ -613,6 +613,63 @@ pub struct ScanTargets {
     pub paths: Vec<String>,
 }
 
+/// Explicit path allowlist/denylist for regulated deployments.
+///
+/// When `allow_paths` is non-empty, tool calls (Read, Write, Edit, Glob, Grep)
+/// targeting a path that does not begin with one of the listed prefixes are
+/// flagged as policy violations and recorded in the event log. `deny_paths` is
+/// always applied regardless of `allow_paths`.
+///
+/// # Audit limitations
+/// - **Bash** commands are not inspected — shell commands embed paths as
+///   free-form text that cannot be parsed without a full shell parser.
+///   System-prompt guidance discourages shell-level file access, but it is
+///   not audited post-hoc. This is a known gap; configure `deny_paths` and
+///   prompt guidance to mitigate.
+/// - **Glob** only audits the `path` (search root); the `pattern` argument
+///   (e.g. `vendor/**/*.rs`) is not checked.
+/// - **Grep** without a `path` argument is treated as a whole-workspace
+///   access (`"."`) and will trigger an allow-list violation when
+///   `allow_paths` is non-empty.
+/// - **Non-Claude agents** (e.g. Codex): the system-prompt fragment that
+///   instructs the agent to respect path constraints is only injected for
+///   the Claude adapter. Non-Claude agents still have violations recorded
+///   post-hoc, but receive no in-prompt guidance. Caretta emits a
+///   `tracing::warn!` at run time when this combination is detected so
+///   that operators are not silently surprised.
+///
+/// # Relationship to the workflow scoping layer
+/// The workflow scoping layer controls *which workflow prompt* the agent
+/// receives; path constraints control *which files* the agent may touch during
+/// that workflow. They are complementary: scoping narrows the task; path
+/// constraints bound file-system access regardless of task.
+///
+/// # Configuration
+/// In `caretta.toml`:
+/// ```toml
+/// [path_constraints]
+/// allow_paths = ["src/", "tests/"]
+/// deny_paths  = ["vendor/", "secrets/"]
+/// ```
+/// In a workflow YAML, add an optional `path_constraints` key to override
+/// the project-level constraints for a specific workflow.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PathConstraints {
+    /// If non-empty, only file paths that begin with one of these prefixes are allowed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_paths: Vec<String>,
+    /// File paths beginning with these prefixes are always blocked.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deny_paths: Vec<String>,
+}
+
+impl PathConstraints {
+    pub fn is_unconstrained(&self) -> bool {
+        self.allow_paths.is_empty() && self.deny_paths.is_empty()
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: Agent,
@@ -635,6 +692,8 @@ pub struct Config {
     /// Override path for the agent event log SQLite database.
     /// When `None`, falls back to the `CARETTA_EVENT_LOG` env var, then the platform data-local dir.
     pub event_log_path: Option<String>,
+    /// Path allowlist/denylist enforced for every agent tool call in this run.
+    pub path_constraints: PathConstraints,
 }
 
 /// Project-specific test/format commands run after an agent edit.
@@ -741,6 +800,7 @@ impl fmt::Debug for Config {
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
             .field("event_log_path", &self.event_log_path)
+            .field("path_constraints", &self.path_constraints)
             .finish()
     }
 }
@@ -820,6 +880,9 @@ pub struct DevConfig {
     /// Override path for the SQLite event log (also: CARETTA_EVENT_LOG env var).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub event_log_path: Option<String>,
+    /// Path allowlist/denylist for this project. Applied to every agent run.
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub path_constraints: PathConstraints,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]

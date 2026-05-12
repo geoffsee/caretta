@@ -14,6 +14,8 @@ pub mod interview;
 pub mod issue;
 pub mod launch;
 pub mod models_catalog;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod path_constraint;
 pub mod process;
 pub mod refresh;
 pub mod review;
