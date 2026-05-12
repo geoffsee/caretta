@@ -23,8 +23,9 @@ path = "src/main.rs"
 # the agent runtime archive embedded.
 default = []
 bundle-runtime = ["agent-runtime/bundle-runtime", "rusqlite/bundled"]
-# Enable the Dioxus desktop GUI. Requires the `javascriptcoregtk-4.1` system
-# library (webkit2gtk). Off by default so `cargo test` works without GTK deps.
+# Enable the Dioxus desktop GUI. Requires the `webkit2gtk-4.1` system
+# library (`libwebkit2gtk-4.1-dev` on Debian/Ubuntu). Off by default so
+# `cargo test` works without GTK deps.
 desktop = ["dioxus"]
 
 [dependencies]

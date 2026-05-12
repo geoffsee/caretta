@@ -74,14 +74,13 @@ fn record_workflow_run(
         use crate::agent::workflow::{VERSION_MISMATCH_TAG, parse_preset_ref, resolve_preset};
         match resolve_preset(&cfg.root, &cfg.workflow_preset) {
             Ok((name, ver)) => (Some(name), Some(ver)),
-            Err(e) if e.contains(VERSION_MISMATCH_TAG) => {
-                log(&format!("WARNING: preset version mismatch: {e}"));
-                let (name, _) = parse_preset_ref(&cfg.workflow_preset)
-                    .unwrap_or_else(|_| (cfg.workflow_preset.clone(), None));
-                (Some(name), None)
-            }
             Err(e) => {
-                log(&format!("WARNING: preset resolution failed: {e}"));
+                let tag = if e.contains(VERSION_MISMATCH_TAG) {
+                    "version mismatch"
+                } else {
+                    "resolution failed"
+                };
+                log(&format!("WARNING: preset {tag}: {e}"));
                 let (name, _) = parse_preset_ref(&cfg.workflow_preset)
                     .unwrap_or_else(|_| (cfg.workflow_preset.clone(), None));
                 (Some(name), None)
