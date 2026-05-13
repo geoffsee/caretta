@@ -281,6 +281,7 @@ pub fn render_prompt(
 /// is not present in `vars` causes a render error instead of substituting an
 /// empty string. Used by the template fixture test harness to catch templates
 /// that drift from their declared required variables.
+#[doc(hidden)]
 pub fn render_prompt_strict(
     template: &str,
     vars: &serde_json::Value,
@@ -296,7 +297,7 @@ fn render_prompt_inner(
     strict: bool,
 ) -> Result<String, String> {
     let mut hbs = handlebars::Handlebars::new();
-    hbs.set_strict_mode(strict);
+    hbs.set_strict_mode(strict); // non-strict: missing vars become empty string
 
     for (name, body) in fragments {
         hbs.register_partial(name, body)
