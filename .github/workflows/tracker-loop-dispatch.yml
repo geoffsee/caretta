@@ -166,6 +166,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       prs: ${{ steps.resolve-prs.outputs.prs }}
+      pr-count: ${{ steps.resolve-prs.outputs.pr-count }}
     steps:
       - uses: actions/checkout@v4
 
@@ -178,35 +179,46 @@ jobs:
         run: |
           set -euo pipefail
 
+          [[ -z "${ISSUES_JSON:-}" ]] && ISSUES_JSON='[]'
+          open_prs_json="$(gh pr list --state open --limit 100 --json number,headRefName,isDraft,mergeStateStatus)"
           if [[ "$(jq 'length' <<< "$ISSUES_JSON")" -eq 0 ]]; then
-            prs_json="$(gh pr list --state open --limit 50 --json number,headRefName,isDraft,mergeStateStatus \
-              --jq '[.[] | select(.isDraft == false and .mergeStateStatus != "DIRTY" and (.headRefName | test("^agent/issue-[0-9]+$"))) | .number]')"
+            prs_json="$(jq -c '
+              [
+                .[]
+                | select(.isDraft == false and .mergeStateStatus != "DIRTY" and (.headRefName | test("^agent/issue-[0-9]+$")))
+              ]
+              | sort_by(.headRefName | capture("^agent/issue-(?<issue>[0-9]+)$").issue | tonumber)
+              | map(.number)
+            ' <<< "$open_prs_json")"
           else
-            mapfile -t nums < <(jq -r '.[]' <<< "$ISSUES_JSON")
-            found=()
-            for n in "${nums[@]}"; do
-              num="$(gh pr list --head "agent/issue-${n}" --state open --json number,isDraft,mergeStateStatus \
-                -q '.[0] | select(.isDraft == false and .mergeStateStatus != "DIRTY") | .number // empty')"
-              if [[ -n "$num" ]]; then
-                found+=("$num")
-              fi
-            done
-            if [[ ${#found[@]} -eq 0 ]]; then
-              prs_json='[]'
-            else
-              prs_json="$(printf '%s\n' "${found[@]}" | jq -c -R -s 'split("\n") | map(select(length>0)) | unique | map(tonumber)')"
-            fi
+            prs_json="$(jq -c --argjson issues "$ISSUES_JSON" '
+              ($issues | map(tostring)) as $issue_strings
+              | [
+                  $issue_strings[] as $issue
+                  | .[]
+                  | select(
+                      .isDraft == false
+                      and .mergeStateStatus != "DIRTY"
+                      and .headRefName == ("agent/issue-" + $issue)
+                    )
+                  | .number
+                ]
+            ' <<< "$open_prs_json")"
           fi
           [[ -z "$prs_json" ]] && prs_json='[]'
           # GITHUB_OUTPUT is line-oriented: pretty-printed JSON would break parsing (e.g. "Invalid format ' 77,'").
           prs_json="$(printf '%s' "$prs_json" | jq -c .)"
+          pr_count="$(jq 'length' <<< "$prs_json")"
+          echo "Resolved code review PRs: $prs_json"
           echo "prs=$prs_json" >> "$GITHUB_OUTPUT"
+          echo "pr-count=$pr_count" >> "$GITHUB_OUTPUT"
 
   code-review:
     needs: [code-review-plan]
     if: >-
       needs.code-review-plan.result == 'success' &&
-      needs.code-review-plan.outputs.prs != '[]'
+      needs.code-review-plan.outputs.pr-count != '' &&
+      needs.code-review-plan.outputs.pr-count != '0'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -235,7 +247,8 @@ jobs:
     needs: [code-review-plan, code-review]
     if: >-
       needs.code-review-plan.result == 'success' &&
-      needs.code-review-plan.outputs.prs != '[]' &&
+      needs.code-review-plan.outputs.pr-count != '' &&
+      needs.code-review-plan.outputs.pr-count != '0' &&
       needs.code-review.result == 'success'
     runs-on: ubuntu-latest
     strategy:
