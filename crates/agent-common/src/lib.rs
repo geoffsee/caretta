@@ -95,9 +95,7 @@ pub struct CapabilityManifest {
 
 impl CapabilityManifest {
     pub fn new() -> Self {
-        Self {
-            supported: BTreeSet::new(),
-        }
+        Self::default()
     }
 
     pub fn with(mut self, capability: Capability) -> Self {
@@ -105,7 +103,7 @@ impl CapabilityManifest {
         self
     }
 
-    pub fn extend<I: IntoIterator<Item = Capability>>(mut self, capabilities: I) -> Self {
+    pub fn with_all<I: IntoIterator<Item = Capability>>(mut self, capabilities: I) -> Self {
         self.supported.extend(capabilities);
         self
     }
@@ -159,6 +157,15 @@ pub trait AgentCliAdapter {
     /// inspect support without probing each argv builder. Returning an empty
     /// manifest means the adapter accepts no invocations.
     fn capabilities(&self) -> CapabilityManifest;
+
+    /// Returns `true` if this adapter supports `cap`.
+    ///
+    /// Overrideable so adapters that want a cheaper check (e.g. a static
+    /// `[Capability]` slice) avoid the `BTreeSet` allocation on every
+    /// `command_for` call.
+    fn supports_capability(&self, cap: Capability) -> bool {
+        self.capabilities().supports(cap)
+    }
 
     fn help_args(&self) -> Vec<String>;
 
@@ -222,7 +229,7 @@ pub trait AgentCliAdapter {
             capability,
         };
 
-        if !self.capabilities().supports(capability) {
+        if !self.supports_capability(capability) {
             return Err(unsupported());
         }
 

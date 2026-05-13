@@ -240,7 +240,7 @@ mod tests {
     }
 
     #[test]
-    fn cursor_capabilities_match_claude_minus_yolo() {
+    fn claude_and_cursor_have_identical_capability_manifests() {
         let claude_manifest = ClaudeWrapper.capabilities();
         let cursor_manifest = CursorWrapper.capabilities();
         assert_eq!(claude_manifest, cursor_manifest);
