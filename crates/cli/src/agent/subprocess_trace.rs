@@ -45,6 +45,17 @@ pub struct RunTracer {
     started_at: DateTime<Utc>,
     started_instant: Instant,
     log_dir: PathBuf,
+    finished: bool,
+}
+
+impl Drop for RunTracer {
+    fn drop(&mut self) {
+        if !self.finished {
+            log("subprocess_trace: RunTracer dropped without calling finish — trace lost");
+            #[cfg(debug_assertions)]
+            panic!("RunTracer dropped without calling finish");
+        }
+    }
 }
 
 impl RunTracer {
@@ -75,6 +86,7 @@ impl RunTracer {
             started_at: Utc::now(),
             started_instant: Instant::now(),
             log_dir,
+            finished: false,
         }
     }
 
@@ -82,14 +94,18 @@ impl RunTracer {
     /// (`None` if the child was killed or never spawned). Always returns a
     /// record so callers can serialize it for tests; I/O is the responsibility
     /// of [`Self::finish`].
-    pub fn into_record(self, exit_code: Option<i32>) -> RunRecord {
+    ///
+    /// Marks the tracer as finished so that `Drop` does not warn when the
+    /// caller inspects the record directly without going through `finish`.
+    pub fn into_record(&mut self, exit_code: Option<i32>) -> RunRecord {
+        self.finished = true;
         let duration_ms = u64::try_from(self.started_instant.elapsed().as_millis()).unwrap_or(0);
         RunRecord {
             schema: RUN_RECORD_SCHEMA.to_string(),
-            agent: self.agent,
-            prompt_hash: self.prompt_hash,
-            model: self.model,
-            endpoint: self.endpoint,
+            agent: self.agent.clone(),
+            prompt_hash: self.prompt_hash.clone(),
+            model: self.model.clone(),
+            endpoint: self.endpoint.clone(),
             started_at: iso8601_utc(self.started_at),
             exit_code,
             duration_ms,
@@ -99,10 +115,9 @@ impl RunTracer {
     /// Finalize the trace by writing one JSON line to `.caretta/runs.jsonl`.
     /// I/O failures are logged but do not propagate — tracing must never
     /// influence the agent run outcome.
-    pub fn finish(self, exit_code: Option<i32>) {
-        let log_dir = self.log_dir.clone();
+    pub fn finish(mut self, exit_code: Option<i32>) {
         let record = self.into_record(exit_code);
-        append_record(&log_dir, &record);
+        append_record(&self.log_dir, &record);
     }
 }
 
@@ -280,6 +295,13 @@ mod tests {
             endpoint_for_config(&cfg),
             Some("https://api.anthropic.com".to_string())
         );
+    }
+
+    #[test]
+    fn endpoint_for_config_returns_none_for_agents_without_default() {
+        let tmp = TempDir::new().expect("tempdir");
+        assert_eq!(endpoint_for_config(&base_config(tmp.path(), Agent::Cline)), None);
+        assert_eq!(endpoint_for_config(&base_config(tmp.path(), Agent::Junie)), None);
     }
 
     #[test]

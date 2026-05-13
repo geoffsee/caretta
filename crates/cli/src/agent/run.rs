@@ -75,6 +75,8 @@ fn run_claude_native_with_env_for_prompt(
     )
 }
 
+// TODO: bundle the growing parameter list into a SubprocessRunOpts struct so
+// future additions don't need another allow suppression and positional argument.
 #[allow(clippy::too_many_arguments)]
 fn run_claude_native_with_env_for_prompt_and_stdin(
     binary: &str,
