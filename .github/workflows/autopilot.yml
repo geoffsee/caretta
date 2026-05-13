@@ -17,6 +17,7 @@ on:
 
 permissions:
   actions: write
+  checks: read
   contents: write
   issues: write
   pull-requests: write
@@ -110,8 +111,107 @@ jobs:
             echo "busy=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Dispatch pending PR CI
+        id: pending-ci
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          append_entry() {
+            jq -c \
+              --arg number "$2" \
+              --arg branch "$3" \
+              --arg sha "$4" \
+              --arg url "$5" \
+              '. + [{number: ($number | tonumber), branch: $branch, sha: $sha, url: $url}]' \
+              <<< "$1"
+          }
+
+          prs_json="$(gh pr list --state open --limit 100 --json number,headRefName,headRefOid,isDraft,mergeStateStatus,url)"
+          pending_json='[]'
+          dispatched_json='[]'
+          active_json='[]'
+          current_json='[]'
+
+          while IFS=$'\t' read -r number branch sha url; do
+            [[ -z "${number:-}" ]] && continue
+
+            test_check="$(gh api "repos/$GH_REPO/commits/$sha/check-runs" \
+              --jq '[.check_runs[] | select(.name == "Test")] | sort_by(.started_at // .created_at // "") | last // empty')"
+
+            if [[ -n "$test_check" ]]; then
+              current_json="$(append_entry "$current_json" "$number" "$branch" "$sha" "$url")"
+              continue
+            fi
+
+            queued_runs="$(gh run list \
+              --workflow ci.yml \
+              --branch "$branch" \
+              --status queued \
+              --limit 20 \
+              --json databaseId,headSha \
+              | jq --arg sha "$sha" '[.[] | select(.headSha == $sha)] | length')"
+            in_progress_runs="$(gh run list \
+              --workflow ci.yml \
+              --branch "$branch" \
+              --status in_progress \
+              --limit 20 \
+              --json databaseId,headSha \
+              | jq --arg sha "$sha" '[.[] | select(.headSha == $sha)] | length')"
+            active_runs="$((queued_runs + in_progress_runs))"
+
+            pending_json="$(append_entry "$pending_json" "$number" "$branch" "$sha" "$url")"
+            if (( active_runs > 0 )); then
+              active_json="$(append_entry "$active_json" "$number" "$branch" "$sha" "$url")"
+              continue
+            fi
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "Dry run: would dispatch CI for PR #$number ($branch @ $sha)."
+            else
+              echo "Dispatching CI for PR #$number ($branch @ $sha)."
+              gh workflow run ci.yml --ref "$branch"
+              dispatched_json="$(append_entry "$dispatched_json" "$number" "$branch" "$sha" "$url")"
+            fi
+          done < <(
+            jq -r '
+              .[]
+              | select(
+                  .isDraft == false
+                  and .mergeStateStatus != "DIRTY"
+                  and (.headRefName | test("^agent/issue-[0-9]+$"))
+                )
+              | [.number, .headRefName, .headRefOid, .url]
+              | @tsv
+            ' <<< "$prs_json"
+          )
+
+          pending_count="$(jq 'length' <<< "$pending_json")"
+          dispatched_count="$(jq 'length' <<< "$dispatched_json")"
+          active_count="$(jq 'length' <<< "$active_json")"
+          current_count="$(jq 'length' <<< "$current_json")"
+
+          {
+            echo "pending_count=$pending_count"
+            echo "dispatched_count=$dispatched_count"
+            echo "active_count=$active_count"
+            echo "current_count=$current_count"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### PR CI check"
+            echo
+            echo "- Current agent PRs with a Test check on their head SHA: $current_count"
+            echo "- Agent PRs pending a Test check on their head SHA: $pending_count"
+            echo "- Agent PRs already queued/running CI for their head SHA: $active_count"
+            echo "- CI dispatches started: $dispatched_count"
+            if (( pending_count > 0 )); then
+              echo "- Target workflow dispatch skipped this pass so pending tests can attach to the current PR heads."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Dispatch tracker loop
-        if: steps.evaluate.outputs.workflow == 'tracker-loop-dispatch.yml' && steps.activity.outputs.busy == 'false' && env.DRY_RUN != 'true'
+        if: steps.evaluate.outputs.workflow == 'tracker-loop-dispatch.yml' && steps.activity.outputs.busy == 'false' && steps.pending-ci.outputs.pending_count == '0' && env.DRY_RUN != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -122,7 +222,7 @@ jobs:
             -f context="$AUTOPILOT_CONTEXT"
 
       - name: Dispatch factory cycle
-        if: steps.evaluate.outputs.workflow == 'factory-cycle-dispatch.yml' && steps.activity.outputs.busy == 'false' && env.DRY_RUN != 'true'
+        if: steps.evaluate.outputs.workflow == 'factory-cycle-dispatch.yml' && steps.activity.outputs.busy == 'false' && steps.pending-ci.outputs.pending_count == '0' && env.DRY_RUN != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -132,7 +232,7 @@ jobs:
             -f context="$AUTOPILOT_CONTEXT"
 
       - name: Report dry run
-        if: steps.evaluate.outputs.workflow != '' && steps.activity.outputs.busy == 'false' && env.DRY_RUN == 'true'
+        if: steps.evaluate.outputs.workflow != '' && steps.activity.outputs.busy == 'false' && steps.pending-ci.outputs.pending_count == '0' && env.DRY_RUN == 'true'
         shell: bash
         run: |
           {
