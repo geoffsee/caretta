@@ -216,6 +216,7 @@ jobs:
   code-review:
     needs: [code-review-plan]
     if: >-
+      always() && !failure() && !cancelled() &&
       needs.code-review-plan.result == 'success' &&
       needs.code-review-plan.outputs.prs != '' &&
       needs.code-review-plan.outputs.prs != '[]'
@@ -246,6 +247,7 @@ jobs:
   fix-review-comments:
     needs: [code-review-plan, code-review]
     if: >-
+      always() && !failure() && !cancelled() &&
       needs.code-review-plan.result == 'success' &&
       needs.code-review-plan.outputs.prs != '' &&
       needs.code-review-plan.outputs.prs != '[]' &&
