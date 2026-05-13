@@ -14,7 +14,7 @@ impl AgentCliAdapter for GeminiWrapper {
             .with(Capability::Version)
             .with(Capability::Model)
             .with(Capability::Prompt)
-            .with(Capability::Resume)
+            // Resume intentionally omitted: resume_args(Some(_)) returns None
             .with(Capability::OutputFormat)
             .with(Capability::Yolo)
     }
@@ -66,7 +66,7 @@ impl AgentCliAdapter for GeminiWrapper {
 #[cfg(test)]
 mod tests {
     use super::GeminiWrapper;
-    use agent_common::AgentCliAdapter;
+    use agent_common::{AgentCliAdapter, AgentInvocation, Capability};
 
     #[test]
     fn builds_model_prompt_and_output_format_args() {
@@ -102,5 +102,16 @@ mod tests {
             Some(vec!["--resume".to_string()])
         );
         assert_eq!(wrapper.resume_args(Some("ignored")), None);
+    }
+
+    #[test]
+    fn resume_with_session_id_returns_structured_error() {
+        let err = GeminiWrapper
+            .command_for(AgentInvocation::Resume(Some("session-x".to_string())))
+            .expect_err("resume with session id is not supported by GeminiWrapper");
+        assert_eq!(err.binary, "gemini");
+        assert_eq!(err.capability, Capability::Resume);
+        assert!(err.to_string().contains("resume"));
+        assert!(err.to_string().contains("gemini"));
     }
 }
