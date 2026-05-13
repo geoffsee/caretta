@@ -1,16 +1,19 @@
 use indexmap::IndexMap;
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::agent::assets::assets_dir;
+use crate::agent::cmd::die;
 use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;
 
 // ── YAML config types ────────────────────────────────────────────────────
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowConfig {
     pub name: String,
     pub id: String,
@@ -36,7 +39,8 @@ pub struct WorkflowConfig {
 }
 
 /// Fetch the body of a GitHub issue by its label and inject it as a template variable.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ExtraContextFetch {
     /// Template variable name to inject (e.g. "report_synthesis").
     pub name: String,
@@ -44,7 +48,7 @@ pub struct ExtraContextFetch {
     pub label: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionPattern {
     TwoPhase,
@@ -53,7 +57,8 @@ pub enum ExecutionPattern {
     Implementation,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UiConfig {
     #[serde(default = "default_category")]
     pub category: String,
@@ -119,7 +124,8 @@ pub fn load_sidebar_entries(root: &str, preset: &str) -> Vec<WorkflowEntry> {
     entries
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PhaseConfig {
     pub template: String,
     #[serde(default)]
@@ -209,6 +215,10 @@ pub fn list_presets(root: &str) -> Vec<String> {
 
 /// Scan bundled and project-local workflow directories for the selected preset.
 /// Project-local workflows override bundled workflows with the same `id`.
+///
+/// Each `workflow.yaml` is validated against [`WorkflowConfig`]; misconfigured
+/// files abort startup with a field-named error rather than silently falling
+/// back to defaults.
 pub fn load_workflows(root: &str, preset: &str) -> HashMap<String, WorkflowConfig> {
     let mut map = HashMap::new();
     for base in preset_dirs(root, preset) {
@@ -227,13 +237,13 @@ pub fn load_workflows(root: &str, preset: &str) -> HashMap<String, WorkflowConfi
                 Ok(c) => c,
                 Err(_) => continue,
             };
-            match serde_yaml::from_str::<WorkflowConfig>(&content) {
+            match parse_workflow_yaml(&content) {
                 Ok(wf) => {
                     map.insert(wf.id.clone(), wf);
                 }
                 Err(e) => {
-                    log(&format!(
-                        "WARNING: failed to parse {}: {e}",
+                    die(&format!(
+                        "Invalid workflow config {}: {e}",
                         yaml_path.display()
                     ));
                 }
@@ -241,6 +251,149 @@ pub fn load_workflows(root: &str, preset: &str) -> HashMap<String, WorkflowConfi
         }
     }
     map
+}
+
+/// Parse and validate a single `workflow.yaml` string against
+/// [`WorkflowConfig`]'s schema.
+///
+/// Unknown fields are rejected (no silent defaults), and the returned error is
+/// rewritten to highlight the offending field name and, when possible, a
+/// suggested correction (`did you mean \`visible\`?`).
+pub fn parse_workflow_yaml(content: &str) -> Result<WorkflowConfig, String> {
+    serde_yaml::from_str::<WorkflowConfig>(content).map_err(|e| format_yaml_error(content, &e))
+}
+
+/// Return the JSON Schema derived from [`WorkflowConfig`].
+///
+/// Generated via `schemars` so that documentation, tooling, and external
+/// validators can consume the same source of truth that load-time validation
+/// uses.
+pub fn workflow_json_schema() -> schemars::Schema {
+    schemars::schema_for!(WorkflowConfig)
+}
+
+/// Rewrite a `serde_yaml` error into a startup-friendly message.
+///
+/// `serde_yaml` already names the offending field; we append a "did you mean"
+/// suggestion when the unknown field is a near-miss for a known one. Missing
+/// required fields and parse errors pass through with their location.
+fn format_yaml_error(content: &str, err: &serde_yaml::Error) -> String {
+    let msg = err.to_string();
+    let location = err
+        .location()
+        .map(|loc| format!(" (line {}, column {})", loc.line(), loc.column()))
+        .unwrap_or_default();
+
+    if let Some((path, bad, known)) = parse_unknown_field(&msg) {
+        let suggestion = closest_match(&bad, &known)
+            .map(|s| format!(" — did you mean `{s}`?"))
+            .unwrap_or_default();
+        let in_path = if path.is_empty() {
+            String::new()
+        } else {
+            format!(" in `{path}`")
+        };
+        return format!(
+            "unknown field `{bad}`{in_path}{location}{suggestion}. Allowed fields: {}",
+            known.join(", ")
+        );
+    }
+
+    if let Some((path, field)) = parse_missing_field(&msg) {
+        let in_path = if path.is_empty() {
+            String::new()
+        } else {
+            format!(" in `{path}`")
+        };
+        return format!("missing required field `{field}`{in_path}{location}");
+    }
+
+    // Fall back to the raw serde_yaml message, which still names fields when
+    // the error is a type mismatch on a specific value.
+    let _ = content; // reserved for future contextual hints
+    format!("{msg}{location}")
+}
+
+/// Pull the offending field name, dotted path, and list of allowed fields out
+/// of a `serde_yaml` "unknown field" error. Nested errors are prefixed by the
+/// parent path (e.g. `ui: unknown field …`); we capture that prefix as `path`
+/// so the rewritten message can name the location.
+fn parse_unknown_field(msg: &str) -> Option<(String, String, Vec<String>)> {
+    let needle = "unknown field `";
+    let idx = msg.find(needle)?;
+    let path = msg[..idx].trim_end_matches(": ").to_string();
+    let after = &msg[idx + needle.len()..];
+    let (bad, rest) = after.split_once('`')?;
+    let known = if let Some(list) = rest.strip_prefix(", expected one of ") {
+        list.split(',')
+            .filter_map(|tok| {
+                let tok = tok.trim();
+                tok.strip_prefix('`').and_then(|t| t.strip_suffix('`'))
+            })
+            .map(|s| s.to_string())
+            .collect()
+    } else if let Some(single) = rest.strip_prefix(", expected `") {
+        // `expected `field`` — singular case used by some serde versions.
+        single
+            .strip_suffix('`')
+            .map(|s| vec![s.to_string()])
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    Some((path, bad.to_string(), known))
+}
+
+fn parse_missing_field(msg: &str) -> Option<(String, String)> {
+    let needle = "missing field `";
+    let idx = msg.find(needle)?;
+    let path = msg[..idx].trim_end_matches(": ").to_string();
+    let after = &msg[idx + needle.len()..];
+    let (field, _) = after.split_once('`')?;
+    Some((path, field.to_string()))
+}
+
+/// Return the closest match by Levenshtein distance, if any is within the
+/// half-the-shorter-name threshold (so wildly different typos don't produce
+/// misleading suggestions).
+fn closest_match(needle: &str, haystack: &[String]) -> Option<String> {
+    let mut best: Option<(usize, &String)> = None;
+    for candidate in haystack {
+        let d = levenshtein(needle, candidate);
+        if best.is_none_or(|(bd, _)| d < bd) {
+            best = Some((d, candidate));
+        }
+    }
+    let (dist, candidate) = best?;
+    let threshold = needle.len().min(candidate.len()).max(2) / 2;
+    if dist <= threshold.max(1) {
+        Some(candidate.clone())
+    } else {
+        None
+    }
+}
+
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let (n, m) = (a.len(), b.len());
+    if n == 0 {
+        return m;
+    }
+    if m == 0 {
+        return n;
+    }
+    let mut prev: Vec<usize> = (0..=m).collect();
+    let mut curr = vec![0usize; m + 1];
+    for i in 1..=n {
+        curr[0] = i;
+        for j in 1..=m {
+            let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
+            curr[j] = (prev[j] + 1).min(curr[j - 1] + 1).min(prev[j - 1] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[m]
 }
 
 /// Read a prompt template file from a workflow directory within a preset.
@@ -726,5 +879,123 @@ phases:
             ),
             "local template"
         );
+    }
+
+    #[test]
+    fn parse_workflow_yaml_accepts_valid_config() {
+        let yaml = r#"
+name: Example
+id: example
+description: An example workflow
+pattern: two_phase
+context: none
+ui:
+  category: planning
+  order: 20
+  visible: true
+phases:
+  draft:
+    template: draft.md
+"#;
+        let wf = parse_workflow_yaml(yaml).expect("valid workflow should parse");
+        assert_eq!(wf.id, "example");
+        assert_eq!(wf.pattern, ExecutionPattern::TwoPhase);
+        assert_eq!(wf.ui.order, 20);
+        assert!(wf.phases.contains_key("draft"));
+    }
+
+    #[test]
+    fn parse_workflow_yaml_rejects_unknown_top_level_field_with_suggestion() {
+        // `pattren` is a near-miss for `pattern` — the error should name the
+        // offending field and suggest the closest known one.
+        let yaml = r#"
+name: Example
+id: example
+pattren: two_phase
+"#;
+        let err = parse_workflow_yaml(yaml).expect_err("unknown field should fail");
+        assert!(
+            err.contains("unknown field `pattren`"),
+            "expected unknown-field error to name the field, got: {err}"
+        );
+        assert!(
+            err.contains("did you mean `pattern`?"),
+            "expected did-you-mean suggestion, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_workflow_yaml_rejects_unknown_nested_field() {
+        // `visibel` inside `ui` is also a near-miss for `visible`.
+        let yaml = r#"
+name: Example
+id: example
+pattern: one_shot
+ui:
+  visibel: true
+"#;
+        let err = parse_workflow_yaml(yaml).expect_err("unknown nested field should fail");
+        assert!(
+            err.contains("unknown field `visibel`"),
+            "expected unknown-field error to name the field, got: {err}"
+        );
+        assert!(
+            err.contains("did you mean `visible`?"),
+            "expected did-you-mean suggestion, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_workflow_yaml_reports_missing_required_field() {
+        // `name` is required and has no default.
+        let yaml = r#"
+id: example
+pattern: one_shot
+"#;
+        let err = parse_workflow_yaml(yaml).expect_err("missing required field should fail");
+        assert!(
+            err.contains("missing required field `name`"),
+            "expected missing-field error to name the field, got: {err}"
+        );
+    }
+
+    #[test]
+    fn workflow_json_schema_is_derivable_and_lists_known_fields() {
+        // The schema is derived from `WorkflowConfig` via `schemars` and acts
+        // as a single source of truth for tooling/docs. We don't assert the
+        // full shape here, only that it exposes the top-level field names so
+        // downstream consumers can rely on it.
+        let schema = workflow_json_schema();
+        let json = serde_json::to_value(&schema).expect("schema serializes");
+        let props = json
+            .get("properties")
+            .and_then(|p| p.as_object())
+            .expect("schema has properties");
+        for field in [
+            "name",
+            "id",
+            "pattern",
+            "context",
+            "ui",
+            "depends_on",
+            "phases",
+        ] {
+            assert!(
+                props.contains_key(field),
+                "schema should expose `{field}` property: {props:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn closest_match_finds_near_typos() {
+        let known: Vec<String> = ["pattern", "context", "phases"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(closest_match("pattren", &known), Some("pattern".into()));
+        assert_eq!(closest_match("contxt", &known), Some("context".into()));
+        // Wildly different inputs should not produce a misleading suggestion.
+        assert_eq!(closest_match("xyz", &known), None);
     }
 }

@@ -49,6 +49,7 @@ clap = { version = "4.5", features = ["derive"] }
 handlebars = "6"
 serde_yaml = "0.9"
 indexmap = { version = "2", features = ["serde"] }
+schemars = { version = "1", features = ["indexmap2"] }
 tempfile = "3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
