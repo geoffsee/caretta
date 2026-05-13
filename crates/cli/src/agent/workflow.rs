@@ -260,7 +260,7 @@ pub fn load_workflows(root: &str, preset: &str) -> HashMap<String, WorkflowConfi
 /// rewritten to highlight the offending field name and, when possible, a
 /// suggested correction (`did you mean \`visible\`?`).
 pub fn parse_workflow_yaml(content: &str) -> Result<WorkflowConfig, String> {
-    serde_yaml::from_str::<WorkflowConfig>(content).map_err(|e| format_yaml_error(content, &e))
+    serde_yaml::from_str::<WorkflowConfig>(content).map_err(|e| format_yaml_error(&e))
 }
 
 /// Return the JSON Schema derived from [`WorkflowConfig`].
@@ -277,7 +277,7 @@ pub fn workflow_json_schema() -> schemars::Schema {
 /// `serde_yaml` already names the offending field; we append a "did you mean"
 /// suggestion when the unknown field is a near-miss for a known one. Missing
 /// required fields and parse errors pass through with their location.
-fn format_yaml_error(content: &str, err: &serde_yaml::Error) -> String {
+fn format_yaml_error(err: &serde_yaml::Error) -> String {
     let msg = err.to_string();
     let location = err
         .location()
@@ -310,7 +310,6 @@ fn format_yaml_error(content: &str, err: &serde_yaml::Error) -> String {
 
     // Fall back to the raw serde_yaml message, which still names fields when
     // the error is a type mismatch on a specific value.
-    let _ = content; // reserved for future contextual hints
     format!("{msg}{location}")
 }
 
@@ -318,6 +317,10 @@ fn format_yaml_error(content: &str, err: &serde_yaml::Error) -> String {
 /// of a `serde_yaml` "unknown field" error. Nested errors are prefixed by the
 /// parent path (e.g. `ui: unknown field …`); we capture that prefix as `path`
 /// so the rewritten message can name the location.
+///
+/// Matches serde_yaml 0.9.x error format:
+///   "unknown field `<name>`, expected one of `f1`, `f2`, …"
+///   or with nesting: "ui: unknown field `<name>`, …"
 fn parse_unknown_field(msg: &str) -> Option<(String, String, Vec<String>)> {
     let needle = "unknown field `";
     let idx = msg.find(needle)?;
