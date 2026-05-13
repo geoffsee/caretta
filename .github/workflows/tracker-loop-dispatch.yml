@@ -217,8 +217,8 @@ jobs:
     needs: [code-review-plan]
     if: >-
       needs.code-review-plan.result == 'success' &&
-      needs.code-review-plan.outputs.pr-count != '' &&
-      needs.code-review-plan.outputs.pr-count != '0'
+      needs.code-review-plan.outputs.prs != '' &&
+      needs.code-review-plan.outputs.prs != '[]'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -247,8 +247,8 @@ jobs:
     needs: [code-review-plan, code-review]
     if: >-
       needs.code-review-plan.result == 'success' &&
-      needs.code-review-plan.outputs.pr-count != '' &&
-      needs.code-review-plan.outputs.pr-count != '0' &&
+      needs.code-review-plan.outputs.prs != '' &&
+      needs.code-review-plan.outputs.prs != '[]' &&
       needs.code-review.result == 'success'
     runs-on: ubuntu-latest
     strategy:
