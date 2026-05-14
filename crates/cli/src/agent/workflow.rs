@@ -281,7 +281,6 @@ pub fn render_prompt(
 /// is not present in `vars` causes a render error instead of substituting an
 /// empty string. Used by the template fixture test harness to catch templates
 /// that drift from their declared required variables.
-#[cfg(test)]
 pub fn render_prompt_strict(
     template: &str,
     vars: &serde_json::Value,

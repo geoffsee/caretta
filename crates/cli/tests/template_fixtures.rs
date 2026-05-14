@@ -95,10 +95,7 @@ fn yaml_to_json(value: &serde_yaml::Value) -> serde_json::Value {
 fn render_missing_substring_excerpt(template_path: &Path, missing: &str, output: &str) -> String {
     let preview = if output.len() > 4000 {
         let truncated: String = output.chars().take(4000).collect();
-        format!(
-            "{truncated}\n... [truncated, {} bytes total]",
-            output.len()
-        )
+        format!("{truncated}\n... [truncated, {} bytes total]", output.len())
     } else {
         output.to_string()
     };
