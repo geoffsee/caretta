@@ -224,12 +224,13 @@ pub trait AgentCliAdapter {
         invocation: AgentInvocation,
     ) -> Result<AgentCliCommand, UnsupportedCapabilityError> {
         let capability = invocation.capability();
+        let manifest = self.capabilities();
         let unsupported = || UnsupportedCapabilityError {
             binary: self.binary().to_string(),
             capability,
         };
 
-        if !self.supports_capability(capability) {
+        if !manifest.supports(capability) {
             return Err(unsupported());
         }
 

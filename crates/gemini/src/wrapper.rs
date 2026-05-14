@@ -14,7 +14,7 @@ impl AgentCliAdapter for GeminiWrapper {
             .with(Capability::Version)
             .with(Capability::Model)
             .with(Capability::Prompt)
-            // Resume intentionally omitted: resume_args(Some(_)) returns None
+            .with(Capability::Resume)
             .with(Capability::OutputFormat)
             .with(Capability::Yolo)
     }
@@ -102,6 +102,15 @@ mod tests {
             Some(vec!["--resume".to_string()])
         );
         assert_eq!(wrapper.resume_args(Some("ignored")), None);
+    }
+
+    #[test]
+    fn resume_without_session_id_succeeds() {
+        let cmd = GeminiWrapper
+            .command_for(AgentInvocation::Resume(None))
+            .expect("resume without session id is supported by GeminiWrapper");
+        assert_eq!(cmd.binary, "gemini");
+        assert_eq!(cmd.args, vec!["--resume".to_string()]);
     }
 
     #[test]
