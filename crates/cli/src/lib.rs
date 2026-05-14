@@ -265,6 +265,13 @@ where
 
         let cli = Cli::parse();
 
+        // Materialize embedded workflow/skill assets to the app-data dir so the
+        // binary works outside the caretta source tree (e.g. CI runners). The
+        // `load_workflows` lookup searches `materialized_workflows_dir()` first,
+        // and the release tarball ships only the binary — without this, preset
+        // discovery returns empty and built-in workflows resolve to "unknown".
+        agent::assets::materialize_assets();
+
         if cli.create_labels {
             let config = parse_args();
             let content =
