@@ -12,6 +12,7 @@ use crate::agent::types::Config;
 // ── YAML config types ────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct WorkflowConfig {
     pub name: String,
     pub id: String,
@@ -55,6 +56,7 @@ pub enum ExecutionPattern {
 }
 
 #[derive(Clone, Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct UiConfig {
     #[serde(default = "default_category")]
     pub category: String,
@@ -372,8 +374,8 @@ fn closest_match(needle: &str, haystack: &[String]) -> Option<String> {
 }
 
 fn levenshtein(a: &str, b: &str) -> usize {
-    let a: Vec<char> = a.chars().collect();
-    let b: Vec<char> = b.chars().collect();
+    let a = a.as_bytes();
+    let b = b.as_bytes();
     let (n, m) = (a.len(), b.len());
     if n == 0 {
         return m;
