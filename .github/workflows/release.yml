@@ -1,0 +1,181 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "v* tag to build and publish"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  GITHUB_TOKEN: ${{ github.token }}
+  GH_TOKEN: ${{ github.token }}
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: caretta-x86_64-linux
+            container: ghcr.io/geoffsee/caretta-ci:latest
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-24.04-arm
+            artifact: caretta-aarch64-linux
+            container: ghcr.io/geoffsee/caretta-ci:latest
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: caretta-aarch64-macos
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: caretta-x86_64-windows
+
+    runs-on: ${{ matrix.os }}
+    container: ${{ matrix.container }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Mark workspace as safe for git
+        if: runner.os != 'Windows'
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Setup Bun
+        if: ${{ !matrix.container }}
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install system dependencies (Linux)
+        if: runner.os == 'Linux' && !matrix.container
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            libxdo-dev \
+            libssl-dev \
+            pkg-config
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --features bundle-runtime --target ${{ matrix.target }}
+
+      - name: Package (unix)
+        if: runner.os != 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          tar czf ../../../${{ matrix.artifact }}.tar.gz caretta
+          cd ../../..
+
+      - name: Package (windows)
+        if: runner.os == 'Windows'
+        run: |
+          cd target/${{ matrix.target }}/release
+          7z a ../../../${{ matrix.artifact }}.zip caretta.exe
+          cd ../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.artifact }}.tar.gz
+            ${{ matrix.artifact }}.zip
+
+  publish-crate:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Mark workspace as safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Publish crate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$(awk -F '"' '/^version = / { print $2; exit }' Cargo.toml)"
+          expected_tag="v${version}"
+          if [[ "$RELEASE_TAG" != "$expected_tag" ]]; then
+            echo "Release tag $RELEASE_TAG does not match Cargo.toml version $version." >&2
+            echo "Update Cargo.toml so the workspace version matches $RELEASE_TAG before publishing." >&2
+            exit 1
+          fi
+
+          user_agent="caretta-release-workflow (https://github.com/geoffsee/caretta)"
+          http_code="$(
+            curl -sS \
+              -A "$user_agent" \
+              -H "Accept: application/json" \
+              -o /tmp/caretta-crate-version.json \
+              -w "%{http_code}" \
+              "https://crates.io/api/v1/crates/caretta/${version}"
+          )"
+          case "$http_code" in
+            200)
+              echo "caretta ${version} is already published on crates.io; skipping."
+              exit 0
+              ;;
+            404)
+              ;;
+            *)
+              echo "Unexpected crates.io API response while checking caretta ${version}: HTTP ${http_code}" >&2
+              cat /tmp/caretta-crate-version.json >&2 || true
+              exit 1
+              ;;
+          esac
+
+          if [[ -z "${CARGO_REGISTRY_TOKEN:-}" ]]; then
+            echo "CARGO_REGISTRY_TOKEN secret is required to publish caretta ${version}." >&2
+            exit 1
+          fi
+
+          ./scripts/stage-crates-io.sh
+          cargo publish --manifest-path publish/caretta/Cargo.toml --no-verify
+
+  release:
+    needs: [build, publish-crate]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          generate_release_notes: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.zip
