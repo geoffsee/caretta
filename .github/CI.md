@@ -49,12 +49,14 @@ should use their native `task` value directly.
 2. If an open `sprint` issue exists, Autopilot dispatches `tracker-loop-dispatch.yml` with that sprint issue number.
 3. If no open `sprint` issue exists, Autopilot dispatches `factory-cycle-dispatch.yml` to plan the next cycle.
 4. Tracker loop work creates or updates PRs.
-5. After tracker work succeeds, `tracker-loop-dispatch.yml` runs `caretta code-review`.
-6. After code review succeeds, it runs `caretta fix-pr <PR>` for each open PR.
-7. `Release Mediator` creates a neutral, time-bounded checkpoint issue each Friday.
-8. `Release Mediator` calls `Release Tag Publisher` with the checkpoint issue number.
-9. `Release Tag Publisher` creates and pushes the next annotated `v*` tag.
-10. The pushed `v*` tag triggers `release.yml`, which builds release artifacts and publishes the matching Cargo version to crates.io.
+5. Before review, `tracker-loop-dispatch.yml` dispatches `ci.yml` for current agent PR heads, mirrors the result to the PR head `Test` commit status, and waits for it to pass.
+6. After tracker work succeeds, `tracker-loop-dispatch.yml` runs `caretta code-review`.
+7. After code review succeeds, it runs `caretta fix-pr <PR>` for each open PR.
+8. After review fixes and branch syncs, `tracker-loop-dispatch.yml` dispatches `ci.yml` again for the updated PR heads and refreshes the `Test` commit status before enabling auto-merge.
+9. `Release Mediator` creates a neutral, time-bounded checkpoint issue each Friday.
+10. `Release Mediator` calls `Release Tag Publisher` with the checkpoint issue number.
+11. `Release Tag Publisher` creates and pushes the next annotated `v*` tag.
+12. The pushed `v*` tag triggers `release.yml`, which builds release artifacts and publishes the matching Cargo version to crates.io.
 
 ## Release Checkpoints
 
