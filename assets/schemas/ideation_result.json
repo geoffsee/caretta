@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IdeationResult",
+  "description": "Typed output schema for the Ideation workflow artifact. Embedded as <!-- caretta:ideation_result {...} --> in the ideation GitHub issue body so downstream workflows (UXR Synth) can validate the hand-off.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "idea_count",
+    "buckets"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Schema version. Currently \"1.0.0\"."
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp when the ideation agent run completed (e.g. \"2026-05-15T10:30:00Z\")."
+    },
+    "idea_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of ideas in the final ideation set."
+    },
+    "buckets": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Bucket names present in the output (e.g. [\"capability\", \"foundational\", \"provocations\", \"wildcards\"])."
+    }
+  }
+}

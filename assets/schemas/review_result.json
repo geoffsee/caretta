@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ReviewResult",
+  "description": "Typed output schema for the Code Review workflow artifact. Embedded as <!-- caretta:review_result {...} --> in the PR review body so downstream workflows and tooling can parse the verdict and finding count without screen-scraping the review comments.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "pr_number",
+    "verdict",
+    "finding_count"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Schema version. Currently \"1.0.0\"."
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp when the review agent run completed (e.g. \"2026-05-15T10:30:00Z\")."
+    },
+    "pr_number": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Pull request number that was reviewed."
+    },
+    "verdict": {
+      "type": "string",
+      "enum": ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
+      "description": "Review verdict submitted to GitHub."
+    },
+    "finding_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of inline review findings (all severities)."
+    }
+  }
+}

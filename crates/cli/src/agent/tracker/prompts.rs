@@ -889,7 +889,27 @@ theme of the surviving ideas. The body must contain the complete final ideation 
 Go back to each issue you closed in Step 1 and update the close comment to include the
 new issue number: "Superseded by #<new>."
 
-### Step 4 — Echo the issue URL
+### Step 4 — Embed artifact metadata in the issue body
+
+Before running `gh issue create`, append this HTML comment to the body you plan to
+submit. Replace the placeholders with real values:
+
+```
+<!-- caretta:ideation_result {{"schema_version":"1.0.0","generated_at":"<YYYY-MM-DDTHH:MM:SSZ>","idea_count":<N>,"buckets":["capability","foundational","provocations","wildcards"]}} -->
+```
+
+Where:
+- `generated_at` is the current UTC time in ISO 8601 format
+- `idea_count` is the count of surviving ideas in the final set
+- `buckets` lists only the bucket names actually present in the output
+
+Schema reference: `assets/schemas/ideation_result.json`
+
+The UXR Synthesis workflow validates this block before handing off to the next
+agent. Missing or malformed metadata will surface as a warning but will not block
+the workflow.
+
+### Step 5 — Echo the issue URL
 
 After creating the issue, print the issue URL so it appears in the editor panel output.
 Format: `Ideation published: <URL>`
@@ -1134,7 +1154,24 @@ includes the new issue number — no follow-up edit needed:
 gh issue close <NUMBER> --comment "Superseded by #<new>."
 ```
 
-### Step 4 — Echo the issue URL
+### Step 4 — Embed artifact metadata in the issue body
+
+Before running `gh issue create`, append this HTML comment to the body you plan to
+submit. Replace the placeholders with real values:
+
+```
+<!-- caretta:synthesis_result {{"schema_version":"1.0.0","generated_at":"<YYYY-MM-DDTHH:MM:SSZ>","priority_count":<N>,"top_persona":"<dominant-persona-id>","velocity":"<accelerating|steady|slowing>"}} -->
+```
+
+Where:
+- `generated_at` is the current UTC time in ISO 8601 format
+- `priority_count` is the number of top priorities listed in the synthesis section
+- `top_persona` is the dominant persona identified this cycle (or `""` if none)
+- `velocity` is one of `accelerating`, `steady`, or `slowing`
+
+Schema reference: `assets/schemas/synthesis_result.json`
+
+### Step 5 — Echo the issue URL
 
 After creating the issue, print the issue URL so it appears in the editor panel output.
 Format: `UXR synthesis published: <URL>`
@@ -1425,7 +1462,24 @@ Constraints the API enforces — respect them or you will get HTTP 422:
 - If `gh api` returns non-2xx, surface the response body verbatim and
   stop. Do not retry blindly and do not fall back to `gh pr review`.
 
-### Step 4 — Confirm and stop
+### Step 4 — Embed artifact metadata in the review body
+
+Include the following HTML comment inside the top-level `body` field of the JSON
+payload you POST (GitHub hides HTML comments from rendered review bodies but
+preserves them in the API response):
+
+```
+<!-- caretta:review_result {{"schema_version":"1.0.0","generated_at":"<YYYY-MM-DDTHH:MM:SSZ>","pr_number":{pr_num},"verdict":"<APPROVE|REQUEST_CHANGES|COMMENT>","finding_count":<N>}} -->
+```
+
+Where:
+- `generated_at` is the current UTC time in ISO 8601 format
+- `verdict` matches the `event` field you chose in Step 2
+- `finding_count` is the total number of inline comment entries in `comments`
+
+Schema reference: `assets/schemas/review_result.json`
+
+### Step 5 — Confirm and stop
 On success, log the `html_url` from the response and exit. Do NOT also
 run `gh pr review` or `gh pr comment` — the inline comments and verdict
 are already posted in the single call above."#

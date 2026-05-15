@@ -435,9 +435,32 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
 
 /// Fetch extra context variables declared in `extra_context` and inject them
 /// into the vars map.
+///
+/// For the Ideation → Synthesis hand-off (`label == "ideation"`), the fetched
+/// body is validated against the `IdeationResult` schema
+/// (`assets/schemas/ideation_result.json`) before injection. Validation failures
+/// are logged as warnings so the synthesis agent still receives the artifact
+/// content; they do not abort the workflow.
 pub fn fetch_extra_context(wf: &WorkflowConfig, vars: &mut serde_json::Value) {
     for fetch in &wf.extra_context {
         let val = fetch_issue_by_label(&fetch.label);
+        if fetch.label == "ideation" && !val.is_empty() {
+            match crate::agent::tracker::validate_ideation_artifact(&val) {
+                Ok(result) => {
+                    log(&format!(
+                        "IdeationResult schema validation passed: {} ideas, {} buckets (schema v{})",
+                        result.idea_count,
+                        result.buckets.len(),
+                        result.schema_version,
+                    ));
+                }
+                Err(reason) => {
+                    log(&format!(
+                        "WARNING: ideation artifact did not pass schema validation — {reason}"
+                    ));
+                }
+            }
+        }
         vars[&fetch.name] = serde_json::Value::String(val);
     }
 }

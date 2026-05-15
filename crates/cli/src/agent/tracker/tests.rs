@@ -2285,3 +2285,189 @@ fn build_pr_review_verification_prompt_includes_thread_ids_and_output_path() {
     assert!(prompt.contains("verified"));
     assert!(prompt.contains("unverified"));
 }
+
+// ── Typed output schemas: IdeationResult ──
+
+#[test]
+fn parse_ideation_result_round_trip() {
+    let result = IdeationResult {
+        schema_version: "1.0.0".to_string(),
+        generated_at: "2026-05-15T10:00:00Z".to_string(),
+        idea_count: 18,
+        buckets: vec![
+            "capability".to_string(),
+            "foundational".to_string(),
+            "provocations".to_string(),
+            "wildcards".to_string(),
+        ],
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let body = format!("# Ideation\n\nSome ideas here.\n\n<!-- caretta:ideation_result {json} -->");
+    let parsed = parse_ideation_result_from_body(&body).expect("must parse");
+    assert_eq!(parsed, result);
+}
+
+#[test]
+fn parse_ideation_result_from_body_absent_returns_none() {
+    assert!(parse_ideation_result_from_body("No metadata here.").is_none());
+    assert!(parse_ideation_result_from_body("").is_none());
+    assert!(parse_ideation_result_from_body("<!-- caretta:provenance {} -->").is_none());
+}
+
+#[test]
+fn validate_ideation_artifact_accepts_valid_body() {
+    let result = IdeationResult {
+        schema_version: "1.0.0".to_string(),
+        generated_at: "2026-05-15T10:00:00Z".to_string(),
+        idea_count: 16,
+        buckets: vec!["capability".to_string(), "wildcards".to_string()],
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let body = format!("Ideas.\n\n<!-- caretta:ideation_result {json} -->");
+    let validated = validate_ideation_artifact(&body).expect("must validate");
+    assert_eq!(validated.idea_count, 16);
+    assert_eq!(validated.schema_version, "1.0.0");
+}
+
+#[test]
+fn validate_ideation_artifact_rejects_missing_block() {
+    let err = validate_ideation_artifact("No block here.").unwrap_err();
+    assert!(
+        err.contains("no <!-- caretta:ideation_result"),
+        "got: {err}"
+    );
+}
+
+#[test]
+fn validate_ideation_artifact_rejects_wrong_schema_version() {
+    let body = "<!-- caretta:ideation_result {\"schema_version\":\"2.0.0\",\"generated_at\":\"2026-05-15T10:00:00Z\",\"idea_count\":5,\"buckets\":[]} -->";
+    let err = validate_ideation_artifact(body).unwrap_err();
+    assert!(err.contains("schema_version"), "got: {err}");
+}
+
+#[test]
+fn validate_ideation_artifact_rejects_empty_generated_at() {
+    let body = "<!-- caretta:ideation_result {\"schema_version\":\"1.0.0\",\"generated_at\":\"\",\"idea_count\":5,\"buckets\":[]} -->";
+    let err = validate_ideation_artifact(body).unwrap_err();
+    assert!(err.contains("generated_at"), "got: {err}");
+}
+
+// ── Typed output schemas: SynthesisResult ──
+
+#[test]
+fn parse_synthesis_result_round_trip() {
+    let result = SynthesisResult {
+        schema_version: "1.0.0".to_string(),
+        generated_at: "2026-05-15T11:00:00Z".to_string(),
+        priority_count: 5,
+        top_persona: "payments-settlement-engineer".to_string(),
+        velocity: "steady".to_string(),
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let body = format!("# Synthesis\n\n<!-- caretta:synthesis_result {json} -->");
+    let parsed = parse_synthesis_result_from_body(&body).expect("must parse");
+    assert_eq!(parsed, result);
+}
+
+#[test]
+fn parse_synthesis_result_from_body_absent_returns_none() {
+    assert!(parse_synthesis_result_from_body("No block.").is_none());
+    assert!(parse_synthesis_result_from_body("").is_none());
+}
+
+// ── Typed output schemas: ReviewResult ──
+
+#[test]
+fn parse_review_result_round_trip() {
+    let result = ReviewResult {
+        schema_version: "1.0.0".to_string(),
+        generated_at: "2026-05-15T12:00:00Z".to_string(),
+        pr_number: 42,
+        verdict: "REQUEST_CHANGES".to_string(),
+        finding_count: 3,
+    };
+    let json = serde_json::to_string(&result).unwrap();
+    let body = format!("Review summary.\n\n<!-- caretta:review_result {json} -->");
+    let parsed = parse_review_result_from_body(&body).expect("must parse");
+    assert_eq!(parsed, result);
+}
+
+#[test]
+fn parse_review_result_from_body_absent_returns_none() {
+    assert!(parse_review_result_from_body("No block.").is_none());
+    assert!(parse_review_result_from_body("").is_none());
+}
+
+// ── Schema references in prompt builders ──
+
+#[test]
+fn ideation_finalize_prompt_references_ideation_result_schema() {
+    let p = build_ideation_finalize_prompt(
+        "test-project",
+        "[i]",
+        "[p]",
+        "[c]",
+        "[s]",
+        "[m]",
+        "[t]",
+        "keep all ideas",
+        false,
+    );
+    assert!(
+        p.contains("caretta:ideation_result"),
+        "ideation finalize prompt must reference the caretta:ideation_result marker"
+    );
+    assert!(
+        p.contains("assets/schemas/ideation_result.json"),
+        "ideation finalize prompt must cite the schema path"
+    );
+    assert!(
+        p.contains("schema_version"),
+        "prompt must include schema_version in the metadata block"
+    );
+}
+
+#[test]
+fn report_finalize_prompt_references_synthesis_result_schema() {
+    let sp = crate::agent::types::SkillPaths::default();
+    let p = build_report_finalize_prompt(
+        "test-project",
+        "[i]",
+        "[p]",
+        "[c]",
+        "[s]",
+        "[m]",
+        "[t]",
+        "",
+        "all good",
+        false,
+        &sp,
+    );
+    assert!(
+        p.contains("caretta:synthesis_result"),
+        "report finalize prompt must reference the caretta:synthesis_result marker"
+    );
+    assert!(
+        p.contains("assets/schemas/synthesis_result.json"),
+        "report finalize prompt must cite the schema path"
+    );
+}
+
+#[test]
+fn code_review_prompt_references_review_result_schema() {
+    let p = build_code_review_prompt(
+        "test-project",
+        42,
+        "Add caching",
+        "Implements LRU",
+        "+fn c()",
+    );
+    assert!(
+        p.contains("caretta:review_result"),
+        "code review prompt must reference the caretta:review_result marker"
+    );
+    assert!(
+        p.contains("assets/schemas/review_result.json"),
+        "code review prompt must cite the schema path"
+    );
+}

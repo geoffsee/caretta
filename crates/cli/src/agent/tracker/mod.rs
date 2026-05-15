@@ -1221,6 +1221,105 @@ fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::Hash
     counts
 }
 
+// ── Typed output schemas ─────────────────────────────────────────────────────
+
+/// Typed result metadata for the Ideation workflow artifact.
+///
+/// Serialised as `<!-- caretta:ideation_result {...} -->` in the ideation GitHub
+/// issue body so the UXR Synthesis hand-off can validate the upstream artifact.
+/// Schema: `assets/schemas/ideation_result.json`
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IdeationResult {
+    pub schema_version: String,
+    pub generated_at: String,
+    pub idea_count: u32,
+    pub buckets: Vec<String>,
+}
+
+/// Typed result metadata for the UXR Synthesis workflow artifact.
+///
+/// Serialised as `<!-- caretta:synthesis_result {...} -->` in the uxr-synthesis
+/// GitHub issue body so Strategic Review / Sprint Planning can validate the hand-off.
+/// Schema: `assets/schemas/synthesis_result.json`
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SynthesisResult {
+    pub schema_version: String,
+    pub generated_at: String,
+    pub priority_count: u32,
+    pub top_persona: String,
+    pub velocity: String,
+}
+
+/// Typed result metadata for the Code Review workflow artifact.
+///
+/// Serialised as `<!-- caretta:review_result {...} -->` in the PR review body so
+/// downstream tooling can parse the verdict without screen-scraping review comments.
+/// Schema: `assets/schemas/review_result.json`
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReviewResult {
+    pub schema_version: String,
+    pub generated_at: String,
+    pub pr_number: u32,
+    pub verdict: String,
+    pub finding_count: u32,
+}
+
+/// Parse the first `<!-- caretta:ideation_result {...} -->` comment from `body`.
+///
+/// Returns `None` when absent or when the embedded JSON is malformed.
+pub fn parse_ideation_result_from_body(body: &str) -> Option<IdeationResult> {
+    const PREFIX: &str = "<!-- caretta:ideation_result ";
+    const SUFFIX: &str = " -->";
+    let start = body.find(PREFIX)? + PREFIX.len();
+    let end = body[start..].find(SUFFIX)? + start;
+    serde_json::from_str(&body[start..end]).ok()
+}
+
+/// Parse the first `<!-- caretta:synthesis_result {...} -->` comment from `body`.
+///
+/// Returns `None` when absent or when the embedded JSON is malformed.
+pub fn parse_synthesis_result_from_body(body: &str) -> Option<SynthesisResult> {
+    const PREFIX: &str = "<!-- caretta:synthesis_result ";
+    const SUFFIX: &str = " -->";
+    let start = body.find(PREFIX)? + PREFIX.len();
+    let end = body[start..].find(SUFFIX)? + start;
+    serde_json::from_str(&body[start..end]).ok()
+}
+
+/// Parse the first `<!-- caretta:review_result {...} -->` comment from `body`.
+///
+/// Returns `None` when absent or when the embedded JSON is malformed.
+pub fn parse_review_result_from_body(body: &str) -> Option<ReviewResult> {
+    const PREFIX: &str = "<!-- caretta:review_result ";
+    const SUFFIX: &str = " -->";
+    let start = body.find(PREFIX)? + PREFIX.len();
+    let end = body[start..].find(SUFFIX)? + start;
+    serde_json::from_str(&body[start..end]).ok()
+}
+
+/// Validate an ideation artifact body for the Ideation → Synthesis hand-off.
+///
+/// Returns `Ok(IdeationResult)` when the embedded block is present and the
+/// `schema_version` and `generated_at` fields are populated; `Err(reason)` otherwise.
+/// Called by [`crate::agent::workflow::fetch_extra_context`] before the synthesis
+/// agent is invoked so that upstream schema violations surface as warnings rather than
+/// silent wrong-context runs.
+pub fn validate_ideation_artifact(body: &str) -> Result<IdeationResult, String> {
+    let result = parse_ideation_result_from_body(body).ok_or_else(|| {
+        "no <!-- caretta:ideation_result {...} --> block found in ideation artifact".to_string()
+    })?;
+    if result.schema_version != "1.0.0" {
+        return Err(format!(
+            "IdeationResult schema_version must be \"1.0.0\", got \"{}\"",
+            result.schema_version
+        ));
+    }
+    if result.generated_at.is_empty() {
+        return Err("IdeationResult.generated_at is empty".to_string());
+    }
+    Ok(result)
+}
+
 // ── Provenance ────────────────────────────────────────────────────────────────
 
 /// Structured provenance metadata emitted by every agent workflow run.

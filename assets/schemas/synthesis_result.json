@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SynthesisResult",
+  "description": "Typed output schema for the UXR Synthesis workflow artifact. Embedded as <!-- caretta:synthesis_result {...} --> in the uxr-synthesis GitHub issue body so downstream workflows (Strategic Review, Sprint Planning) can validate the hand-off.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "priority_count",
+    "top_persona",
+    "velocity"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0.0",
+      "description": "Schema version. Currently \"1.0.0\"."
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp when the synthesis agent run completed (e.g. \"2026-05-15T10:30:00Z\")."
+    },
+    "priority_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of top priorities identified in the synthesis."
+    },
+    "top_persona": {
+      "type": "string",
+      "description": "Dominant persona signal identified this cycle (e.g. \"payments-settlement-engineer\"). Empty string if no clear signal."
+    },
+    "velocity": {
+      "type": "string",
+      "description": "One-word velocity assessment: \"accelerating\", \"steady\", or \"slowing\"."
+    }
+  }
+}
