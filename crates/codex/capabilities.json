@@ -1,0 +1,5 @@
+{
+  "agent": "codex",
+  "binary": "codex",
+  "supported_invocations": ["Help", "Version", "Model", "Prompt", "Resume", "Project", "Yolo"]
+}

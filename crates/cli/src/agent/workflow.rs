@@ -126,6 +126,13 @@ pub struct PhaseConfig {
     pub log_start: String,
     #[serde(default)]
     pub log_complete: String,
+    /// Pin a specific agent for this phase (overrides the global `--agent` flag).
+    /// Must be a known agent name (claude, codex, gemini, …).
+    #[serde(default)]
+    pub agent: Option<String>,
+    /// Pin a specific model for this phase (overrides the global model selection).
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 fn default_context() -> String {

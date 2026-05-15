@@ -8,6 +8,10 @@ impl AgentCliAdapter for JunieWrapper {
         "junie"
     }
 
+    fn capability_manifest_json(&self) -> &'static str {
+        include_str!("../capabilities.json")
+    }
+
     fn help_args(&self) -> Vec<String> {
         vec!["--help".to_string()]
     }

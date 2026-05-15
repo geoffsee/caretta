@@ -1,0 +1,5 @@
+{
+  "agent": "cline",
+  "binary": "cline",
+  "supported_invocations": ["Help", "Version", "Model", "Prompt", "Resume", "Project", "OutputFormat", "Yolo"]
+}

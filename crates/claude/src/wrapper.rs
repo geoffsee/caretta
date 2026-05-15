@@ -43,6 +43,10 @@ impl AgentCliAdapter for ClaudeWrapper {
         "claude"
     }
 
+    fn capability_manifest_json(&self) -> &'static str {
+        include_str!("../capabilities.json")
+    }
+
     fn help_args(&self) -> Vec<String> {
         vec!["--help".to_string()]
     }
@@ -93,6 +97,10 @@ impl AgentCliAdapter for ClaudeWrapper {
 impl AgentCliAdapter for CursorWrapper {
     fn binary(&self) -> &'static str {
         "cursor"
+    }
+
+    fn capability_manifest_json(&self) -> &'static str {
+        include_str!("../capabilities.json")
     }
 
     fn help_args(&self) -> Vec<String> {

@@ -272,6 +272,13 @@ where
         // discovery returns empty and built-in workflows resolve to "unknown".
         agent::assets::materialize_assets();
 
+        // Validate capability manifests early so a missing or malformed
+        // capabilities.json in any adapter crate surfaces immediately.
+        if let Err(e) = agent::adapter_dispatch::validate_capability_manifests() {
+            eprintln!("caretta: capability manifest error — {e}");
+            std::process::exit(2);
+        }
+
         if cli.create_labels {
             let config = parse_args();
             let content =

@@ -9,6 +9,10 @@ impl AgentCliAdapter for DummyAgentWrapper {
         "caretta-dummy-agent"
     }
 
+    fn capability_manifest_json(&self) -> &'static str {
+        r#"{"agent":"dummy","binary":"caretta-dummy-agent","supported_invocations":["Help","Version","Model","Prompt","Resume","Project","OutputFormat","Yolo"]}"#
+    }
+
     fn help_args(&self) -> Vec<String> {
         vec!["--help".to_string()]
     }

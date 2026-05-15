@@ -30,6 +30,10 @@ pub enum AgentInvocation {
 pub trait AgentCliAdapter {
     fn binary(&self) -> &'static str;
 
+    /// Returns the raw JSON content of this adapter crate's `capabilities.json` manifest.
+    /// Validated at startup by the dispatch layer; panicking here is a programming error.
+    fn capability_manifest_json(&self) -> &'static str;
+
     fn help_args(&self) -> Vec<String>;
 
     fn version_args(&self) -> Vec<String>;
@@ -111,6 +115,10 @@ mod tests {
     impl AgentCliAdapter for MockAdapter {
         fn binary(&self) -> &'static str {
             "mock-cli"
+        }
+
+        fn capability_manifest_json(&self) -> &'static str {
+            r#"{"agent":"mock","binary":"mock-cli","supported_invocations":["Help","Version","Model","Prompt"]}"#
         }
 
         fn help_args(&self) -> Vec<String> {

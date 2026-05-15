@@ -1,5 +1,9 @@
 //! Dispatches [`cli_common::Agent`] to provider [`agent_common::AgentCliAdapter`] implementations.
 //! All binary names and flag spellings for subprocess construction live in the provider crates.
+//!
+//! Also owns the capability registry: each adapter crate embeds a `capabilities.json` manifest
+//! declaring its supported [`agent_common::AgentInvocation`] variants. Call
+//! [`validate_capability_manifests`] at startup to catch missing or malformed manifests early.
 
 use agent_common::{AgentCliAdapter, AgentCliCommand};
 use claude::{ClaudeWrapper, CursorWrapper};
@@ -11,6 +15,104 @@ use gemini::GeminiWrapper;
 use grok::GrokWrapper;
 use junie::JunieWrapper;
 use xai::XaiWrapper;
+
+// ── Capability registry ──────────────────────────────────────────────────────
+
+const KNOWN_INVOCATIONS: &[&str] = &[
+    "Help",
+    "Version",
+    "Model",
+    "Prompt",
+    "Resume",
+    "Project",
+    "OutputFormat",
+    "Yolo",
+];
+
+/// Returns the raw `capabilities.json` JSON for the given agent.
+pub fn capability_manifest_for(agent: Agent) -> &'static str {
+    match agent {
+        Agent::Claude => ClaudeWrapper.capability_manifest_json(),
+        Agent::Cursor => CursorWrapper.capability_manifest_json(),
+        Agent::Cline => ClineWrapper.capability_manifest_json(),
+        Agent::Codex => CodexWrapper.capability_manifest_json(),
+        Agent::Copilot => CopilotWrapper.capability_manifest_json(),
+        Agent::Gemini => GeminiWrapper.capability_manifest_json(),
+        Agent::Grok => GrokWrapper.capability_manifest_json(),
+        Agent::Junie => JunieWrapper.capability_manifest_json(),
+        Agent::Xai => XaiWrapper.capability_manifest_json(),
+    }
+}
+
+/// Returns `true` if the agent's capability manifest lists the given
+/// [`AgentInvocation`] variant name (e.g. `"Prompt"`, `"Resume"`).
+pub fn agent_supports_invocation(agent: Agent, invocation: &str) -> bool {
+    let json = capability_manifest_for(agent);
+    if let Ok(manifest) = serde_json::from_str::<serde_json::Value>(json)
+        && let Some(arr) = manifest["supported_invocations"].as_array()
+    {
+        return arr.iter().any(|v| v.as_str() == Some(invocation));
+    }
+    false
+}
+
+/// Validates every adapter's `capabilities.json` manifest at startup.
+///
+/// Returns an error string identifying the crate and the problem when a
+/// manifest is missing (compile-time error) or malformed / contains an
+/// unknown [`AgentInvocation`] variant name (runtime error).  Callers
+/// should treat a non-`Ok` result as a fatal startup error.
+pub fn validate_capability_manifests() -> Result<(), String> {
+    let entries: &[(&str, &str)] = &[
+        ("claude", ClaudeWrapper.capability_manifest_json()),
+        ("claude (cursor)", CursorWrapper.capability_manifest_json()),
+        ("cline", ClineWrapper.capability_manifest_json()),
+        ("codex", CodexWrapper.capability_manifest_json()),
+        ("copilot", CopilotWrapper.capability_manifest_json()),
+        ("gemini", GeminiWrapper.capability_manifest_json()),
+        ("grok", GrokWrapper.capability_manifest_json()),
+        ("junie", JunieWrapper.capability_manifest_json()),
+        ("xai", XaiWrapper.capability_manifest_json()),
+    ];
+
+    for (adapter_name, json) in entries {
+        let manifest = serde_json::from_str::<serde_json::Value>(json).map_err(|e| {
+            format!(
+                "crates/{adapter_name}/capabilities.json is malformed: {e}\n\
+                     Fix: ensure the file contains valid JSON with an \
+                     \"supported_invocations\" array."
+            )
+        })?;
+
+        let invocations = manifest["supported_invocations"]
+            .as_array()
+            .ok_or_else(|| {
+                format!(
+                    "crates/{adapter_name}/capabilities.json: missing required \
+                 \"supported_invocations\" array"
+                )
+            })?;
+
+        for inv in invocations {
+            let name = inv.as_str().ok_or_else(|| {
+                format!(
+                    "crates/{adapter_name}/capabilities.json: \
+                     all entries in \"supported_invocations\" must be strings"
+                )
+            })?;
+            if !KNOWN_INVOCATIONS.contains(&name) {
+                return Err(format!(
+                    "crates/{adapter_name}/capabilities.json: unknown \
+                     AgentInvocation variant \"{name}\"\n\
+                     Known variants: {}",
+                    KNOWN_INVOCATIONS.join(", ")
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
 
 pub const PROMPT_STDIN_BYTE_THRESHOLD: usize = 64 * 1024;
 
@@ -184,6 +286,51 @@ mod tests {
     use super::*;
     use agent_common::claude_family_native_argv;
     use cli_common::Agent;
+
+    #[test]
+    fn all_capability_manifests_are_valid() {
+        validate_capability_manifests()
+            .expect("all capability manifests must be valid at test time");
+    }
+
+    #[test]
+    fn capability_manifest_lists_expected_invocations() {
+        assert!(agent_supports_invocation(Agent::Claude, "Prompt"));
+        assert!(agent_supports_invocation(Agent::Claude, "Resume"));
+        assert!(!agent_supports_invocation(Agent::Claude, "Project"));
+        assert!(!agent_supports_invocation(Agent::Claude, "Yolo"));
+
+        assert!(agent_supports_invocation(Agent::Grok, "Prompt"));
+        assert!(!agent_supports_invocation(Agent::Grok, "Resume"));
+        assert!(agent_supports_invocation(Agent::Grok, "Project"));
+
+        assert!(agent_supports_invocation(Agent::Cline, "Yolo"));
+        assert!(agent_supports_invocation(Agent::Codex, "Yolo"));
+        assert!(!agent_supports_invocation(Agent::Codex, "OutputFormat"));
+
+        assert!(agent_supports_invocation(Agent::Junie, "Yolo"));
+        assert!(agent_supports_invocation(Agent::Junie, "Project"));
+    }
+
+    #[test]
+    fn validate_rejects_malformed_json() {
+        let result = serde_json::from_str::<serde_json::Value>("not-json");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_rejects_unknown_invocation_names() {
+        let bad_json = r#"{"agent":"x","binary":"x","supported_invocations":["Typo"]}"#;
+        let manifest = serde_json::from_str::<serde_json::Value>(bad_json).unwrap();
+        let invocations = manifest["supported_invocations"].as_array().unwrap();
+        for inv in invocations {
+            let name = inv.as_str().unwrap();
+            assert!(
+                !KNOWN_INVOCATIONS.contains(&name),
+                "expected 'Typo' to not be a known invocation"
+            );
+        }
+    }
 
     #[test]
     fn native_base_matches_claude_family_and_distinct_agents() {

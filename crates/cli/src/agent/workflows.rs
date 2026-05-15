@@ -1,9 +1,50 @@
+use crate::agent::adapter_dispatch::agent_supports_invocation;
 use crate::agent::cmd::{die, log};
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::stop_requested;
 use crate::agent::run::run_agent;
 use crate::agent::types::{AgentEvent, Config, EVENT_SENDER, Workflow};
+use crate::agent::workflow::PhaseConfig;
+
+/// Apply per-phase agent and model overrides declared in the workflow YAML.
+///
+/// Clones `cfg` only when at least one override is present, so the common
+/// path (no overrides) pays no allocation.
+fn apply_phase_overrides(cfg: &Config, phase: &PhaseConfig) -> Config {
+    let mut c = cfg.clone();
+    if let Some(agent_str) = &phase.agent {
+        match agent_str.parse::<cli_common::Agent>() {
+            Ok(agent) => {
+                if agent_supports_invocation(agent, "Prompt") {
+                    log(&format!(
+                        "Phase agent override: switching from {} to {agent_str}",
+                        cfg.agent
+                    ));
+                    c.agent = agent;
+                } else {
+                    log(&format!(
+                        "WARNING: phase agent '{agent_str}' does not support Prompt; \
+                         falling back to global agent {}",
+                        cfg.agent
+                    ));
+                }
+            }
+            Err(_) => {
+                log(&format!(
+                    "WARNING: unknown agent '{agent_str}' in phase config; \
+                     ignoring and using global agent {}",
+                    cfg.agent
+                ));
+            }
+        }
+    }
+    if let Some(model) = &phase.model {
+        log(&format!("Phase model override: using '{model}'"));
+        c.model = model.clone();
+    }
+    c
+}
 
 /// Inject standard variables that all workflows may need.
 fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
@@ -39,8 +80,10 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     let prompt = load_and_render(&cfg.root, &cfg.workflow_preset, wf, "draft", &vars)
         .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
 
-    if cfg.dry_run {
-        log_resolved_agent_launch(cfg, &[]);
+    let effective = apply_phase_overrides(cfg, phase_cfg);
+
+    if effective.dry_run {
+        log_resolved_agent_launch(&effective, &[]);
         log(&format!("[dry-run] Would run {} draft", wf.name));
         if let Some(tx) = EVENT_SENDER.get() {
             let _ = tx.send(AgentEvent::Done);
@@ -48,7 +91,7 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
         return;
     }
 
-    run_agent(cfg, &prompt);
+    run_agent(&effective, &prompt);
     if stop_requested() {
         log(&format!("Stop requested. {} draft cancelled.", wf.name));
         if let Some(tx) = EVENT_SENDER.get() {
@@ -65,7 +108,7 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     // fire (finalize phases routinely create/close GitHub issues). The GUI path
     // keeps its existing two-step flow because EVENT_SENDER is set there.
     let has_finalize = wf.phases.contains_key("finalize");
-    if cfg.auto_mode && EVENT_SENDER.get().is_none() && has_finalize {
+    if effective.auto_mode && EVENT_SENDER.get().is_none() && has_finalize {
         let feedback = synthesized_cli_feedback();
         log("--auto: synthesizing feedback and continuing to finalize.");
         run_workflow_finalize(cfg, workflow_id, &feedback);
@@ -119,7 +162,8 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     let prompt = load_and_render(&cfg.root, &cfg.workflow_preset, wf, "finalize", &vars)
         .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
 
-    run_agent(cfg, &prompt);
+    let effective = apply_phase_overrides(cfg, phase_cfg);
+    run_agent(&effective, &prompt);
     if stop_requested() {
         log(&format!(
             "Stop requested. {} finalization cancelled.",

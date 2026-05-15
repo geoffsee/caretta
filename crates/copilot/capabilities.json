@@ -1,0 +1,5 @@
+{
+  "agent": "copilot",
+  "binary": "copilot",
+  "supported_invocations": ["Help", "Version", "Model", "Prompt", "Resume", "OutputFormat", "Yolo"]
+}

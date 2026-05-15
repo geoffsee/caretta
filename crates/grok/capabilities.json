@@ -1,0 +1,5 @@
+{
+  "agent": "grok",
+  "binary": "grok",
+  "supported_invocations": ["Help", "Version", "Model", "Prompt", "Project"]
+}
