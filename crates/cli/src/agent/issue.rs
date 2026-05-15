@@ -7,9 +7,10 @@ use crate::agent::review::run_issue_pr_review_resume;
 use crate::agent::run::run_agent;
 use crate::agent::snapshot::generate_codebase_snapshot;
 use crate::agent::tracker::{
-    build_prompt, build_test_fix_prompt, fetch_all_unresolved_review_threads, fetch_issue,
-    find_upstream_branch, get_tracker_body, open_pr_number_for_head_branch, parse_pending,
-    pending_issues_execution_order, pr_review_decision,
+    build_prompt, build_provenance, build_test_fix_prompt, embed_provenance_in_body,
+    fetch_all_unresolved_review_threads, fetch_issue, find_upstream_branch, get_tracker_body,
+    open_pr_number_for_head_branch, parse_pending, pending_issues_execution_order,
+    pr_review_decision,
 };
 use crate::agent::types::{BRANCH_PREFIX, Config, MAX_COMMIT_ATTEMPTS, MAX_PUSH_ATTEMPTS};
 use crate::timed;
@@ -160,18 +161,16 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     log(&format!(
         "Launching agent for issue #{issue_num} on branch '{branch}'..."
     ));
-    let agent_ok = run_agent(
-        cfg,
-        &build_prompt(
-            &cfg.project_name,
-            issue_num,
-            &title,
-            &body,
-            &codebase,
-            tracker_num,
-            &tracker_body,
-        ),
+    let prompt = build_prompt(
+        &cfg.project_name,
+        issue_num,
+        &title,
+        &body,
+        &codebase,
+        tracker_num,
+        &tracker_body,
     );
+    let agent_ok = run_agent(cfg, &prompt);
     if agent_ok {
         log(&format!("Agent run completed for issue #{issue_num}."));
     } else {
@@ -216,8 +215,11 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
     );
     if push_ok {
         let pr_title = format!("implement #{issue_num}: {title}");
-        let pr_body =
-            format!("Closes #{issue_num}\n\nAutomated PR opened by caretta issue runner.");
+        let prov = build_provenance(&cfg.agent.to_string(), &cfg.model, &prompt, &title, &body);
+        let pr_body = embed_provenance_in_body(
+            &format!("Closes #{issue_num}\n\nAutomated PR opened by caretta issue runner."),
+            &prov,
+        );
         create_pr_if_missing(&branch, &base, &pr_title, &pr_body);
     }
     log(&format!("Issue #{issue_num} loop iteration complete."));

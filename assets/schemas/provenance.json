@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CarettaProvenance",
+  "description": "Provenance metadata emitted by every caretta agent workflow run. Stored as a JSON comment <!-- caretta:provenance {...} --> in the GitHub issue or PR body.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "agent",
+    "model_id",
+    "prompt_version",
+    "input_digest",
+    "run_timestamp"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Schema version. Currently \"1\"."
+    },
+    "agent": {
+      "type": "string",
+      "description": "Agent CLI used for the run (e.g. \"claude\", \"codex\", \"gemini\")."
+    },
+    "model_id": {
+      "type": "string",
+      "description": "Model identifier as configured in caretta.toml at the time of the run."
+    },
+    "prompt_version": {
+      "type": "string",
+      "description": "Hex-encoded 64-bit hash of the full prompt text, uniquely identifying the prompt version used."
+    },
+    "input_digest": {
+      "type": "string",
+      "description": "Hex-encoded 64-bit hash of the issue title and body, identifying the inputs consumed by the run."
+    },
+    "run_timestamp": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp when the agent run started (e.g. \"2026-05-15T10:30:00Z\")."
+    }
+  }
+}

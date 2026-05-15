@@ -1221,6 +1221,127 @@ fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::Hash
     counts
 }
 
+// ── Provenance ────────────────────────────────────────────────────────────────
+
+/// Structured provenance metadata emitted by every agent workflow run.
+///
+/// Serialized as a JSON comment `<!-- caretta:provenance {...} -->` in the
+/// GitHub issue or PR body so it is parseable by `gh api` without extra
+/// tooling. Schema is versioned under `assets/schemas/provenance.json`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Provenance {
+    pub schema_version: String,
+    pub agent: String,
+    pub model_id: String,
+    pub prompt_version: String,
+    pub input_digest: String,
+    pub run_timestamp: String,
+}
+
+/// Build a [`Provenance`] record for a single agent run.
+///
+/// `prompt_version` is a hex-encoded hash of the full prompt text;
+/// `input_digest` is a hex-encoded hash of `issue_title\0issue_body`.
+pub fn build_provenance(
+    agent: &str,
+    model_id: &str,
+    prompt: &str,
+    issue_title: &str,
+    issue_body: &str,
+) -> Provenance {
+    Provenance {
+        schema_version: "1".to_string(),
+        agent: agent.to_string(),
+        model_id: model_id.to_string(),
+        prompt_version: hash_str(prompt),
+        input_digest: hash_str(&format!("{issue_title}\0{issue_body}")),
+        run_timestamp: iso8601_now(),
+    }
+}
+
+/// Render a [`Provenance`] as an HTML comment parseable by `gh api`.
+pub fn render_provenance_comment(prov: &Provenance) -> String {
+    let json = serde_json::to_string(prov).unwrap_or_default();
+    format!("<!-- caretta:provenance {json} -->")
+}
+
+/// Parse the first `<!-- caretta:provenance {...} -->` comment from `body`.
+///
+/// Returns `None` when absent or when the embedded JSON is malformed.
+pub fn parse_provenance_from_body(body: &str) -> Option<Provenance> {
+    const PREFIX: &str = "<!-- caretta:provenance ";
+    const SUFFIX: &str = " -->";
+    let start = body.find(PREFIX)? + PREFIX.len();
+    let end = body[start..].find(SUFFIX)? + start;
+    serde_json::from_str(&body[start..end]).ok()
+}
+
+/// Return `body` with the provenance comment appended or replaced in-place.
+///
+/// If a `<!-- caretta:provenance ... -->` comment already exists it is
+/// replaced with the new one; otherwise the comment is appended with two
+/// preceding newlines so the human-readable portion of the body is preserved.
+pub fn embed_provenance_in_body(body: &str, prov: &Provenance) -> String {
+    let comment = render_provenance_comment(prov);
+    const PREFIX: &str = "<!-- caretta:provenance ";
+    const SUFFIX: &str = " -->";
+    if let Some(start) = body.find(PREFIX)
+        && let Some(rel_end) = body[start..].find(SUFFIX)
+    {
+        let end = start + rel_end + SUFFIX.len();
+        return format!("{}{}{}", &body[..start], comment, &body[end..]);
+    }
+    format!("{body}\n\n{comment}")
+}
+
+/// Hex-encode a 64-bit hash of `s` using `DefaultHasher`.
+fn hash_str(s: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    s.hash(&mut h);
+    format!("{:016x}", h.finish())
+}
+
+/// Current UTC time as ISO 8601 string (`YYYY-MM-DDTHH:MM:SSZ`).
+fn iso8601_now() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format_unix_secs(secs)
+}
+
+/// Format Unix epoch seconds as ISO 8601 UTC string.
+fn format_unix_secs(secs: u64) -> String {
+    let time = secs % 86400;
+    let days = secs / 86400;
+    let h = time / 3600;
+    let m = (time % 3600) / 60;
+    let s = time % 60;
+    let (y, mo, d) = civil_from_days(days);
+    format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+/// Convert days since 1970-01-01 to (year, month, day).
+///
+/// Uses Howard Hinnant's civil_from_days algorithm:
+/// <http://howardhinnant.github.io/date_algorithms.html>
+fn civil_from_days(days: u64) -> (i64, u64, u64) {
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = if mo <= 2 { y + 1 } else { y };
+    (y, mo, d)
+}
+
 mod prompts;
 pub use prompts::*;
 

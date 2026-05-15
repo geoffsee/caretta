@@ -1941,6 +1941,167 @@ fn refresh_docs_prompt_limits_scope_and_requires_summary_block() {
     assert!(prompt.contains("Do NOT commit, push, or open a pull request"));
 }
 
+// ── Provenance ──
+
+#[test]
+fn render_provenance_comment_has_correct_delimiters() {
+    let prov = Provenance {
+        schema_version: "1".to_string(),
+        agent: "claude".to_string(),
+        model_id: "claude-sonnet-4-5".to_string(),
+        prompt_version: "aabbccdd11223344".to_string(),
+        input_digest: "1122334455667788".to_string(),
+        run_timestamp: "2026-05-15T10:00:00Z".to_string(),
+    };
+    let comment = render_provenance_comment(&prov);
+    assert!(
+        comment.starts_with("<!-- caretta:provenance "),
+        "comment must start with the marker prefix"
+    );
+    assert!(comment.ends_with(" -->"), "comment must end with -->");
+    assert!(
+        comment.contains("\"schema_version\":\"1\""),
+        "schema_version must be present"
+    );
+    assert!(
+        comment.contains("\"agent\":\"claude\""),
+        "agent must be present"
+    );
+}
+
+#[test]
+fn parse_provenance_round_trip() {
+    let prov = Provenance {
+        schema_version: "1".to_string(),
+        agent: "codex".to_string(),
+        model_id: "gpt-4o".to_string(),
+        prompt_version: "deadbeefdeadbeef".to_string(),
+        input_digest: "cafebabecafebabe".to_string(),
+        run_timestamp: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let body = embed_provenance_in_body("Closes #42\n\nFoo.", &prov);
+    let parsed = parse_provenance_from_body(&body).expect("provenance must round-trip");
+    assert_eq!(parsed, prov);
+}
+
+#[test]
+fn parse_provenance_from_body_absent_returns_none() {
+    assert!(parse_provenance_from_body("No provenance here.").is_none());
+    assert!(parse_provenance_from_body("").is_none());
+    assert!(parse_provenance_from_body("<!-- some other comment -->").is_none());
+}
+
+#[test]
+fn embed_provenance_replaces_existing_comment() {
+    let prov1 = Provenance {
+        schema_version: "1".to_string(),
+        agent: "claude".to_string(),
+        model_id: "v1".to_string(),
+        prompt_version: "0000000000000000".to_string(),
+        input_digest: "1111111111111111".to_string(),
+        run_timestamp: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let prov2 = Provenance {
+        schema_version: "1".to_string(),
+        agent: "claude".to_string(),
+        model_id: "v2".to_string(),
+        prompt_version: "2222222222222222".to_string(),
+        input_digest: "3333333333333333".to_string(),
+        run_timestamp: "2026-06-01T00:00:00Z".to_string(),
+    };
+    let body_with_prov1 = embed_provenance_in_body("Closes #1.", &prov1);
+    let body_with_prov2 = embed_provenance_in_body(&body_with_prov1, &prov2);
+    assert_eq!(
+        body_with_prov2.matches("<!-- caretta:provenance").count(),
+        1,
+        "only one provenance comment should survive after replacement"
+    );
+    let parsed = parse_provenance_from_body(&body_with_prov2).unwrap();
+    assert_eq!(parsed.model_id, "v2");
+}
+
+#[test]
+fn embed_provenance_appends_when_absent() {
+    let prov = Provenance {
+        schema_version: "1".to_string(),
+        agent: "claude".to_string(),
+        model_id: "x".to_string(),
+        prompt_version: "aaaaaaaaaaaaaaaa".to_string(),
+        input_digest: "bbbbbbbbbbbbbbbb".to_string(),
+        run_timestamp: "2026-01-01T00:00:00Z".to_string(),
+    };
+    let body = "Closes #99.\n\nImplemented.";
+    let result = embed_provenance_in_body(body, &prov);
+    assert!(
+        result.starts_with("Closes #99."),
+        "original body must be preserved at the start"
+    );
+    assert!(
+        result.contains("<!-- caretta:provenance "),
+        "provenance comment must be appended"
+    );
+}
+
+#[test]
+fn build_provenance_schema_version_and_fields() {
+    let prov = build_provenance(
+        "gemini",
+        "gemini-2.5-pro",
+        "prompt text for the run",
+        "Fix login bug",
+        "Login fails when password contains special chars.",
+    );
+    assert_eq!(prov.schema_version, "1");
+    assert_eq!(prov.agent, "gemini");
+    assert_eq!(prov.model_id, "gemini-2.5-pro");
+    assert!(!prov.prompt_version.is_empty());
+    assert!(!prov.input_digest.is_empty());
+    assert!(
+        prov.run_timestamp.contains('T'),
+        "run_timestamp must be ISO 8601"
+    );
+}
+
+#[test]
+fn build_provenance_different_prompts_yield_different_versions() {
+    let p1 = build_provenance("claude", "", "prompt A", "title", "body");
+    let p2 = build_provenance("claude", "", "prompt B", "title", "body");
+    assert_ne!(
+        p1.prompt_version, p2.prompt_version,
+        "distinct prompts must produce distinct prompt_version hashes"
+    );
+}
+
+#[test]
+fn build_provenance_different_inputs_yield_different_digests() {
+    let p1 = build_provenance("claude", "", "prompt", "title A", "body A");
+    let p2 = build_provenance("claude", "", "prompt", "title B", "body B");
+    assert_ne!(
+        p1.input_digest, p2.input_digest,
+        "distinct inputs must produce distinct input_digest hashes"
+    );
+}
+
+#[test]
+fn format_unix_secs_epoch_zero_is_1970() {
+    assert_eq!(format_unix_secs(0), "1970-01-01T00:00:00Z");
+}
+
+#[test]
+fn format_unix_secs_known_date() {
+    // 2024-01-01T00:00:00Z = 1704067200
+    assert_eq!(format_unix_secs(1704067200), "2024-01-01T00:00:00Z");
+}
+
+#[test]
+fn format_unix_secs_known_time_component() {
+    // 2026-05-15T13:45:30Z
+    // 2026-05-15 = days 20588 (verified by: 365*56 + leap days + days into 2026)
+    // 13*3600 + 45*60 + 30 = 46800 + 2700 + 30 = 49530
+    // epoch = 20588 * 86400 + 49530 = 1778803200 + 49530 = 1778852730
+    assert_eq!(format_unix_secs(1_778_852_730), "2026-05-15T13:45:30Z");
+}
+
 // ── parse_auto_merge_response ──
 
 #[test]
