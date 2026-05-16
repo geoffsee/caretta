@@ -32,6 +32,13 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     preflight(cfg);
     log(&phase_cfg.log_start);
 
+    if cfg.surface_disagreements {
+        log(&format!(
+            "Disagreement surfacing active (threshold {}): ConflictRecords will be emitted when \u{2265}{} items diverge.",
+            cfg.disagreement_threshold, cfg.disagreement_threshold
+        ));
+    }
+
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);
     fetch_extra_context(wf, &mut vars);

@@ -109,6 +109,16 @@ struct Cli {
     /// Write the bundled label taxonomy to .github/labels.yml and exit
     #[arg(long)]
     create_labels: bool,
+
+    /// Emit a structured ConflictRecord when agent assessments on the same artifact diverge.
+    /// Threshold is controlled by --disagreement-threshold (default 2).
+    #[arg(long)]
+    surface_disagreements: bool,
+
+    /// Minimum number of distinct claim texts on the same named item required to surface
+    /// a conflict when --surface-disagreements is active (default 2).
+    #[arg(long, default_value = "2", value_name = "N")]
+    disagreement_threshold: usize,
 }
 
 #[derive(Subcommand)]
@@ -295,6 +305,8 @@ where
             .unwrap_or_default();
         config.auto_mode = cli.auto;
         config.dry_run = cli.dry_run;
+        config.surface_disagreements = cli.surface_disagreements;
+        config.disagreement_threshold = cli.disagreement_threshold;
         overrides(&mut config);
 
         apply_caretta_model_env_and_cli(&mut config, cli.model.as_deref());

@@ -397,6 +397,227 @@ fn pr_summary_unresolved_thread_count_defaults_to_zero() {
     assert_eq!(prs[0].unresolved_thread_count, 0);
 }
 
+// ── Disagreement Surfacing (#116) ─────────────────────────────────────────────
+
+fn make_claim(agent_id: &str, item_name: &str, claim: &str) -> AssessmentClaim {
+    AssessmentClaim {
+        item_name: item_name.to_string(),
+        claim: claim.to_string(),
+        agent_id: agent_id.to_string(),
+    }
+}
+
+fn make_assessment(agent_id: &str, scope: &str, claims: Vec<AssessmentClaim>) -> AgentAssessment {
+    AgentAssessment {
+        agent_id: agent_id.to_string(),
+        artifact_scope: scope.to_string(),
+        claims,
+    }
+}
+
+#[test]
+fn surface_disagreements_no_conflict_below_threshold() {
+    // Two agents agree on every item — no conflict record.
+    let a1 = make_assessment(
+        "claude-1",
+        "pr-42",
+        vec![make_claim("claude-1", "AuthService", "uses token auth")],
+    );
+    let a2 = make_assessment(
+        "claude-2",
+        "pr-42",
+        vec![make_claim("claude-2", "AuthService", "uses token auth")],
+    );
+    let result = surface_disagreements(&[a1, a2], "pr-42", 2);
+    assert!(!result.threshold_crossed);
+    assert!(result.conflict_record.is_none());
+    assert!(!result.merged_summary.is_empty());
+}
+
+#[test]
+fn surface_disagreements_crosses_threshold_with_divergent_claims() {
+    // Two agents disagree on AuthService — threshold=2 is crossed.
+    let a1 = make_assessment(
+        "claude-1",
+        "pr-42",
+        vec![make_claim(
+            "claude-1",
+            "AuthService",
+            "secure: uses token auth",
+        )],
+    );
+    let a2 = make_assessment(
+        "claude-2",
+        "pr-42",
+        vec![make_claim(
+            "claude-2",
+            "AuthService",
+            "vulnerable: uses plain cookies",
+        )],
+    );
+    let result = surface_disagreements(&[a1, a2], "pr-42", 2);
+    assert!(result.threshold_crossed);
+    let record = result
+        .conflict_record
+        .expect("conflict record should be present");
+    assert_eq!(record.schema_version, "1");
+    assert_eq!(record.artifact_scope, "pr-42");
+    assert_eq!(record.threshold, 2);
+    assert_eq!(record.conflict_count, 1);
+    assert_eq!(record.conflicts.len(), 1);
+    assert_eq!(record.conflicts[0].item_name, "AuthService");
+    assert_eq!(record.conflicts[0].claims.len(), 2);
+}
+
+#[test]
+fn surface_disagreements_threshold_of_three_requires_three_distinct_claims() {
+    // threshold=3: two diverging claims is insufficient.
+    let a1 = make_assessment(
+        "claude-1",
+        "scope",
+        vec![make_claim("claude-1", "Latency", "fast")],
+    );
+    let a2 = make_assessment(
+        "claude-2",
+        "scope",
+        vec![make_claim("claude-2", "Latency", "slow")],
+    );
+    let result = surface_disagreements(&[a1, a2], "scope", 3);
+    assert!(!result.threshold_crossed);
+    assert!(result.conflict_record.is_none());
+}
+
+#[test]
+fn surface_disagreements_three_distinct_claims_with_threshold_three() {
+    // threshold=3: three distinct claims crosses the threshold.
+    let a1 = make_assessment(
+        "claude-1",
+        "scope",
+        vec![make_claim("claude-1", "Perf", "fast")],
+    );
+    let a2 = make_assessment(
+        "claude-2",
+        "scope",
+        vec![make_claim("claude-2", "Perf", "slow")],
+    );
+    let a3 = make_assessment(
+        "codex-1",
+        "scope",
+        vec![make_claim("codex-1", "Perf", "medium")],
+    );
+    let result = surface_disagreements(&[a1, a2, a3], "scope", 3);
+    assert!(result.threshold_crossed);
+    let record = result.conflict_record.unwrap();
+    assert_eq!(record.conflict_count, 1);
+    assert_eq!(record.conflicts[0].claims.len(), 3);
+}
+
+#[test]
+fn surface_disagreements_only_conflicted_items_appear_in_record() {
+    // Item A diverges; item B is agreed upon — only A should be in the record.
+    let a1 = make_assessment(
+        "agent-1",
+        "scope",
+        vec![
+            make_claim("agent-1", "Alpha", "good"),
+            make_claim("agent-1", "Beta", "shared opinion"),
+        ],
+    );
+    let a2 = make_assessment(
+        "agent-2",
+        "scope",
+        vec![
+            make_claim("agent-2", "Alpha", "bad"),
+            make_claim("agent-2", "Beta", "shared opinion"),
+        ],
+    );
+    let result = surface_disagreements(&[a1, a2], "scope", 2);
+    assert!(result.threshold_crossed);
+    let record = result.conflict_record.unwrap();
+    assert_eq!(record.conflicts.len(), 1);
+    assert_eq!(record.conflicts[0].item_name, "Alpha");
+}
+
+#[test]
+fn surface_disagreements_empty_assessments_yields_no_conflict() {
+    let result = surface_disagreements(&[], "scope", 2);
+    assert!(!result.threshold_crossed);
+    assert!(result.conflict_record.is_none());
+    assert!(result.merged_summary.is_empty());
+}
+
+#[test]
+fn surface_disagreements_conflicts_sorted_by_item_name() {
+    let a1 = make_assessment(
+        "a1",
+        "s",
+        vec![
+            make_claim("a1", "Zebra", "z-claim-1"),
+            make_claim("a1", "Alpha", "a-claim-1"),
+        ],
+    );
+    let a2 = make_assessment(
+        "a2",
+        "s",
+        vec![
+            make_claim("a2", "Zebra", "z-claim-2"),
+            make_claim("a2", "Alpha", "a-claim-2"),
+        ],
+    );
+    let result = surface_disagreements(&[a1, a2], "s", 2);
+    let record = result.conflict_record.unwrap();
+    assert_eq!(record.conflicts[0].item_name, "Alpha");
+    assert_eq!(record.conflicts[1].item_name, "Zebra");
+}
+
+#[test]
+fn render_and_parse_conflict_record_round_trips() {
+    let record = ConflictRecord {
+        schema_version: "1".to_string(),
+        generated_at: "2026-05-16T00:00:00Z".to_string(),
+        artifact_scope: "pr-99".to_string(),
+        threshold: 2,
+        conflict_count: 1,
+        conflicts: vec![ClaimConflict {
+            item_name: "CacheLayer".to_string(),
+            claims: vec![
+                make_claim("agent-a", "CacheLayer", "Redis, fast"),
+                make_claim("agent-b", "CacheLayer", "in-memory, fragile"),
+            ],
+        }],
+    };
+    let comment = render_conflict_record_comment(&record);
+    assert!(comment.starts_with("<!-- caretta:conflict_record "));
+    assert!(comment.ends_with(" -->"));
+
+    let body = format!("Some synthesis text\n\n{comment}\n\nMore text.");
+    let parsed = parse_conflict_record_from_body(&body).expect("should parse back");
+    assert_eq!(parsed, record);
+}
+
+#[test]
+fn parse_conflict_record_from_body_returns_none_when_absent() {
+    assert!(parse_conflict_record_from_body("no marker here").is_none());
+}
+
+#[test]
+fn merged_summary_lists_all_claims_by_agent_and_item() {
+    let a1 = make_assessment(
+        "claude-1",
+        "scope",
+        vec![make_claim("claude-1", "Auth", "good")],
+    );
+    let a2 = make_assessment(
+        "codex-1",
+        "scope",
+        vec![make_claim("codex-1", "Auth", "bad")],
+    );
+    let result = surface_disagreements(&[a1, a2], "scope", 2);
+    assert!(result.merged_summary.contains("[claude-1]"));
+    assert!(result.merged_summary.contains("[codex-1]"));
+    assert!(result.merged_summary.contains("Auth"));
+}
+
 // ── Phase 4: batched PR thread-count parser (#146) ──
 
 /// Acceptance criterion from #146: parses a batched

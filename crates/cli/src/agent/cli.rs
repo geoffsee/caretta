@@ -32,6 +32,8 @@ pub fn parse_args() -> Config {
         bot_settings: Default::default(),
         bot_credentials: None,
         test: Default::default(),
+        surface_disagreements: false,
+        disagreement_threshold: 2,
     }
 }
 
@@ -80,5 +82,7 @@ pub fn parse_args() -> Config {
         bot_settings,
         bot_credentials,
         test,
+        surface_disagreements: false,
+        disagreement_threshold: 2,
     }
 }

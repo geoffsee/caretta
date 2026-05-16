@@ -1342,6 +1342,158 @@ fn civil_from_days(days: u64) -> (i64, u64, u64) {
     (y, mo, d)
 }
 
+// ── Disagreement Surfacing ────────────────────────────────────────────────────
+
+/// A single claim an agent made about a named item during an assessment.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AssessmentClaim {
+    /// Name of the item being assessed (e.g. `"AuthService"`, `"latency"`).
+    pub item_name: String,
+    /// The agent's claim about this item.
+    pub claim: String,
+    /// Identifies the agent run that produced this claim.
+    pub agent_id: String,
+}
+
+/// One agent run's full set of claims about a scoped artifact.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct AgentAssessment {
+    /// Identifier for the agent or run (e.g. `"claude-run-1"`).
+    pub agent_id: String,
+    /// Scoped artifact identifier (e.g. a PR number, issue number, or workflow run ID).
+    pub artifact_scope: String,
+    /// One claim per named item this agent assessed.
+    pub claims: Vec<AssessmentClaim>,
+}
+
+/// All conflicting claims from different agents on a single named item.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ClaimConflict {
+    /// The named item on which agents disagree.
+    pub item_name: String,
+    /// The diverging claims from different agents.
+    pub claims: Vec<AssessmentClaim>,
+}
+
+/// Primary synthesis output produced when the disagreement threshold is crossed.
+///
+/// Serialised as `<!-- caretta:conflict_record {...} -->` in the synthesis
+/// artifact body, following the `SynthesisResult` typed-schema convention.
+/// Schema: `assets/schemas/conflict_record.json`
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ConflictRecord {
+    pub schema_version: String,
+    pub generated_at: String,
+    /// Artifact scope shared by all compared assessments.
+    pub artifact_scope: String,
+    /// Conflict threshold that was applied for this run.
+    pub threshold: u32,
+    /// Number of named items with conflicting claims.
+    pub conflict_count: u32,
+    /// Per-item conflict details.
+    pub conflicts: Vec<ClaimConflict>,
+}
+
+/// Result of a [`surface_disagreements`] call.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SurfaceDisagreementsResult {
+    /// Present when `threshold_crossed` is true; this is the primary synthesis output.
+    pub conflict_record: Option<ConflictRecord>,
+    /// Human-readable merged summary of all claims across all assessments.
+    pub merged_summary: String,
+    /// True when ≥ 1 named item had ≥ `threshold` distinct claim texts.
+    pub threshold_crossed: bool,
+}
+
+/// Compare agent assessments on the same artifact and surface conflicts.
+///
+/// An item is considered conflicted when ≥ `threshold` distinct claim texts
+/// exist across all assessments for that item name. When any item is conflicted
+/// a [`ConflictRecord`] is produced as the primary output; a merged summary is
+/// always produced regardless of whether the threshold is crossed.
+///
+/// `threshold` defaults to 2 and is set per workflow run via
+/// `--disagreement-threshold`.
+pub fn surface_disagreements(
+    assessments: &[AgentAssessment],
+    artifact_scope: &str,
+    threshold: usize,
+) -> SurfaceDisagreementsResult {
+    use std::collections::HashMap;
+
+    // Group all claims by item_name across assessments.
+    let mut by_item: HashMap<&str, Vec<&AssessmentClaim>> = HashMap::new();
+    for assessment in assessments {
+        for claim in &assessment.claims {
+            by_item
+                .entry(claim.item_name.as_str())
+                .or_default()
+                .push(claim);
+        }
+    }
+
+    // An item is conflicted when it has ≥ threshold distinct claim texts.
+    let mut conflicts: Vec<ClaimConflict> = by_item
+        .iter()
+        .filter(|(_, claims)| {
+            let distinct: std::collections::HashSet<&str> =
+                claims.iter().map(|c| c.claim.as_str()).collect();
+            distinct.len() >= threshold
+        })
+        .map(|(item_name, claims)| ClaimConflict {
+            item_name: item_name.to_string(),
+            claims: claims.iter().map(|c| (*c).clone()).collect(),
+        })
+        .collect();
+
+    // Deterministic output order.
+    conflicts.sort_by(|a, b| a.item_name.cmp(&b.item_name));
+
+    let threshold_crossed = !conflicts.is_empty();
+    let conflict_record = threshold_crossed.then(|| ConflictRecord {
+        schema_version: "1".to_string(),
+        generated_at: iso8601_now(),
+        artifact_scope: artifact_scope.to_string(),
+        threshold: threshold as u32,
+        conflict_count: conflicts.len() as u32,
+        conflicts,
+    });
+
+    SurfaceDisagreementsResult {
+        conflict_record,
+        merged_summary: build_assessment_summary(assessments),
+        threshold_crossed,
+    }
+}
+
+/// Render a [`ConflictRecord`] as an HTML comment parseable by `gh api`.
+pub fn render_conflict_record_comment(record: &ConflictRecord) -> String {
+    let json = serde_json::to_string(record).unwrap_or_default();
+    format!("<!-- caretta:conflict_record {json} -->")
+}
+
+/// Parse the first `<!-- caretta:conflict_record {...} -->` comment from `body`.
+///
+/// Returns `None` when absent or when the embedded JSON is malformed.
+pub fn parse_conflict_record_from_body(body: &str) -> Option<ConflictRecord> {
+    const PREFIX: &str = "<!-- caretta:conflict_record ";
+    const SUFFIX: &str = " -->";
+    let start = body.find(PREFIX)? + PREFIX.len();
+    let end = body[start..].find(SUFFIX)? + start;
+    serde_json::from_str(&body[start..end]).ok()
+}
+
+/// Produce a flat human-readable summary of all assessment claims.
+fn build_assessment_summary(assessments: &[AgentAssessment]) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for a in assessments {
+        for c in &a.claims {
+            lines.push(format!("- [{}] {}: {}", a.agent_id, c.item_name, c.claim));
+        }
+    }
+    lines.join("\n")
+}
+
 mod prompts;
 pub use prompts::*;
 

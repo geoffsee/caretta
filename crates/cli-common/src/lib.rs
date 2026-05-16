@@ -632,6 +632,12 @@ pub struct Config {
     pub bot_settings: BotSettings,
     pub bot_credentials: Option<BotCredentials>,
     pub test: TestCommands,
+    /// Emit structured ConflictRecords when agent assessments diverge (--surface-disagreements).
+    #[serde(default)]
+    pub surface_disagreements: bool,
+    /// Minimum distinct claim texts on the same named item to surface a conflict (--disagreement-threshold).
+    #[serde(default = "default_disagreement_threshold")]
+    pub disagreement_threshold: usize,
 }
 
 /// Project-specific test/format commands run after an agent edit.
@@ -737,6 +743,8 @@ impl fmt::Debug for Config {
             .field("pricing", &self.pricing)
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
+            .field("surface_disagreements", &self.surface_disagreements)
+            .field("disagreement_threshold", &self.disagreement_threshold)
             .finish()
     }
 }
@@ -914,6 +922,10 @@ impl BotSettingsFile {
             private_key_pem: String::new(),
         }
     }
+}
+
+fn default_disagreement_threshold() -> usize {
+    2
 }
 
 fn is_none<T>(opt: &Option<T>) -> bool {

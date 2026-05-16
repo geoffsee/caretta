@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CarettaConflictRecord",
+  "description": "Structured conflict record emitted by the disagreement-surfacing synthesis mode when two or more agent assessments on the same artifact diverge beyond the configured threshold. Stored as a JSON comment <!-- caretta:conflict_record {...} --> in the synthesis artifact body. Produced alongside the merged summary when --surface-disagreements is active.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "artifact_scope",
+    "threshold",
+    "conflict_count",
+    "conflicts"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1",
+      "description": "Schema version. Currently \"1\"."
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "ISO 8601 UTC timestamp when the conflict record was produced."
+    },
+    "artifact_scope": {
+      "type": "string",
+      "description": "Scoped artifact identifier shared by all compared assessments (e.g. a PR number, issue number, or workflow run ID)."
+    },
+    "threshold": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Minimum number of distinct claim texts on the same named item required to surface a conflict. Default 2."
+    },
+    "conflict_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of named items with conflicting claims in this record."
+    },
+    "conflicts": {
+      "type": "array",
+      "description": "Per-item conflict details. Empty when conflict_count is 0.",
+      "items": {
+        "type": "object",
+        "required": ["item_name", "claims"],
+        "additionalProperties": false,
+        "properties": {
+          "item_name": {
+            "type": "string",
+            "description": "The named item on which agents disagree (e.g. \"AuthService\", \"latency\")."
+          },
+          "claims": {
+            "type": "array",
+            "description": "All diverging claims from different agents for this item.",
+            "items": {
+              "type": "object",
+              "required": ["item_name", "claim", "agent_id"],
+              "additionalProperties": false,
+              "properties": {
+                "item_name": {
+                  "type": "string",
+                  "description": "Name of the item being assessed."
+                },
+                "claim": {
+                  "type": "string",
+                  "description": "The agent's claim about this item."
+                },
+                "agent_id": {
+                  "type": "string",
+                  "description": "Identifier for the agent run that produced this claim."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
