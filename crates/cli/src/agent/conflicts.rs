@@ -1,12 +1,14 @@
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, log};
 use crate::agent::issue::preflight;
-use crate::agent::review::WorktreeGuard;
+use crate::agent::review::{
+    PrepareBranchOutcome, WorktreeGuard, prepare_branch_for_worktree_add, restore_main_head,
+};
 use crate::agent::run::run_agent_with_env_in_dir;
 use crate::agent::tracker::{list_open_prs, pr_diff};
 use crate::agent::types::{AgentEvent, Config};
 use crate::agent::{launch::log_resolved_agent_launch, process::emit_event};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const CONFLICT_RESOLUTION_MARKER: &str = "<!-- caretta:branch-sync-conflict -->";
 
@@ -263,9 +265,23 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
         return;
     }
 
+    let restore_after_add = match prepare_branch_for_worktree_add(Path::new(&cfg.root), &branch) {
+        PrepareBranchOutcome::Aborted { reason } => {
+            log(&reason);
+            log(&format!(
+                "Aborting conflict-resolution run for PR #{pr_num}."
+            ));
+            emit_event(AgentEvent::Done);
+            return;
+        }
+        PrepareBranchOutcome::Ready { restore } => restore,
+    };
+
     if !cmd_run(
         "git",
         &[
+            "-C",
+            &cfg.root,
             "worktree",
             "add",
             "--force",
@@ -275,6 +291,9 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
             &remote_ref,
         ],
     ) {
+        if let Some(restore) = &restore_after_add {
+            restore_main_head(restore);
+        }
         log(&format!(
             "Failed to create conflict-resolution worktree for PR #{pr_num} from {remote_ref}."
         ));
@@ -283,6 +302,8 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
     }
     let _guard = WorktreeGuard {
         path: worktree_path.clone(),
+        root: PathBuf::from(&cfg.root),
+        restore: restore_after_add,
     };
 
     let expected_base_refspec =

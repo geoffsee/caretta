@@ -20,6 +20,22 @@ use std::env;
 use std::path::Path;
 use std::time::Instant;
 
+/// Discard any leftover changes in the main checkout so the next iteration
+/// starts from a known-good HEAD. Called at the top of `work_on_issue` (so
+/// iteration N+1 is not poisoned by however iteration N exited — including
+/// a `commit_with_retries` that staged content via `git add .` and then bailed
+/// when the pre-commit hook kept failing) and on the failure-exit path of
+/// `commit_with_retries` itself.
+///
+/// Skipped during `dry_run` — callers gate the call themselves.
+pub(crate) fn reset_working_tree(repo_root: &str) {
+    log(&format!(
+        "Resetting working tree in {repo_root} (git reset --hard HEAD; git clean -fd)"
+    ));
+    let _ = cmd_run("git", &["-C", repo_root, "reset", "--hard", "HEAD"]);
+    let _ = cmd_run("git", &["-C", repo_root, "clean", "-fd"]);
+}
+
 /// Fetch `origin/{branch}` first; if it exists, check it out and fast-forward pull.
 /// Otherwise create a new local branch (removing a stale local branch if needed).
 fn checkout_issue_working_branch(branch: &str) {
@@ -96,6 +112,13 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
             prompt
         ));
         return;
+    }
+
+    // Clean the slate before any branch operations: if the previous iteration
+    // (or a prior crash/panic/stop) left staged or untracked files behind, a
+    // later `git checkout <trunk>` silently carries them onto the next branch.
+    if !cfg.dry_run {
+        reset_working_tree(&cfg.root);
     }
 
     let branch = format!("{BRANCH_PREFIX}{issue_num}");
@@ -308,6 +331,13 @@ pub fn commit_with_retries(cfg: &Config, _issue_num: u32, branch: &str, message:
 
     if !ok {
         log("Failed to commit after multiple attempts.");
+        // The retry loop ran `git add .` on every attempt, so the working tree
+        // is almost certainly dirty (staged adds + whatever the hook-fix agent
+        // produced). Reset before returning so single-shot `caretta issue <n>`
+        // operators don't end up with mystery changes in their tree.
+        if !cfg.dry_run {
+            reset_working_tree(&cfg.root);
+        }
         return false;
     }
 
@@ -465,7 +495,75 @@ pub(crate) fn pr_open_action(decision: &str, unresolved_thread_count: usize) -> 
 
 #[cfg(test)]
 mod tests {
-    use super::{PrOpenAction, pr_open_action};
+    use super::{PrOpenAction, pr_open_action, reset_working_tree};
+    use std::process::Command;
+
+    #[test]
+    fn reset_working_tree_drops_staged_and_untracked_changes() {
+        // Reproduces the Bug B failure-exit cleanup: after a commit fails with
+        // a dirty index (`git add .` already staged content), `reset_working_tree`
+        // must return the tree to HEAD so the next iteration starts clean.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let root_s = root.to_string_lossy().to_string();
+
+        let git = |args: &[&str]| {
+            let status = Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .status()
+                .expect("spawn git");
+            assert!(status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "t@example.com"]);
+        git(&["config", "user.name", "tester"]);
+        git(&["config", "commit.gpgsign", "false"]);
+        std::fs::write(root.join("tracked.txt"), b"v1\n").unwrap();
+        git(&["add", "tracked.txt"]);
+        git(&["commit", "-qm", "initial"]);
+
+        // Simulate the leftover state from a failed commit_with_retries:
+        //  - tracked file modified + staged
+        //  - new untracked file (a likely product of the agent's edits)
+        std::fs::write(root.join("tracked.txt"), b"v2-modified\n").unwrap();
+        std::fs::write(root.join("untracked.txt"), b"junk\n").unwrap();
+        git(&["add", "tracked.txt"]);
+
+        let status_before = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["status", "--porcelain"])
+            .output()
+            .expect("status");
+        let status_before = String::from_utf8_lossy(&status_before.stdout);
+        assert!(
+            !status_before.trim().is_empty(),
+            "precondition: tree should be dirty before reset"
+        );
+
+        reset_working_tree(&root_s);
+
+        let status_after = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["status", "--porcelain"])
+            .output()
+            .expect("status");
+        let status_after = String::from_utf8_lossy(&status_after.stdout);
+        assert_eq!(
+            status_after.trim(),
+            "",
+            "tree should be clean after reset, got:\n{status_after}"
+        );
+        let content = std::fs::read_to_string(root.join("tracked.txt")).unwrap();
+        assert_eq!(content, "v1\n", "tracked file should be restored to HEAD");
+        assert!(
+            !root.join("untracked.txt").exists(),
+            "untracked file should be removed by `git clean -fd`"
+        );
+    }
 
     #[test]
     fn approved_skips_regardless_of_threads() {

@@ -15,6 +15,25 @@ use crate::agent::tracker::{
 use crate::agent::types::{AgentEvent, Config, MAX_COMMIT_ATTEMPTS};
 use std::path::{Path, PathBuf};
 
+/// Where to put the main checkout's HEAD back after a fix-pr run that
+/// temporarily detached it to free a branch for the throwaway worktree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RestoreTarget {
+    /// Re-attach the main checkout's HEAD to this short branch name.
+    Branch(String),
+    /// Re-attach as detached HEAD at this commit SHA.
+    Detached(String),
+}
+
+/// Records the main checkout HEAD that [`WorktreeGuard`] should restore on
+/// drop. Only populated when we had to detach the main checkout to free a
+/// branch that the throwaway worktree wants to force-reset.
+#[derive(Debug, Clone)]
+pub struct MainHeadRestore {
+    pub root: PathBuf,
+    pub target: RestoreTarget,
+}
+
 pub fn run_code_review(cfg: &Config, only_pr: Option<u32>) {
     preflight(cfg);
     log("Starting code review...");
@@ -113,20 +132,286 @@ pub fn run_security_code_review(cfg: &Config) {
 }
 
 /// RAII guard that removes a git worktree on drop, including on panic.
+/// When `restore` is set, the guard also re-attaches the main checkout's HEAD
+/// after the throwaway worktree is gone (the order matters: the throwaway must
+/// release the branch before the main checkout can re-attach to it).
+///
+/// `root` is the parent repo's worktree path. We pass it via `-C` so the
+/// worktree commands operate on the right repo regardless of the process cwd
+/// (important when this guard runs from a test harness or library context
+/// that does not chdir into `cfg.root`).
 pub struct WorktreeGuard {
     pub path: PathBuf,
+    pub root: PathBuf,
+    pub restore: Option<MainHeadRestore>,
 }
 
 impl Drop for WorktreeGuard {
     fn drop(&mut self) {
         let path_str = self.path.to_string_lossy().to_string();
-        if !cmd_run("git", &["worktree", "remove", "--force", &path_str]) {
+        let root_str = self.root.to_string_lossy().to_string();
+        if !cmd_run(
+            "git",
+            &["-C", &root_str, "worktree", "remove", "--force", &path_str],
+        ) {
             log(&format!(
                 "WARNING: `git worktree remove` failed for {path_str}; falling back to fs cleanup"
             ));
             let _ = std::fs::remove_dir_all(&self.path);
-            let _ = cmd_run("git", &["worktree", "prune"]);
+            let _ = cmd_run("git", &["-C", &root_str, "worktree", "prune"]);
         }
+        if let Some(restore) = &self.restore {
+            restore_main_head(restore);
+        }
+    }
+}
+
+/// Re-attach the main checkout's HEAD per `restore`. Used by both
+/// [`WorktreeGuard::drop`] and the inline error path in
+/// [`run_pr_review_fix_scoped`] / [`crate::agent::conflicts::run_pr_conflict_fix`]
+/// when `git worktree add` fails after we detached the main checkout.
+pub(crate) fn restore_main_head(restore: &MainHeadRestore) {
+    let root = restore.root.to_string_lossy().to_string();
+    let ok = match &restore.target {
+        RestoreTarget::Branch(name) => cmd_run("git", &["-C", &root, "checkout", name]),
+        RestoreTarget::Detached(sha) => cmd_run("git", &["-C", &root, "checkout", "--detach", sha]),
+    };
+    let label = match &restore.target {
+        RestoreTarget::Branch(name) => format!("branch '{name}'"),
+        RestoreTarget::Detached(sha) => format!("commit {sha} (detached)"),
+    };
+    if ok {
+        log(&format!(
+            "Restored main checkout HEAD to {label} in {root}."
+        ));
+    } else {
+        let short = match &restore.target {
+            RestoreTarget::Branch(name) => name.clone(),
+            RestoreTarget::Detached(sha) => sha.clone(),
+        };
+        log(&format!(
+            "WARNING: failed to restore main checkout HEAD to {label} in {root}. \
+             Operator may need to run `git -C {root} checkout {short}` manually."
+        ));
+    }
+}
+
+/// One worktree entry parsed from `git worktree list --porcelain`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorktreeEntry {
+    pub path: String,
+    /// Full ref form, e.g. `refs/heads/agent/issue-67`. `None` for detached
+    /// or bare worktrees.
+    pub branch: Option<String>,
+}
+
+/// Pure parser for `git worktree list --porcelain` output. Each entry is a
+/// block of lines (`worktree <path>`, `HEAD <sha>`, then either
+/// `branch <ref>`, `detached`, or `bare`) separated by blank lines.
+pub(crate) fn parse_worktree_list(porcelain: &str) -> Vec<WorktreeEntry> {
+    let mut out = Vec::new();
+    let mut cur_path: Option<String> = None;
+    let mut cur_branch: Option<String> = None;
+    for line in porcelain.lines() {
+        if line.is_empty() {
+            if let Some(p) = cur_path.take() {
+                out.push(WorktreeEntry {
+                    path: p,
+                    branch: cur_branch.take(),
+                });
+            }
+            cur_branch = None;
+        } else if let Some(rest) = line.strip_prefix("worktree ") {
+            if let Some(p) = cur_path.take() {
+                out.push(WorktreeEntry {
+                    path: p,
+                    branch: cur_branch.take(),
+                });
+            }
+            cur_path = Some(rest.to_string());
+            cur_branch = None;
+        } else if let Some(rest) = line.strip_prefix("branch ") {
+            cur_branch = Some(rest.trim().to_string());
+        }
+    }
+    if let Some(p) = cur_path.take() {
+        out.push(WorktreeEntry {
+            path: p,
+            branch: cur_branch,
+        });
+    }
+    out
+}
+
+/// Does `a` resolve to the same filesystem location as `b`? Tries exact
+/// equality first, then canonicalization (handles macOS `/var` vs `/private/var`,
+/// trailing slashes, symlinks).
+fn paths_match_canonical(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ac), Ok(bc)) => ac == bc,
+        _ => false,
+    }
+}
+
+/// True iff `path` is a throwaway caretta worktree directory: a child of
+/// `temp_dir` whose name starts with one of the prefixes used by the caretta
+/// throwaway-worktree flows (`caretta-pr-` for fix-pr, `caretta-conflicts-pr-`
+/// for conflict resolution).
+pub(crate) fn is_caretta_temp_worktree_path(path: &str, temp_dir: &Path) -> bool {
+    const PREFIXES: &[&str] = &["caretta-pr-", "caretta-conflicts-pr-"];
+    let p = Path::new(path);
+    let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if !PREFIXES.iter().any(|prefix| name.starts_with(prefix)) {
+        return false;
+    }
+    p.parent()
+        .is_some_and(|parent| paths_match_canonical(parent, temp_dir))
+}
+
+/// Result of [`prepare_branch_for_worktree_add`].
+pub(crate) enum PrepareBranchOutcome {
+    /// Branch is now free; the worktree add will succeed. If we had to detach
+    /// the main checkout to get here, `restore` carries what to put back when
+    /// the throwaway worktree is dropped.
+    Ready { restore: Option<MainHeadRestore> },
+    /// Cannot safely free the branch (e.g. dirty main checkout, or some
+    /// non-caretta worktree holds it). The caller should log `reason` and bail.
+    Aborted { reason: String },
+}
+
+/// Free `target_branch` so a subsequent `git worktree add --force -B
+/// <target_branch> <tmp>` will succeed.
+///
+/// Steps:
+/// 1. Prune any stale caretta `caretta-pr-*` worktrees that currently hold the
+///    branch (they would otherwise block `-B`'s force-reset).
+/// 2. If after pruning the branch is still held by another worktree:
+///    - When it's the main checkout AND its working tree is clean, detach the
+///      main checkout and return the restore target so the caller can put the
+///      branch back on drop.
+///    - Otherwise (dirty main checkout, or some unrelated worktree holds it),
+///      return `Aborted` — we won't silently risk operator work.
+pub(crate) fn prepare_branch_for_worktree_add(
+    repo_root: &Path,
+    target_branch: &str,
+) -> PrepareBranchOutcome {
+    let root_str = repo_root.to_string_lossy().to_string();
+    let temp_dir = std::env::temp_dir();
+    let full_ref = format!("refs/heads/{target_branch}");
+
+    let porcelain = cmd_stdout("git", &["-C", &root_str, "worktree", "list", "--porcelain"])
+        .unwrap_or_default();
+    let entries = parse_worktree_list(&porcelain);
+
+    let mut pruned_any = false;
+    for entry in &entries {
+        if entry.branch.as_deref() == Some(&full_ref)
+            && is_caretta_temp_worktree_path(&entry.path, &temp_dir)
+        {
+            log(&format!(
+                "Pruning stale caretta worktree at {} (holds branch '{}').",
+                entry.path, target_branch
+            ));
+            if !cmd_run(
+                "git",
+                &[
+                    "-C",
+                    &root_str,
+                    "worktree",
+                    "remove",
+                    "--force",
+                    &entry.path,
+                ],
+            ) {
+                let _ = std::fs::remove_dir_all(&entry.path);
+            }
+            pruned_any = true;
+        }
+    }
+    if pruned_any {
+        let _ = cmd_run("git", &["-C", &root_str, "worktree", "prune"]);
+    }
+
+    let porcelain = cmd_stdout("git", &["-C", &root_str, "worktree", "list", "--porcelain"])
+        .unwrap_or_default();
+    let entries = parse_worktree_list(&porcelain);
+    let Some(holder) = entries
+        .iter()
+        .find(|e| e.branch.as_deref() == Some(&full_ref))
+    else {
+        return PrepareBranchOutcome::Ready { restore: None };
+    };
+
+    let holder_path = Path::new(&holder.path);
+    if !paths_match_canonical(holder_path, repo_root) {
+        return PrepareBranchOutcome::Aborted {
+            reason: format!(
+                "Branch '{target_branch}' is still checked out at '{}' after pruning caretta orphans. \
+                 That worktree was not created by caretta — refusing to disturb it. \
+                 Remove it manually (`git worktree remove '{}'`) if it is stale.",
+                holder.path, holder.path
+            ),
+        };
+    }
+
+    let dirty = cmd_stdout("git", &["-C", &root_str, "status", "--porcelain"]).unwrap_or_default();
+    if !dirty.trim().is_empty() {
+        return PrepareBranchOutcome::Aborted {
+            reason: format!(
+                "Main checkout at '{root_str}' is on branch '{target_branch}' with a dirty working tree. \
+                 Refusing to detach HEAD to free the branch (would risk uncommitted work). \
+                 Commit, stash, or discard changes in the main checkout, then retry."
+            ),
+        };
+    }
+
+    let short = cmd_stdout(
+        "git",
+        &[
+            "-C",
+            &root_str,
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+        ],
+    )
+    .filter(|s| !s.is_empty());
+    let target = if let Some(name) = short {
+        RestoreTarget::Branch(name)
+    } else {
+        let sha = cmd_stdout("git", &["-C", &root_str, "rev-parse", "HEAD"]).unwrap_or_default();
+        if sha.is_empty() {
+            return PrepareBranchOutcome::Aborted {
+                reason: format!(
+                    "Could not read HEAD in main checkout at '{root_str}'; cannot safely detach."
+                ),
+            };
+        }
+        RestoreTarget::Detached(sha)
+    };
+
+    log(&format!(
+        "Detaching main checkout HEAD at '{root_str}' to free branch '{target_branch}' (will restore on completion)."
+    ));
+    if !cmd_run("git", &["-C", &root_str, "checkout", "--detach"]) {
+        return PrepareBranchOutcome::Aborted {
+            reason: format!(
+                "Failed to detach HEAD in main checkout at '{root_str}' to free branch '{target_branch}'."
+            ),
+        };
+    }
+
+    PrepareBranchOutcome::Ready {
+        restore: Some(MainHeadRestore {
+            root: repo_root.to_path_buf(),
+            target,
+        }),
     }
 }
 
@@ -212,9 +497,21 @@ fn run_pr_review_fix_scoped(
         return;
     }
 
+    let restore_after_add = match prepare_branch_for_worktree_add(Path::new(&cfg.root), &branch) {
+        PrepareBranchOutcome::Aborted { reason } => {
+            log(&reason);
+            log(&format!("Aborting Fix Comments run for PR #{pr_num}."));
+            emit_event(AgentEvent::Done);
+            return;
+        }
+        PrepareBranchOutcome::Ready { restore } => restore,
+    };
+
     if !cmd_run(
         "git",
         &[
+            "-C",
+            &cfg.root,
             "worktree",
             "add",
             "--force",
@@ -224,6 +521,9 @@ fn run_pr_review_fix_scoped(
             &remote_ref,
         ],
     ) {
+        if let Some(restore) = &restore_after_add {
+            restore_main_head(restore);
+        }
         log(&format!(
             "Failed to create worktree for PR #{pr_num} from {remote_ref}."
         ));
@@ -233,6 +533,8 @@ fn run_pr_review_fix_scoped(
 
     let _guard = WorktreeGuard {
         path: worktree_path.clone(),
+        root: PathBuf::from(&cfg.root),
+        restore: restore_after_add,
     };
     let prompt =
         build_pr_review_fix_prompt(&cfg.project_name, pr_num, &title, &branch, &diff, &threads);
@@ -469,4 +771,295 @@ pub fn try_approve_pr(cfg: &Config, pr_num: u32) -> bool {
         ));
     }
     ok
+}
+
+#[cfg(test)]
+mod worktree_prep_tests {
+    use super::{
+        MainHeadRestore, PrepareBranchOutcome, RestoreTarget, WorktreeEntry, WorktreeGuard,
+        is_caretta_temp_worktree_path, parse_worktree_list, prepare_branch_for_worktree_add,
+        restore_main_head,
+    };
+    use std::path::{Path, PathBuf};
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Minimal `git init -b main` repo with one empty commit on `main` so HEAD
+    /// is a valid symbolic ref.
+    fn init_repo() -> (TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().to_path_buf();
+        run(&root, &["init", "-q", "-b", "main"]);
+        run(&root, &["config", "user.email", "t@example.com"]);
+        run(&root, &["config", "user.name", "tester"]);
+        run(&root, &["config", "commit.gpgsign", "false"]);
+        run(&root, &["commit", "--allow-empty", "-qm", "initial"]);
+        (dir, root)
+    }
+
+    fn run(root: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .status()
+            .expect("spawn git");
+        assert!(status.success(), "git {args:?} failed in {root:?}");
+    }
+
+    fn current_branch(root: &Path) -> Option<String> {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["symbolic-ref", "--quiet", "--short", "HEAD"])
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if s.is_empty() { None } else { Some(s) }
+    }
+
+    fn head_sha(root: &Path) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .expect("rev-parse");
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    #[test]
+    fn parses_single_branch_entry() {
+        let input = "\
+worktree /path/to/main
+HEAD abc123
+branch refs/heads/main
+";
+        assert_eq!(
+            parse_worktree_list(input),
+            vec![WorktreeEntry {
+                path: "/path/to/main".into(),
+                branch: Some("refs/heads/main".into()),
+            }]
+        );
+    }
+
+    #[test]
+    fn parses_multiple_entries_including_detached() {
+        let input = "\
+worktree /a
+HEAD abc
+branch refs/heads/main
+
+worktree /b
+HEAD def
+detached
+
+worktree /c
+HEAD ghi
+branch refs/heads/agent/issue-67
+";
+        let got = parse_worktree_list(input);
+        assert_eq!(got.len(), 3);
+        assert_eq!(got[0].branch.as_deref(), Some("refs/heads/main"));
+        assert_eq!(got[1].branch, None);
+        assert_eq!(got[2].branch.as_deref(), Some("refs/heads/agent/issue-67"));
+    }
+
+    #[test]
+    fn caretta_temp_path_classifier_matches_both_caretta_prefixes() {
+        let temp = std::env::temp_dir();
+        let fix_pr = temp.join("caretta-pr-67-12345");
+        let conflicts = temp.join("caretta-conflicts-pr-67-12345");
+        let unrelated = temp.join("not-caretta-67-12345");
+        let nested = temp.join("nested").join("caretta-pr-67-12345");
+        assert!(is_caretta_temp_worktree_path(
+            &fix_pr.to_string_lossy(),
+            &temp
+        ));
+        assert!(is_caretta_temp_worktree_path(
+            &conflicts.to_string_lossy(),
+            &temp
+        ));
+        assert!(!is_caretta_temp_worktree_path(
+            &unrelated.to_string_lossy(),
+            &temp
+        ));
+        assert!(!is_caretta_temp_worktree_path(
+            &nested.to_string_lossy(),
+            &temp
+        ));
+    }
+
+    #[test]
+    fn prepare_returns_ready_with_no_restore_when_branch_unused() {
+        let (_dir, root) = init_repo();
+        // Branch exists but main checkout is on `main`, not on `agent/issue-99`.
+        run(&root, &["branch", "agent/issue-99"]);
+        match prepare_branch_for_worktree_add(&root, "agent/issue-99") {
+            PrepareBranchOutcome::Ready { restore } => assert!(restore.is_none()),
+            PrepareBranchOutcome::Aborted { reason } => panic!("unexpected abort: {reason}"),
+        }
+        // Main checkout is untouched.
+        assert_eq!(current_branch(&root).as_deref(), Some("main"));
+    }
+
+    #[test]
+    fn prepare_detaches_clean_main_and_restore_puts_branch_back() {
+        let (_dir, root) = init_repo();
+        // Put the main checkout ON `agent/issue-101` — this is the Bug A
+        // scenario verbatim.
+        run(&root, &["checkout", "-b", "agent/issue-101"]);
+        assert_eq!(current_branch(&root).as_deref(), Some("agent/issue-101"));
+
+        let outcome = prepare_branch_for_worktree_add(&root, "agent/issue-101");
+        let restore = match outcome {
+            PrepareBranchOutcome::Ready { restore } => restore.expect("restore should be set"),
+            PrepareBranchOutcome::Aborted { reason } => panic!("unexpected abort: {reason}"),
+        };
+        // HEAD should now be detached on the same commit.
+        assert_eq!(current_branch(&root), None, "HEAD should be detached");
+        assert!(matches!(
+            &restore.target,
+            RestoreTarget::Branch(b) if b == "agent/issue-101"
+        ));
+
+        restore_main_head(&restore);
+        assert_eq!(current_branch(&root).as_deref(), Some("agent/issue-101"));
+    }
+
+    #[test]
+    fn prepare_aborts_when_main_checkout_is_dirty() {
+        let (_dir, root) = init_repo();
+        run(&root, &["checkout", "-b", "agent/issue-102"]);
+        // Stage a dirty change so detach would risk operator work.
+        std::fs::write(root.join("scratch.txt"), b"wip").unwrap();
+        run(&root, &["add", "scratch.txt"]);
+
+        match prepare_branch_for_worktree_add(&root, "agent/issue-102") {
+            PrepareBranchOutcome::Aborted { reason } => {
+                assert!(
+                    reason.contains("dirty working tree"),
+                    "abort reason should call out the dirty tree: {reason}"
+                );
+            }
+            PrepareBranchOutcome::Ready { .. } => {
+                panic!("prepare should refuse to detach a dirty main checkout")
+            }
+        }
+        // Main checkout unchanged: still on the branch, change still staged.
+        assert_eq!(current_branch(&root).as_deref(), Some("agent/issue-102"));
+    }
+
+    #[test]
+    fn prepare_prunes_stale_caretta_pr_orphan_worktree() {
+        let (_dir, root) = init_repo();
+        // The branch exists but main checkout is on `main`. An orphan from a
+        // prior killed fix-pr run lives at <temp>/caretta-pr-N-pid and holds
+        // `agent/issue-103`.
+        run(&root, &["branch", "agent/issue-103"]);
+        let orphan_dir =
+            std::env::temp_dir().join(format!("caretta-pr-103-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&orphan_dir);
+        run(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "-B",
+                "agent/issue-103",
+                orphan_dir.to_string_lossy().as_ref(),
+                "agent/issue-103",
+            ],
+        );
+
+        // Sanity: the orphan is registered and holds the branch.
+        let listed = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["worktree", "list", "--porcelain"])
+            .output()
+            .expect("worktree list");
+        let listed_s = String::from_utf8_lossy(&listed.stdout);
+        assert!(
+            listed_s.contains("refs/heads/agent/issue-103"),
+            "precondition: orphan should hold the branch:\n{listed_s}"
+        );
+
+        match prepare_branch_for_worktree_add(&root, "agent/issue-103") {
+            PrepareBranchOutcome::Ready { restore } => assert!(restore.is_none()),
+            PrepareBranchOutcome::Aborted { reason } => panic!("unexpected abort: {reason}"),
+        }
+
+        // The orphan is no longer registered.
+        let listed = Command::new("git")
+            .arg("-C")
+            .arg(&root)
+            .args(["worktree", "list", "--porcelain"])
+            .output()
+            .expect("worktree list");
+        let listed_s = String::from_utf8_lossy(&listed.stdout);
+        assert!(
+            !listed_s.contains(orphan_dir.to_string_lossy().as_ref()),
+            "orphan should be pruned:\n{listed_s}"
+        );
+        let _ = std::fs::remove_dir_all(&orphan_dir);
+    }
+
+    #[test]
+    fn worktree_guard_drop_runs_restore_after_remove() {
+        // End-to-end: detach main, "use" a throwaway worktree, then drop the
+        // guard and confirm the main checkout is back on the original branch.
+        // This exercises the Drop order requirement (remove first → restore).
+        let (_dir, root) = init_repo();
+        run(&root, &["checkout", "-b", "agent/issue-104"]);
+        let sha_before = head_sha(&root);
+
+        let throwaway = std::env::temp_dir().join(format!("caretta-pr-104-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&throwaway);
+
+        let outcome = prepare_branch_for_worktree_add(&root, "agent/issue-104");
+        let restore = match outcome {
+            PrepareBranchOutcome::Ready { restore } => restore.expect("restore set"),
+            PrepareBranchOutcome::Aborted { reason } => panic!("unexpected abort: {reason}"),
+        };
+        run(
+            &root,
+            &[
+                "worktree",
+                "add",
+                "--force",
+                "-B",
+                "agent/issue-104",
+                throwaway.to_string_lossy().as_ref(),
+                "agent/issue-104",
+            ],
+        );
+        {
+            let _guard = WorktreeGuard {
+                path: throwaway.clone(),
+                root: root.clone(),
+                restore: Some(MainHeadRestore {
+                    root: restore.root.clone(),
+                    target: restore.target.clone(),
+                }),
+            };
+            // Guard is alive — main checkout is still detached.
+            assert_eq!(current_branch(&root), None);
+        }
+        // After drop: throwaway is gone, main is back on the branch.
+        assert_eq!(current_branch(&root).as_deref(), Some("agent/issue-104"));
+        assert_eq!(head_sha(&root), sha_before);
+        assert!(
+            !throwaway.exists()
+                || std::fs::read_dir(&throwaway)
+                    .map(|d| d.count() == 0)
+                    .unwrap_or(true)
+        );
+        let _ = std::fs::remove_dir_all(&throwaway);
+    }
 }
