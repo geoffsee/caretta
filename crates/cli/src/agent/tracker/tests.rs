@@ -1221,6 +1221,7 @@ fn code_review_prompt_includes_pr_context() {
         "Add caching",
         "Implements LRU",
         "+fn cache()",
+        "",
     );
     assert!(p.contains("test-project"));
     assert!(p.contains("Pull Request #42"));
@@ -1241,6 +1242,7 @@ fn code_review_prompt_uses_inline_comment_schema() {
         "Add caching",
         "Implements LRU",
         "+fn cache()",
+        "",
     );
     // Inline-comment payload schema must be present so future edits
     // can't accidentally drop the line-anchored review path.
@@ -1255,9 +1257,26 @@ fn code_review_prompt_uses_inline_comment_schema() {
 
 #[test]
 fn code_review_prompt_checks_security() {
-    let p = build_code_review_prompt("test-project", 1, "t", "b", "d");
+    let p = build_code_review_prompt("test-project", 1, "t", "b", "d", "");
     assert!(p.contains("Security"));
     assert!(p.contains("OWASP"));
+}
+
+#[test]
+fn code_review_prompt_includes_prior_pr_review_context() {
+    let prior_context = "## Prior PR Review Context\n\n- CHANGES_REQUESTED by @reviewer at 2026-05-16T12:00:00Z\n\nPlease cover the parser edge case.";
+    let p = build_code_review_prompt(
+        "test-project",
+        42,
+        "Add caching",
+        "Implements LRU",
+        "+fn cache()",
+        prior_context,
+    );
+    assert!(p.contains("Prior PR Review Context"));
+    assert!(p.contains("@reviewer"));
+    assert!(p.contains("CHANGES_REQUESTED"));
+    assert!(p.contains("Please cover the parser edge case."));
 }
 
 #[test]
@@ -1268,6 +1287,7 @@ fn review_followup_prompt_scopes_to_outstanding_threads() {
         line: 10,
         body: "Handle the None case.".into(),
         author: DEFAULT_REVIEW_BOT_LOGIN.to_string(),
+        comments: vec![],
     }];
     let p = build_review_followup_code_review_prompt(
         "test-project",
@@ -1276,6 +1296,7 @@ fn review_followup_prompt_scopes_to_outstanding_threads() {
         "closes issues",
         "+foo",
         &threads,
+        "",
     );
     assert!(p.contains("follow-up verification"));
     assert!(p.contains("src/lib.rs"));
@@ -1284,6 +1305,48 @@ fn review_followup_prompt_scopes_to_outstanding_threads() {
     assert!(
         !p.contains("OWASP"),
         "follow-up prompt must not mandate full security audit"
+    );
+}
+
+#[test]
+fn review_followup_prompt_includes_thread_conversation_and_prior_reviews() {
+    let threads = vec![ReviewThread {
+        id: "thr1".into(),
+        path: "src/lib.rs".into(),
+        line: 10,
+        body: "Handle the None case.".into(),
+        author: DEFAULT_REVIEW_BOT_LOGIN.to_string(),
+        comments: vec![
+            ReviewThreadComment {
+                author: DEFAULT_REVIEW_BOT_LOGIN.to_string(),
+                body: "Handle the None case.".into(),
+            },
+            ReviewThreadComment {
+                author: "maintainer".into(),
+                body: "I pushed a fix in the parser.".into(),
+            },
+        ],
+    }];
+    let prior_context = "## Prior PR Review Context\n\n- APPROVED by @reviewer at 2026-05-16T12:00:00Z\n\nLooks good after changes.";
+    let p = build_review_followup_code_review_prompt(
+        "test-project",
+        7,
+        "Fix parser",
+        "closes issues",
+        "+foo",
+        &threads,
+        prior_context,
+    );
+    assert!(p.contains("follow-up verification"));
+    assert!(p.contains("Handle the None case."));
+    assert!(p.contains("I pushed a fix in the parser."));
+    assert!(p.contains("Prior PR Review Context"));
+    assert!(p.contains("@reviewer"));
+    assert!(p.contains("APPROVED"));
+    assert!(p.contains("Looks good after changes."));
+    assert!(
+        !p.contains("OWASP"),
+        "follow-up prompt must stay scoped to follow-up verification"
     );
 }
 
@@ -1296,6 +1359,7 @@ fn sample_thread(id: &str, path: &str, line: u32, body: &str) -> ReviewThread {
         line,
         body: body.to_string(),
         author: DEFAULT_REVIEW_BOT_LOGIN.to_string(),
+        comments: vec![],
     }
 }
 
@@ -1442,6 +1506,83 @@ fn parse_review_threads_filters_resolved_and_human_authors() {
     assert_eq!(threads[0].line, 14);
     assert_eq!(threads[0].author, "llm-overlord");
     assert_eq!(threads[0].body, "Item 5 is incorrect.");
+}
+
+#[test]
+fn parse_review_threads_keeps_all_comments_in_actionable_thread() {
+    let json = r#"{
+            "data": {
+                "repository": {
+                    "pullRequest": {
+                        "reviewThreads": {
+                            "nodes": [
+                                {
+                                    "id": "PRT_kw1",
+                                    "isResolved": false,
+                                    "comments": {
+                                        "nodes": [
+                                            {
+                                                "author": {"login": "llm-overlord", "__typename": "Bot"},
+                                                "path": "src/lib.rs",
+                                                "line": 14,
+                                                "originalLine": 14,
+                                                "body": "Item 5 is incorrect."
+                                            },
+                                            {
+                                                "author": {"login": "maintainer", "__typename": "User"},
+                                                "path": "src/lib.rs",
+                                                "line": 14,
+                                                "originalLine": 14,
+                                                "body": "Fixed in the latest push."
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+            }
+        }"#;
+    let threads = parse_review_threads(json, "llm-overlord");
+    assert_eq!(threads.len(), 1);
+    assert_eq!(threads[0].author, "llm-overlord");
+    assert_eq!(threads[0].body, "Item 5 is incorrect.");
+    assert_eq!(threads[0].comments.len(), 2);
+    assert_eq!(threads[0].comments[0].author, "llm-overlord");
+    assert_eq!(threads[0].comments[0].body, "Item 5 is incorrect.");
+    assert_eq!(threads[0].comments[1].author, "maintainer");
+    assert_eq!(threads[0].comments[1].body, "Fixed in the latest push.");
+}
+
+#[test]
+fn parse_pr_reviews_extracts_compact_review_summaries() {
+    let json = r#"{
+            "reviews": [
+                {
+                    "author": {"login": "alice"},
+                    "state": "APPROVED",
+                    "submittedAt": "2026-05-15T12:34:56Z",
+                    "body": "Looks good."
+                },
+                {
+                    "author": {"login": "bob"},
+                    "state": "CHANGES_REQUESTED",
+                    "submittedAt": "2026-05-16T08:00:00Z",
+                    "body": "Please add parser tests."
+                }
+            ]
+        }"#;
+    let reviews = parse_pr_reviews(json);
+    assert_eq!(reviews.len(), 2);
+    assert_eq!(reviews[0].author, "alice");
+    assert_eq!(reviews[0].state, "APPROVED");
+    assert_eq!(reviews[0].submitted_at, "2026-05-15T12:34:56Z");
+    assert_eq!(reviews[0].body, "Looks good.");
+    assert_eq!(reviews[1].author, "bob");
+    assert_eq!(reviews[1].state, "CHANGES_REQUESTED");
+    assert_eq!(reviews[1].submitted_at, "2026-05-16T08:00:00Z");
+    assert_eq!(reviews[1].body, "Please add parser tests.");
 }
 
 /// Same fixture as [`parse_review_threads_filters_resolved_and_human_authors`]:
@@ -2102,6 +2243,7 @@ fn build_pr_review_verification_prompt_includes_thread_ids_and_output_path() {
             line: 12,
             body: "guard against panic".to_string(),
             author: "llm-overlord".to_string(),
+            comments: vec![],
         },
         ReviewThread {
             id: "PRT_y".to_string(),
@@ -2109,6 +2251,7 @@ fn build_pr_review_verification_prompt_includes_thread_ids_and_output_path() {
             line: 7,
             body: "use anyhow::Context".to_string(),
             author: "llm-overlord".to_string(),
+            comments: vec![],
         },
     ];
     let prompt = build_pr_review_verification_prompt(

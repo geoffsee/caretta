@@ -8,9 +8,9 @@ use crate::agent::tracker::{
     DEFAULT_REVIEW_BOT_LOGIN, ReviewThread, build_code_review_prompt, build_commit_hook_fix_prompt,
     build_pr_review_fix_prompt, build_pr_review_verification_prompt,
     build_review_followup_code_review_prompt, build_security_review_prompt,
-    fetch_all_unresolved_review_threads, fetch_unresolved_review_threads, list_open_prs,
-    parse_verification_verdict, pr_body, pr_diff, pr_head_branch, pr_review_decision,
-    resolve_review_thread,
+    fetch_all_unresolved_review_threads, fetch_pr_reviews, fetch_unresolved_review_threads,
+    list_open_prs, parse_verification_verdict, pr_body, pr_diff, pr_head_branch,
+    pr_review_decision, render_prior_pr_review_context, resolve_review_thread,
 };
 use crate::agent::types::{AgentEvent, Config, MAX_COMMIT_ATTEMPTS};
 use std::path::{Path, PathBuf};
@@ -87,8 +87,16 @@ pub fn run_code_review(cfg: &Config, only_pr: Option<u32>) {
         let body = pr_body(pr.number);
         let diff = pr_diff(pr.number);
         let threads = fetch_unresolved_review_threads(pr.number, DEFAULT_REVIEW_BOT_LOGIN);
+        let prior_review_context = render_prior_pr_review_context(&fetch_pr_reviews(pr.number));
         let prompt = if threads.is_empty() {
-            build_code_review_prompt(&cfg.project_name, pr.number, &pr.title, &body, &diff)
+            build_code_review_prompt(
+                &cfg.project_name,
+                pr.number,
+                &pr.title,
+                &body,
+                &diff,
+                &prior_review_context,
+            )
         } else {
             log(&format!(
                 "PR #{} has {} unresolved bot-authored thread(s) — follow-up verification review (not a full audit).",
@@ -102,6 +110,7 @@ pub fn run_code_review(cfg: &Config, only_pr: Option<u32>) {
                 &body,
                 &diff,
                 &threads,
+                &prior_review_context,
             )
         };
         run_agent_with_env(cfg, &prompt, &extra_env);

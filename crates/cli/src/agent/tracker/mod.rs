@@ -773,12 +773,28 @@ pub fn pr_review_decision(pr_num: u32) -> Option<String> {
 /// suitable for the `resolveReviewThread` mutation that Phase 3 (#145) will
 /// invoke after a successful Fix Comments push.
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewThreadComment {
+    pub author: String,
+    pub body: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReviewThread {
     pub id: String,
     pub path: String,
     pub line: u32,
     pub body: String,
     pub author: String,
+    pub comments: Vec<ReviewThreadComment>,
+}
+
+/// Compact summary of a submitted PR review from `gh pr view --json reviews`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ReviewSummary {
+    pub author: String,
+    pub state: String,
+    pub submitted_at: String,
+    pub body: String,
 }
 
 /// Default bot login that owns automated review threads. This is matched
@@ -831,7 +847,7 @@ fn pull_request_review_threads_json(pr_num: u32) -> Option<String> {
     };
 
     // Leading newline keeps gh from interpreting the value as a file reference.
-    let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 1) {\n            nodes {\n              author { login __typename }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
+    let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 100) {\n            nodes {\n              author { login __typename }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
     let pr_num_s = pr_num.to_string();
     let owner_arg = format!("owner={owner}");
@@ -891,6 +907,14 @@ pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<Revi
 pub fn fetch_all_unresolved_review_threads(pr_num: u32) -> Vec<ReviewThread> {
     pull_request_review_threads_json(pr_num)
         .map(|out| parse_all_unresolved_review_threads(&out))
+        .unwrap_or_default()
+}
+
+/// Fetch compact prior PR review summaries for prompt context.
+pub fn fetch_pr_reviews(pr_num: u32) -> Vec<ReviewSummary> {
+    let num_s = pr_num.to_string();
+    cmd_stdout("gh", &["pr", "view", &num_s, "--json", "reviews"])
+        .map(|out| parse_pr_reviews(&out))
         .unwrap_or_default()
 }
 
@@ -990,6 +1014,7 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
         let Some(c) = comments.first() else {
             continue;
         };
+        let thread_comments = parse_review_thread_comments(&comments);
         let author = c
             .pointer("/author/login")
             .and_then(serde_json::Value::as_str)
@@ -1029,6 +1054,7 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
             line,
             body,
             author,
+            comments: thread_comments,
         });
     }
     out
@@ -1075,6 +1101,7 @@ fn parse_all_unresolved_review_threads(json: &str) -> Vec<ReviewThread> {
         let Some(c) = comments.first() else {
             continue;
         };
+        let thread_comments = parse_review_thread_comments(&comments);
         let author = c
             .pointer("/author/login")
             .and_then(serde_json::Value::as_str)
@@ -1104,9 +1131,102 @@ fn parse_all_unresolved_review_threads(json: &str) -> Vec<ReviewThread> {
             line,
             body,
             author,
+            comments: thread_comments,
         });
     }
     out
+}
+
+fn parse_review_thread_comments(comments: &[serde_json::Value]) -> Vec<ReviewThreadComment> {
+    comments
+        .iter()
+        .map(|c| ReviewThreadComment {
+            author: c
+                .pointer("/author/login")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            body: c
+                .get("body")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect()
+}
+
+fn parse_pr_reviews(json: &str) -> Vec<ReviewSummary> {
+    let v: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v,
+        Err(e) => {
+            log(&format!("WARNING: PR reviews JSON parse failed: {e}"));
+            return Vec::new();
+        }
+    };
+    v.get("reviews")
+        .and_then(|n| n.as_array())
+        .into_iter()
+        .flatten()
+        .map(|review| ReviewSummary {
+            author: review
+                .pointer("/author/login")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            state: review
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            submitted_at: review
+                .get("submittedAt")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            body: review
+                .get("body")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect()
+}
+
+pub fn render_prior_pr_review_context(reviews: &[ReviewSummary]) -> String {
+    if reviews.is_empty() {
+        return String::new();
+    }
+
+    let mut recent = reviews.to_vec();
+    recent.sort_by(|a, b| b.submitted_at.cmp(&a.submitted_at));
+
+    let mut out = String::from("## Prior PR Review Context\n\n");
+    for review in recent.iter().take(10) {
+        out.push_str(&format!(
+            "### {state} by @{author} at {submitted_at}\n\n",
+            state = review.state,
+            author = review.author,
+            submitted_at = review.submitted_at,
+        ));
+        let body = cap_review_body(&review.body);
+        if body.trim().is_empty() {
+            out.push_str("(No review body.)\n\n");
+        } else {
+            out.push_str(&body);
+            out.push_str("\n\n");
+        }
+    }
+    out.trim_end().to_string()
+}
+
+fn cap_review_body(body: &str) -> String {
+    const MAX_REVIEW_BODY_CHARS: usize = 1000;
+    if body.chars().count() <= MAX_REVIEW_BODY_CHARS {
+        return body.to_string();
+    }
+    let mut capped: String = body.chars().take(MAX_REVIEW_BODY_CHARS).collect();
+    capped.push_str("\n\n[Review body truncated.]");
+    capped
 }
 
 /// Phase 4 (#146): fetch unresolved bot-authored review thread counts for

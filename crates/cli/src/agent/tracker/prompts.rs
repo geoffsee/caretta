@@ -1336,7 +1336,14 @@ pub fn build_code_review_prompt(
     title: &str,
     body: &str,
     diff: &str,
+    prior_review_context: &str,
 ) -> String {
+    let prior_review_section = if prior_review_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", prior_review_context.trim())
+    };
+
     format!(
         r#"You are a code reviewer for the {project_name} project.
 
@@ -1350,7 +1357,7 @@ Read AGENTS.md and skills/ for project conventions and coding standards.
 ### Diff
 ```diff
 {diff}
-```
+```{prior_review_section}
 
 ## Review Dimensions
 
@@ -1443,19 +1450,25 @@ pub fn build_review_followup_code_review_prompt(
     body: &str,
     diff: &str,
     threads: &[ReviewThread],
+    prior_review_context: &str,
 ) -> String {
     let mut threads_section = String::new();
     for (i, t) in threads.iter().enumerate() {
         threads_section.push_str(&format!(
-            "### Thread {i} — `{path}:{line}` (by @{author})\n\n{body}\n\n",
+            "### Thread {i} — `{path}:{line}` (started by @{author})\n\n{conversation}\n\n",
             i = i + 1,
             path = t.path,
             line = t.line,
             author = t.author,
-            body = t.body,
+            conversation = render_review_thread_conversation(t),
         ));
     }
     let thread_count = threads.len();
+    let prior_review_section = if prior_review_context.trim().is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", prior_review_context.trim())
+    };
 
     format!(
         r#"You are performing a **follow-up verification review** on pull request #{pr_num} for the {project_name} project.
@@ -1476,7 +1489,7 @@ Read AGENTS.md and skills/ for project conventions.
 
 ## Outstanding review threads (must verify)
 
-{threads_section}
+{threads_section}{prior_review_section}
 
 ## Instructions
 
@@ -1529,6 +1542,28 @@ Constraints: `line` MUST fall inside diff hunks. On HTTP errors, print the respo
 ### Step 4 — Confirm
 On success, log the review `html_url` from the response. Do NOT also run `gh pr review`."#
     )
+}
+
+fn render_review_thread_conversation(thread: &ReviewThread) -> String {
+    let comments = if thread.comments.is_empty() {
+        vec![ReviewThreadComment {
+            author: thread.author.clone(),
+            body: thread.body.clone(),
+        }]
+    } else {
+        thread.comments.clone()
+    };
+
+    let mut out = String::new();
+    for (i, comment) in comments.iter().enumerate() {
+        out.push_str(&format!(
+            "#### Comment {i} by @{author}\n\n{body}\n\n",
+            i = i + 1,
+            author = comment.author,
+            body = comment.body,
+        ));
+    }
+    out.trim_end().to_string()
 }
 
 pub fn build_security_review_prompt(
