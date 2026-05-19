@@ -22,6 +22,12 @@ Pre-built binaries are available for:
 - `gh` CLI authenticated (`gh auth login`)
 - An AI agent on PATH (`claude`, `cline`, `codex`, `copilot`, `cursor`, `gemini`, `grok`, `junie`, or `xai`)
 
+### Code review and a bot GitHub App
+
+**Code Review** submits PR reviews through the GitHub API (`POST /repos/{owner}/{repo}/pulls/{n}/reviews`). GitHub will not let you approve your own pull requests, so reviews need to come from a **separate bot identity**. In CI, the default `GITHUB_TOKEN` is also a poor fit for posting reviews as a distinct bot. caretta addresses this by minting **installation tokens** for a **GitHub App** you create (recommended), or by using a **second account / PAT** as an alternative.
+
+Set **`DEV_BOT_APP_ID`**, **`DEV_BOT_INSTALLATION_ID`**, and **`DEV_BOT_PRIVATE_KEY`** (or the PAT variables) before running Code Review, or configure the same credentials in the desktop app’s **Configuration** panel (secrets go to the OS keychain, not `caretta.toml`). Step-by-step instructions, permissions, and troubleshooting are in **[Configuration & Setup — Bot account setup](configuration.md#bot-account-setup-code-review)**. For GitHub Actions, see [caretta-action setup](../packages/action/docs/SETUP.md) or [autopilot-action setup](../packages/autopilot-action/docs/SETUP.md).
+
 ## Quick Start
 
 You can choose between a native Desktop App, a Web Server App, or use the Command Line Interface.

@@ -33,6 +33,22 @@ disabled.
 
 ### Option A — GitHub App (recommended)
 
+#### Quick start — `scripts/create-github-app.ts`
+
+A helper script automates the [GitHub App Manifest Flow](https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest): it serves a local form, redirects to GitHub for app registration, then exchanges the returned code for credentials and writes the PEM to `~/.config/caretta/dev-ui-bot.pem` plus a `.env.github-app` containing `DEV_BOT_APP_ID` and `DEV_BOT_PRIVATE_KEY`.
+
+```sh
+# Personal account
+bun scripts/create-github-app.ts
+
+# Org-owned app
+GITHUB_ORG=my-org APP_NAME=my-caretta-bot bun scripts/create-github-app.ts
+```
+
+After the app is created, install it on your repo (`<html_url>/installations/new`), copy the installation ID from the resulting URL into `DEV_BOT_INSTALLATION_ID` in `.env.github-app`, then `source .env.github-app && caretta`.
+
+#### Manual setup
+
 1. **Create a private GitHub App** in your user/org settings:
    - **Repository permissions**: Contents (read), Pull requests (read & write), Issues (read & write), Metadata (read).
    - No webhook URL or events required.
