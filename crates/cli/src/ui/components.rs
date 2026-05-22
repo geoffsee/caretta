@@ -427,12 +427,15 @@ body {
 .tab-bar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: flex-start;
     height: 32px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     padding: 0 8px 0 0;
+}
+.tab-bar > .tab-actions {
+    margin-left: auto;
 }
 .tab {
     padding: 0 16px;
@@ -1391,7 +1394,7 @@ body {
 }
 .discovery-table-frame .discovery-table-head,
 .discovery-table-frame .discovery-table-row {
-    grid-template-columns: 0.9fr 1.3fr 1.3fr 1fr 1fr 92px;
+    grid-template-columns: 0.8fr 1.2fr 1.2fr 1fr 1.3fr 92px;
 }
 .discovery-table-decision .discovery-table-head,
 .discovery-table-decision .discovery-table-row {
@@ -1405,7 +1408,6 @@ body {
 .discovery-table-compact .discovery-table-row {
     grid-template-columns: 1fr 1fr 2fr 92px;
 }
-.discovery-cell-head,
 .discovery-cell {
     border-radius: 3px;
     border: 1px solid var(--border);
@@ -1414,30 +1416,39 @@ body {
     font-size: 11px;
     padding: 4px 6px;
     min-width: 0;
-}
-.discovery-cell {
     width: 100%;
 }
 .discovery-cell-head {
-    background: var(--bg-tertiary);
-    border-color: var(--border);
+    padding: 2px 2px 4px;
+    min-width: 0;
     color: var(--fg-muted);
-    font-size: 10px;
+    font-size: 9px;
     font-weight: 700;
     letter-spacing: 0.2px;
     text-transform: uppercase;
+    line-height: 1.2;
+    white-space: normal;
+    overflow-wrap: break-word;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
 }
-.discovery-cell-evidence {
+.discovery-cell.discovery-cell-evidence {
     min-height: 52px;
 }
-.discovery-cell-step {
+.discovery-cell.discovery-cell-step {
     min-height: 44px;
 }
 .discovery-cell-action {
     display: flex;
     justify-content: center;
+    align-items: center;
+}
+.discovery-cell-head.discovery-cell-action {
+    border-bottom: none;
 }
 .discovery-table-controls .btn,
+.discovery-table-footer .btn,
 .discovery-cell-action .btn,
 .discovery-actions .btn {
     width: auto;
