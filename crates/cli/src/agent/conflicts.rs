@@ -86,6 +86,26 @@ fn parse_latest_conflict_marker(raw: &str) -> Option<ConflictMarkerContext> {
         .next()
 }
 
+/// Bases to merge into the PR head (in order). When a branch-sync marker still names a stacked
+/// parent (`agent/issue-*`) but the PR was later retargeted to `main` on GitHub, we merge the
+/// parent first when it is a no-op — then merge `origin/<baseRefName>` so DIRTY/conflict status
+/// lines up with what GitHub computes. Removing the redundant parent from `merge_bases` when it
+/// matches the GitHub base avoids double work.
+fn merge_bases_for_pr_head(
+    marker: Option<&ConflictMarkerContext>,
+    github_pr_base: &str,
+) -> Vec<String> {
+    let mut bases = Vec::new();
+    if let Some(ctx) = marker {
+        bases.push(ctx.expected_base.clone());
+    }
+    let gh = github_pr_base.to_string();
+    if bases.last() != Some(&gh) {
+        bases.push(gh);
+    }
+    bases
+}
+
 fn fetch_conflict_marker_context(pr_num: u32) -> Option<ConflictMarkerContext> {
     let num_s = pr_num.to_string();
     let raw = cmd_stdout("gh", &["pr", "view", &num_s, "--json", "comments"])?;
@@ -229,10 +249,18 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
         .as_ref()
         .map(|ctx| ctx.head_branch.clone())
         .unwrap_or_else(|| pr.head_ref.clone());
-    let expected_base = marker
-        .as_ref()
-        .map(|ctx| ctx.expected_base.clone())
-        .unwrap_or_else(|| pr.base_ref.clone());
+    let merge_bases = merge_bases_for_pr_head(marker.as_ref(), pr.base_ref.as_str());
+    if merge_bases.len() > 1 {
+        log(&format!(
+            "Conflict fix merges these bases into '{}' in order: {}",
+            pr.head_ref,
+            merge_bases
+                .iter()
+                .map(|s| format!("'{s}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
     let merge_state = pr.merge_state_status.as_deref().unwrap_or("UNKNOWN");
 
     if branch != pr.head_ref {
@@ -246,7 +274,8 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
     if cfg.dry_run {
         log_resolved_agent_launch(cfg, &[]);
         log(&format!(
-            "[dry-run] Would resolve PR #{pr_num} conflicts by merging '{expected_base}' into '{branch}'."
+            "[dry-run] Would resolve PR #{pr_num} conflicts by merging [{}] into '{branch}'.",
+            merge_bases.join(", ")
         ));
         emit_event(AgentEvent::Done);
         return;
@@ -306,76 +335,102 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
         restore: restore_after_add,
     };
 
-    let expected_base_refspec =
-        format!("+refs/heads/{expected_base}:refs/remotes/origin/{expected_base}");
-    if !cmd_run(
-        "git",
-        &[
-            "-C",
-            &worktree_str,
-            "fetch",
-            "origin",
-            &expected_base_refspec,
-        ],
-    ) {
-        log(&format!(
-            "Failed to fetch expected base '{expected_base}' for PR #{pr_num}."
-        ));
-        emit_event(AgentEvent::Done);
-        return;
-    }
+    let mut active_merge_base_for_prompt = pr.base_ref.clone();
+    let mut any_merge_need = false;
 
-    let expected_base_ref = format!("origin/{expected_base}");
-    let merge_ok = cmd_run(
-        "git",
-        &[
-            "-C",
-            &worktree_str,
-            "merge",
-            "--no-ff",
-            "--no-commit",
-            &expected_base_ref,
-        ],
-    );
-
-    if merge_ok && worktree_status(&worktree_path).trim().is_empty() {
-        log(&format!(
-            "PR #{pr_num} already includes '{expected_base}'; no conflict fix needed."
-        ));
-        emit_event(AgentEvent::Done);
-        return;
-    }
-
-    if merge_ok {
-        log(&format!(
-            "Merged '{expected_base}' into PR #{pr_num} without file conflicts; committing the branch update."
-        ));
-    } else {
-        let unresolved = unresolved_merge_paths(&worktree_path);
-        log(&format!(
-            "Merge produced {} conflicted path(s) for PR #{pr_num}; launching agent.",
-            unresolved.len()
-        ));
-
-        let diff = pr_diff(pr_num);
-        let prompt = build_conflict_fix_prompt(&ConflictFixPromptContext {
-            project_name: &cfg.project_name,
-            pr_num,
-            title: &pr.title,
-            branch: &branch,
-            expected_base: &expected_base,
-            merge_state,
-            marker_body: &marker_body,
-            diff: &diff,
-        });
-
-        if !run_agent_with_env_in_dir(cfg, &prompt, &[], &worktree_path) {
+    for (idx, base) in merge_bases.iter().enumerate() {
+        let refs_p = format!("+refs/heads/{base}:refs/remotes/origin/{base}");
+        if !cmd_run("git", &["-C", &worktree_str, "fetch", "origin", &refs_p]) {
             log(&format!(
-                "Conflict-resolution agent failed for PR #{pr_num}."
+                "Failed to fetch merge base '{base}' for PR #{pr_num}."
             ));
             emit_event(AgentEvent::Done);
             return;
         }
+
+        let origin_base = format!("origin/{base}");
+        let merge_ok = cmd_run(
+            "git",
+            &[
+                "-C",
+                &worktree_str,
+                "merge",
+                "--no-ff",
+                "--no-commit",
+                &origin_base,
+            ],
+        );
+        let status = worktree_status(&worktree_path);
+        let clean_empty_tree = merge_ok && status.trim().is_empty();
+
+        if clean_empty_tree {
+            log(&format!(
+                "PR #{pr_num} already includes '{base}'; continuing."
+            ));
+            continue;
+        }
+
+        any_merge_need = true;
+
+        if !merge_ok {
+            active_merge_base_for_prompt.clone_from(base);
+            let unresolved = unresolved_merge_paths(&worktree_path);
+            log(&format!(
+                "Merge produced {} conflicted path(s) merging '{base}' into PR #{pr_num}; launching agent.",
+                unresolved.len()
+            ));
+
+            let diff = pr_diff(pr_num);
+            let prompt = build_conflict_fix_prompt(&ConflictFixPromptContext {
+                project_name: &cfg.project_name,
+                pr_num,
+                title: &pr.title,
+                branch: &branch,
+                expected_base: active_merge_base_for_prompt.as_str(),
+                merge_state,
+                marker_body: &marker_body,
+                diff: &diff,
+            });
+
+            if !run_agent_with_env_in_dir(cfg, &prompt, &[], &worktree_path) {
+                log(&format!(
+                    "Conflict-resolution agent failed for PR #{pr_num}."
+                ));
+                emit_event(AgentEvent::Done);
+                return;
+            }
+            break;
+        }
+
+        log(&format!(
+            "Merged '{base}' into PR #{pr_num} without file conflicts{}.",
+            if idx + 1 < merge_bases.len() {
+                "; continuing merge chain"
+            } else {
+                ""
+            }
+        ));
+        if idx + 1 < merge_bases.len() {
+            continue;
+        }
+        break;
+    }
+
+    if !any_merge_need {
+        log(&format!(
+            "PR #{pr_num} already includes {}; no conflict fix needed.",
+            if merge_bases.len() == 1 {
+                format!("'{0}'", merge_bases[0])
+            } else {
+                merge_bases
+                    .iter()
+                    .map(|s| format!("'{s}'"))
+                    .collect::<Vec<_>>()
+                    .join(" and ")
+            }
+        ));
+        emit_event(AgentEvent::Done);
+        return;
     }
 
     let unresolved = unresolved_merge_paths(&worktree_path);
@@ -472,6 +527,40 @@ mod tests {
             .status()
             .expect("git command should run")
             .success()
+    }
+
+    #[test]
+    fn merge_bases_marker_then_github_when_pr_retargeted() {
+        let marker = ConflictMarkerContext {
+            head_branch: "agent/issue-184".into(),
+            expected_base: "agent/issue-180".into(),
+            body: String::new(),
+        };
+        assert_eq!(
+            merge_bases_for_pr_head(Some(&marker), "main"),
+            vec!["agent/issue-180".to_string(), "main".to_string()]
+        );
+    }
+
+    #[test]
+    fn merge_bases_github_only_without_marker() {
+        assert_eq!(
+            merge_bases_for_pr_head(None, "main"),
+            vec!["main".to_string()]
+        );
+    }
+
+    #[test]
+    fn merge_bases_dedup_when_marker_matches_github_base() {
+        let marker = ConflictMarkerContext {
+            head_branch: "agent/issue-x".into(),
+            expected_base: "agent/issue-180".into(),
+            body: String::new(),
+        };
+        assert_eq!(
+            merge_bases_for_pr_head(Some(&marker), "agent/issue-180"),
+            vec!["agent/issue-180".to_string()]
+        );
     }
 
     #[test]
