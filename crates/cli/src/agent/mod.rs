@@ -17,6 +17,7 @@ pub mod process;
 pub mod refresh;
 pub mod review;
 pub mod run;
+pub mod selftest;
 pub mod shell;
 pub mod snapshot;
 pub mod tracker;

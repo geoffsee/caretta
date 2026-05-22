@@ -783,8 +783,7 @@ phases:
     fn discovery_workflow_template_renders_with_fixture_context() {
         let root = env!("CARGO_MANIFEST_DIR");
         let fixture = std::fs::read_to_string(
-            Path::new(root)
-                .join("tests/fixtures/discovery-workspace.json"),
+            Path::new(root).join("tests/fixtures/discovery-workspace.json"),
         )
         .expect("fixture should be readable");
 

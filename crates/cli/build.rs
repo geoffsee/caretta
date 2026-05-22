@@ -11,9 +11,9 @@ fn resolve_web_assets_dir() -> Result<PathBuf, String> {
     if let Ok(custom_path) = std::env::var("CARETTA_WEB_ASSETS_DIR") {
         let custom = Path::new(&custom_path).to_path_buf();
         if custom.exists() {
-            return custom
-                .canonicalize()
-                .map_err(|e| format!("failed to canonicalize CARETTA_WEB_ASSETS_DIR={custom_path}: {e}"));
+            return custom.canonicalize().map_err(|e| {
+                format!("failed to canonicalize CARETTA_WEB_ASSETS_DIR={custom_path}: {e}")
+            });
         }
         println!(
             "cargo::warning=CARETTA_WEB_ASSETS_DIR is set but path does not exist: {custom_path}"
@@ -64,7 +64,10 @@ fn main() {
     // Tell server.rs where to find the web assets folder. If no bundle
     // is available, we fallback to an empty stub so RustEmbed can still
     // compile and emit a clear warning.
-    println!("cargo::rustc-env=WEB_ASSETS_DIR={}", web_assets_dir.display());
+    println!(
+        "cargo::rustc-env=WEB_ASSETS_DIR={}",
+        web_assets_dir.display()
+    );
 
     let wasm_path = web_assets_dir.join("wasm/caretta_bg.wasm");
 

@@ -41,6 +41,7 @@ use agent::config_store::{
 };
 use agent::conflicts::run_pr_conflict_fix;
 use agent::fix_pr::run_fix_pr;
+use agent::selftest::{CheckStatus, SelfTestReport, unsupported_report};
 use agent::shell::{
     clear_stop_request, list_all_files, parse_args, preflight, record_agent_response, request_stop,
     reset_chat_history, run_chat_send, run_code_review, run_interview_draft, run_interview_respond,
@@ -64,9 +65,9 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing::info;
 use ui::components::BASE_CSS;
+use ui::discovery::load_discovery_workspace;
 use ui::security::{SecurityFinding, run_security_scan};
 use ui::{DiscoveryWorkspace, Editor, Sidebar, Statusbar};
-use ui::discovery::load_discovery_workspace;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(serde::Deserialize)]
@@ -570,9 +571,7 @@ fn App() -> Element {
     let mut chat_turns = use_signal(Vec::<InterviewTurn>::new);
     let mut chat_active = use_signal(|| false);
     let mut chat_agent_buf = use_signal(String::new);
-    let mut discovery_workspace = use_signal(|| {
-        load_discovery_workspace(&config.read().root)
-    });
+    let mut discovery_workspace = use_signal(|| load_discovery_workspace(&config.read().root));
     let mut settings_status = use_signal(|| None::<String>);
     let root_sig = use_signal(|| config.read().root.clone());
     let persona_skill_path_sig = use_signal(|| config.read().skill_paths.user_personas.clone());
@@ -592,6 +591,9 @@ fn App() -> Element {
     let follow_mode = use_signal(|| true);
     let bottom_el = use_signal(|| None::<std::rc::Rc<MountedData>>);
     let mut theme = use_signal(Theme::tokyo_night);
+    let mut selftest_report = use_signal(|| None::<SelfTestReport>);
+    let mut selftest_running = use_signal(|| false);
+    let mut selftest_open = use_signal(|| false);
     let mut presets = use_signal(|| vec!["default".to_string()]);
     let mut workflow_entries = use_signal(Vec::<crate::agent::workflow::WorkflowEntry>::new);
 
@@ -1203,6 +1205,79 @@ fn App() -> Element {
         info!("Auto-merge not available in web mode");
     };
 
+    // ── Self-test ──
+    // Desktop: run the synchronous checks on the blocking pool.
+    // Web: hit `/api/selftest` exposed by `caretta serve`.
+    let on_run_selftest = move |_: MouseEvent| {
+        if *selftest_running.peek() {
+            return;
+        }
+        selftest_running.set(true);
+        selftest_open.set(true);
+        info!("Self-test: running...");
+
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let cfg_snapshot = config.read().clone();
+            spawn(async move {
+                let report = tokio::task::spawn_blocking(move || {
+                    crate::agent::selftest::run_self_test(&cfg_snapshot)
+                })
+                .await
+                .unwrap_or_else(|join_err| {
+                    unsupported_report("", "", format!("self-test task failed: {join_err}"))
+                });
+                info!(
+                    "Self-test: {} ({})",
+                    report.overall().label(),
+                    report.summary()
+                );
+                selftest_report.set(Some(report));
+                selftest_running.set(false);
+            });
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let agent_name = config.read().agent.to_string();
+            let root_snapshot = config.read().root.clone();
+            spawn(async move {
+                let report = match gloo_net::http::Request::get("/api/selftest").send().await {
+                    Ok(response) => match response.text().await {
+                        Ok(text) => {
+                            serde_json::from_str::<SelfTestReport>(&text).unwrap_or_else(|e| {
+                                unsupported_report(
+                                    &agent_name,
+                                    &root_snapshot,
+                                    format!("could not parse /api/selftest response: {e}"),
+                                )
+                            })
+                        }
+                        Err(e) => unsupported_report(
+                            &agent_name,
+                            &root_snapshot,
+                            format!("could not read /api/selftest body: {e}"),
+                        ),
+                    },
+                    Err(e) => unsupported_report(
+                        &agent_name,
+                        &root_snapshot,
+                        format!(
+                            "/api/selftest is unreachable ({e}). Start `caretta serve` to enable the self-test in web mode."
+                        ),
+                    ),
+                };
+                info!(
+                    "Self-test: {} ({})",
+                    report.overall().label(),
+                    report.summary()
+                );
+                selftest_report.set(Some(report));
+                selftest_running.set(false);
+            });
+        }
+    };
+
     let css = format!("{vars}\n{BASE_CSS}", vars = theme.read().to_css_vars());
 
     rsx! {
@@ -1216,6 +1291,99 @@ fn App() -> Element {
                     span { class: "titlebar-name", "{config.read().project_name} Dev Agent" }
                 }
                 div { class: "titlebar-right",
+                    div { class: "selftest-wrap",
+                        button {
+                            class: {
+                                let mut classes = String::from("selftest-btn");
+                                if *selftest_running.read() {
+                                    classes.push_str(" is-running");
+                                }
+                                if let Some(report) = selftest_report.read().as_ref() {
+                                    classes.push(' ');
+                                    classes.push_str("selftest-status-");
+                                    classes.push_str(report.overall().label());
+                                }
+                                classes
+                            },
+                            title: "Run an operational self-test against the current configuration",
+                            disabled: *selftest_running.read(),
+                            onclick: on_run_selftest,
+                            span { class: "selftest-btn-dot" }
+                            span { class: "selftest-btn-label",
+                                if *selftest_running.read() {
+                                    "Self-test…"
+                                } else if let Some(report) = selftest_report.read().as_ref() {
+                                    "Self-test: {report.overall().label()}"
+                                } else {
+                                    "Self-test"
+                                }
+                            }
+                        }
+                        if *selftest_open.read() {
+                            div { class: "selftest-popover", role: "dialog",
+                                div { class: "selftest-popover-head",
+                                    div { class: "selftest-popover-title",
+                                        "Configuration self-test"
+                                    }
+                                    button {
+                                        class: "selftest-popover-close",
+                                        title: "Close",
+                                        onclick: move |_| selftest_open.set(false),
+                                        "×"
+                                    }
+                                }
+                                if *selftest_running.read() {
+                                    div { class: "selftest-popover-body selftest-empty",
+                                        "Running checks…"
+                                    }
+                                } else if let Some(report) = selftest_report.read().clone() {
+                                    div { class: "selftest-popover-summary",
+                                        span {
+                                            class: format!(
+                                                "selftest-badge selftest-status-{}",
+                                                report.overall().label(),
+                                            ),
+                                            "{report.overall().label().to_uppercase()}"
+                                        }
+                                        span { class: "selftest-summary-text", "{report.summary()}" }
+                                    }
+                                    div { class: "selftest-popover-meta",
+                                        "agent: "
+                                        code { "{report.agent}" }
+                                        " · root: "
+                                        code { "{report.root}" }
+                                    }
+                                    ul { class: "selftest-checks",
+                                        for c in report.checks.iter() {
+                                            li {
+                                                key: "{c.name}",
+                                                class: format!(
+                                                    "selftest-check selftest-status-{}",
+                                                    c.status.label(),
+                                                ),
+                                                span { class: "selftest-check-icon",
+                                                    match c.status {
+                                                        CheckStatus::Pass => "✓",
+                                                        CheckStatus::Warn => "⚠",
+                                                        CheckStatus::Fail => "✗",
+                                                        CheckStatus::Skipped => "–",
+                                                    }
+                                                }
+                                                div { class: "selftest-check-body",
+                                                    div { class: "selftest-check-name", "{c.name}" }
+                                                    div { class: "selftest-check-detail", "{c.detail}" }
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    div { class: "selftest-popover-body selftest-empty",
+                                        "No report yet."
+                                    }
+                                }
+                            }
+                        }
+                    }
                     select {
                         class: "titlebar-select",
                         value: "{theme.read().name}",

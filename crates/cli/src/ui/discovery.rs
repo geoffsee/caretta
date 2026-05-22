@@ -178,12 +178,7 @@ impl DiscoveryWorkspace {
         self.dependency_graph
             .iter()
             .enumerate()
-            .map(|(idx, item)| {
-                format!(
-                    "{idx}. {} -> {} ({})",
-                    item.from, item.to, item.reason
-                )
-            })
+            .map(|(idx, item)| format!("{idx}. {} -> {} ({})", item.from, item.to, item.reason))
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -300,17 +295,13 @@ pub fn save_discovery_workspace(root: &str, workspace: &DiscoveryWorkspace) -> R
 }
 
 #[component]
-pub fn DiscoveryPanel(
-    root: Signal<String>,
-    workspace: Signal<DiscoveryWorkspace>,
-) -> Element {
+pub fn DiscoveryPanel(root: Signal<String>, workspace: Signal<DiscoveryWorkspace>) -> Element {
     let mut status = use_signal(|| None::<String>);
     let mut import_text = use_signal(String::new);
 
     let sync_preview_from_workspace = move || {
         let ws = workspace.read();
-        serde_json::to_string_pretty(&*ws)
-            .unwrap_or_else(|_| "{}".to_string())
+        serde_json::to_string_pretty(&*ws).unwrap_or_else(|_| "{}".to_string())
     };
 
     rsx! {
@@ -323,47 +314,50 @@ pub fn DiscoveryPanel(
             }
 
             div { class: "discovery-grid",
-                div { class: "discovery-card",
-                    div { class: "discovery-section-title", "Problem Intake" }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "What is the problem?",
-                        value: "{workspace.read().problem}",
-                        oninput: move |evt| workspace.write().problem = evt.value(),
-                    }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "Stakeholders and owners",
-                        value: "{workspace.read().stakeholders}",
-                        oninput: move |evt| workspace.write().stakeholders = evt.value(),
-                    }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "Evidence (files, links, metrics, incidents)",
-                        value: "{workspace.read().evidence}",
-                        oninput: move |evt| workspace.write().evidence = evt.value(),
-                    }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "Desired outcome / north star",
-                        value: "{workspace.read().desired_outcome}",
-                        oninput: move |evt| workspace.write().desired_outcome = evt.value(),
+                section { class: "discovery-section discovery-card-wide",
+                    h3 { class: "discovery-section-heading", "Problem Intake" }
+                    div { class: "discovery-two-col",
+                        div { class: "discovery-field",
+                            label { class: "discovery-field-label", "What is the problem?" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Describe the problem in plain language",
+                                value: "{workspace.read().problem}",
+                                oninput: move |evt| workspace.write().problem = evt.value(),
+                            }
+                        }
+                        div { class: "discovery-field",
+                            label { class: "discovery-field-label", "Stakeholders and owners" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Who is impacted and who owns the outcome?",
+                                value: "{workspace.read().stakeholders}",
+                                oninput: move |evt| workspace.write().stakeholders = evt.value(),
+                            }
+                        }
+                        div { class: "discovery-field",
+                            label { class: "discovery-field-label", "Evidence (files, links, etc.)" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Metrics, incidents, references that ground the problem",
+                                value: "{workspace.read().evidence}",
+                                oninput: move |evt| workspace.write().evidence = evt.value(),
+                            }
+                        }
+                        div { class: "discovery-field",
+                            label { class: "discovery-field-label", "Desired outcome / north star" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Concrete result you want once this is solved",
+                                value: "{workspace.read().desired_outcome}",
+                                oninput: move |evt| workspace.write().desired_outcome = evt.value(),
+                            }
+                        }
                     }
                 }
 
-                div { class: "discovery-card discovery-card-wide",
-                    div { class: "discovery-section-title", "Assumption Table" }
-                    div { class: "discovery-table-controls",
-                        button {
-                            class: "btn btn-xs btn-action",
-                            onclick: move |_| {
-                                let mut ws = workspace.read().clone();
-                                ws.assumptions.push(AssumptionRecord::default());
-                                workspace.set(ws);
-                            },
-                            "Add assumption"
-                        }
-                    }
+                section { class: "discovery-section discovery-card-wide",
+                    h3 { class: "discovery-section-heading", "Assumption Table" }
                     div { class: "discovery-table",
                         div { class: "discovery-table-head",
                             div { class: "discovery-cell-head", "Status" }
@@ -378,31 +372,36 @@ pub fn DiscoveryPanel(
                         }
                         for row_idx in 0..workspace.read().assumptions.len() {
                             div { key: "assumption-{row_idx}", class: "discovery-table-row",
-                                input {
-                                    class: "discovery-cell",
-                                    r#type: "text",
+                                select {
+                                    class: "discovery-cell discovery-pill-select",
                                     value: "{workspace.read().assumptions[row_idx].status}",
-                                    placeholder: "Status",
-                                    oninput: move |evt| {
+                                    onchange: move |evt| {
                                         let mut ws = workspace.read().clone();
                                         if let Some(row) = ws.assumptions.get_mut(row_idx) {
                                             row.status = evt.value();
                                         }
                                         workspace.set(ws);
-                                    }
+                                    },
+                                    option { value: "", "Status" }
+                                    option { value: "Open", "Open" }
+                                    option { value: "In progress", "In progress" }
+                                    option { value: "Validated", "Validated" }
+                                    option { value: "Invalidated", "Invalidated" }
                                 }
-                                input {
-                                    class: "discovery-cell",
-                                    r#type: "text",
+                                select {
+                                    class: "discovery-cell discovery-pill-select",
                                     value: "{workspace.read().assumptions[row_idx].confidence}",
-                                    placeholder: "Confidence",
-                                    oninput: move |evt| {
+                                    onchange: move |evt| {
                                         let mut ws = workspace.read().clone();
                                         if let Some(row) = ws.assumptions.get_mut(row_idx) {
                                             row.confidence = evt.value();
                                         }
                                         workspace.set(ws);
-                                    }
+                                    },
+                                    option { value: "", "Confidence" }
+                                    option { value: "Low", "Low" }
+                                    option { value: "Medium", "Medium" }
+                                    option { value: "High", "High" }
                                 }
                                 textarea {
                                     class: "discovery-cell discovery-cell-evidence",
@@ -457,27 +456,49 @@ pub fn DiscoveryPanel(
                             }
                         }
                     }
+                    div { class: "discovery-table-footer",
+                        button {
+                            class: "btn btn-xs btn-action",
+                            onclick: move |_| {
+                                let mut ws = workspace.read().clone();
+                                ws.assumptions.push(AssumptionRecord::default());
+                                workspace.set(ws);
+                            },
+                            "+ Add assumption"
+                        }
+                    }
                 }
 
-                div { class: "discovery-card",
-                    div { class: "discovery-section-title", "Context Mapping" }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "Constraints (compliance, policy, budget, platform)",
-                        value: "{workspace.read().constraints}",
-                        oninput: move |evt| workspace.write().constraints = evt.value(),
-                    }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "Dependencies and integration boundaries",
-                        value: "{workspace.read().dependencies}",
-                        oninput: move |evt| workspace.write().dependencies = evt.value(),
-                    }
-                    textarea {
-                        class: "discovery-textarea",
-                        placeholder: "Existing systems and touchpoints",
-                        value: "{workspace.read().existing_systems}",
-                        oninput: move |evt| workspace.write().existing_systems = evt.value(),
+                section { class: "discovery-section discovery-card-wide",
+                    h3 { class: "discovery-section-heading", "Context Mapping" }
+                    div { class: "discovery-two-col",
+                        div { class: "discovery-field",
+                            label { class: "discovery-field-label", "Constraints (compliance, budget)" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Compliance, policy, budget, platform limits",
+                                value: "{workspace.read().constraints}",
+                                oninput: move |evt| workspace.write().constraints = evt.value(),
+                            }
+                        }
+                        div { class: "discovery-field",
+                            label { class: "discovery-field-label", "Dependencies & boundaries" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Upstream/downstream dependencies and integration boundaries",
+                                value: "{workspace.read().dependencies}",
+                                oninput: move |evt| workspace.write().dependencies = evt.value(),
+                            }
+                        }
+                        div { class: "discovery-field discovery-field-full",
+                            label { class: "discovery-field-label", "Existing systems & touchpoints" }
+                            textarea {
+                                class: "discovery-textarea",
+                                placeholder: "Existing systems, services, and user touchpoints involved",
+                                value: "{workspace.read().existing_systems}",
+                                oninput: move |evt| workspace.write().existing_systems = evt.value(),
+                            }
+                        }
                     }
                 }
 
@@ -1017,8 +1038,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn fixture_path() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/discovery-workspace.json")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/discovery-workspace.json")
     }
 
     fn read_fixture() -> String {

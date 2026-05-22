@@ -1,4 +1,10 @@
 #[cfg(not(target_arch = "wasm32"))]
+use crate::agent::selftest::{SelfTestReport, run_self_test};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::agent::shell::parse_args;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::agent::types::Config;
+#[cfg(not(target_arch = "wasm32"))]
 use crate::agent::workflow::{WorkflowEntry, list_presets, load_sidebar_entries};
 #[cfg(not(target_arch = "wasm32"))]
 use axum::{
@@ -53,6 +59,7 @@ pub async fn serve(root: String, port: u16) -> anyhow::Result<()> {
     let state = AppState { root };
     let app = Router::new()
         .route("/api/health", get(api_health))
+        .route("/api/selftest", get(api_selftest))
         .route("/api/workflows/presets", get(api_list_presets))
         .route("/api/workflows/:preset", get(api_list_workflows))
         .route("/", get(index_handler))
@@ -69,6 +76,7 @@ pub async fn serve(root: String, port: u16) -> anyhow::Result<()> {
     info!("Serving web UI on http://{}", local_addr);
     info!("API routes available:");
     info!("  GET /api/health");
+    info!("  GET /api/selftest");
     info!("  GET /api/workflows/presets");
     info!("  GET /api/workflows/<preset>");
     axum::serve(listener, app)
@@ -88,6 +96,41 @@ async fn api_list_presets(State(state): State<AppState>) -> impl IntoResponse {
 async fn api_health() -> impl IntoResponse {
     info!("GET /api/health => ok");
     Json(HealthResponse { status: "ok" })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn api_selftest(State(state): State<AppState>) -> impl IntoResponse {
+    // Run the synchronous self-test on the blocking pool so the axum runtime
+    // stays responsive while `which` / filesystem probes execute.
+    let root = state.root.clone();
+    let report = tokio::task::spawn_blocking({
+        let root = root.clone();
+        move || build_selftest_report(&root)
+    })
+    .await
+    .unwrap_or_else(|_join_err| SelfTestReport {
+        agent: String::new(),
+        root,
+        checks: vec![],
+    });
+    info!(
+        "GET /api/selftest => {} ({})",
+        report.overall().label(),
+        report.summary()
+    );
+    Json(report)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_selftest_report(root: &str) -> SelfTestReport {
+    // Re-derive a Config snapshot rooted at the configured workspace.
+    // `parse_args` already reads `caretta.toml`, so we mirror its behaviour
+    // but override `root` to whatever the server was started with — that way
+    // the report describes the workspace the user is actually serving, not
+    // the CWD of the server process.
+    let mut cfg: Config = parse_args();
+    cfg.root = root.to_string();
+    run_self_test(&cfg)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -142,10 +185,7 @@ fn serve_static_file(file_path: &str) -> impl IntoResponse {
             } else {
                 (
                     StatusCode::NOT_FOUND,
-                    [(
-                        header::CONTENT_TYPE,
-                        "text/plain; charset=utf-8",
-                    )],
+                    [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
                     missing_asset_message,
                 )
                     .into_response()

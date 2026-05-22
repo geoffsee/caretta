@@ -1,5 +1,11 @@
 [[service]]
 name = "caretta-web"
-cmd = "cargo run -p caretta -- serve"
+cmd = "dx serve --platform web"
+cwd = "crates/cli"
+log_capacity = 5000
+
+[[service]]
+name = "caretta-api"
+cmd = "cargo watch -x 'run -p caretta -- serve --port 8787'"
 cwd = "."
 log_capacity = 5000
