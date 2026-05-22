@@ -1,5 +1,5 @@
 use crate::agent::types::{
-    AgentEvent, ChangedFile, ClaudeEvent, ContentBlock, FileChangeKind, InterviewTurn,
+    AgentEvent, ChangedFile, ClaudeEvent, Config, ContentBlock, FileChangeKind, InterviewTurn,
     PricingConfig, Workflow, should_use_event_model,
 };
 use crate::ui::components::EventRow;
@@ -106,6 +106,7 @@ pub fn Editor(
     discovery_workspace: Signal<DiscoveryWorkspace>,
     submit_feedback: EventHandler<MouseEvent>,
     root: Signal<String>,
+    config: Signal<Config>,
     persona_skill_path: Signal<String>,
     follow_mode: Signal<bool>,
     expand_all: Signal<bool>,
@@ -400,6 +401,7 @@ pub fn Editor(
                     DiscoveryPanel {
                         root,
                         workspace: discovery_workspace,
+                        config,
                     }
                 },
                 EditorTab::Security => rsx! {

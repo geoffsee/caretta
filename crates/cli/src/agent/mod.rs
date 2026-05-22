@@ -20,6 +20,7 @@ pub mod run;
 pub mod selftest;
 pub mod shell;
 pub mod snapshot;
+pub mod synthesize;
 pub mod tracker;
 pub mod types;
 pub mod workflow;

@@ -606,6 +606,7 @@ mod tests {
         assert_eq!(
             labels,
             vec![
+                ("discovery", "Discovery & Framing"),
                 ("discovery", "Ideation"),
                 ("discovery", "UXR Synth"),
                 ("discovery", "Interview"),

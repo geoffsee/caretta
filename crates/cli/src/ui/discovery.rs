@@ -1,3 +1,4 @@
+use crate::agent::types::Config;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -295,9 +296,14 @@ pub fn save_discovery_workspace(root: &str, workspace: &DiscoveryWorkspace) -> R
 }
 
 #[component]
-pub fn DiscoveryPanel(root: Signal<String>, workspace: Signal<DiscoveryWorkspace>) -> Element {
+pub fn DiscoveryPanel(
+    root: Signal<String>,
+    workspace: Signal<DiscoveryWorkspace>,
+    config: Signal<Config>,
+) -> Element {
     let mut status = use_signal(|| None::<String>);
     let mut import_text = use_signal(String::new);
+    let mut synthesizing = use_signal(|| false);
 
     let sync_preview_from_workspace = move || {
         let ws = workspace.read();
@@ -951,6 +957,57 @@ pub fn DiscoveryPanel(root: Signal<String>, workspace: Signal<DiscoveryWorkspace
             }
 
             div { class: "discovery-actions",
+                button {
+                    class: "btn btn-sm btn-go",
+                    disabled: *synthesizing.read(),
+                    onclick: move |_| {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            if *synthesizing.read() {
+                                return;
+                            }
+                            let cfg = config.read().clone();
+                            let agent_label = cfg.agent.to_string();
+                            synthesizing.set(true);
+                            status.set(Some(format!(
+                                "Synthesizing workspace from working directory with {agent_label}\u{2026}"
+                            )));
+                            spawn(async move {
+                                let result = tokio::task::spawn_blocking(move || {
+                                    crate::agent::synthesize::synthesize_discovery_workspace(&cfg)
+                                })
+                                .await
+                                .unwrap_or_else(|err| Err(format!("Synthesis task panicked: {err}")));
+                                synthesizing.set(false);
+                                match result {
+                                    Ok(ws) => {
+                                        let cfg_root = root.read().clone();
+                                        let save_result = save_discovery_workspace(&cfg_root, &ws);
+                                        workspace.set(ws);
+                                        status.set(Some(match save_result {
+                                            Ok(()) => "Synthesized and saved discovery workspace.".to_string(),
+                                            Err(err) => format!(
+                                                "Synthesized workspace, but save failed: {err}"
+                                            ),
+                                        }));
+                                    }
+                                    Err(err) => {
+                                        status.set(Some(format!("Synthesis failed: {err}")));
+                                    }
+                                }
+                            });
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        {
+                            status.set(Some("Synthesize is unavailable in web mode. Use desktop build.".to_string()));
+                        }
+                    },
+                    if *synthesizing.read() {
+                        "Synthesizing\u{2026}"
+                    } else {
+                        "Synthesize"
+                    }
+                }
                 button {
                     class: "btn btn-sm btn-go",
                     onclick: move |_| {

@@ -1266,7 +1266,7 @@ fn App() -> Element {
                     Err(e) => unsupported_report(
                         &agent_name,
                         &root_snapshot,
-                            format!(
+                        format!(
                             "/api/selftest is unreachable ({e}). Start `caretta serve` to enable Debug in web mode."
                         ),
                     ),
@@ -1457,6 +1457,7 @@ fn App() -> Element {
                     submit_feedback,
                     discovery_workspace,
                     root: root_sig,
+                    config,
                     persona_skill_path: persona_skill_path_sig,
                     follow_mode,
                     expand_all,

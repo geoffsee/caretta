@@ -22,7 +22,7 @@ Run the most relevant verification commands available in the repository, and rep
 If required context is missing or instructions conflict, surface the blocker instead of guessing.
 "#;
 
-fn native_command(binary: &str, args: &[String]) -> Command {
+pub(crate) fn native_command(binary: &str, args: &[String]) -> Command {
     let mut cmd = if binary == "cursor" {
         // Cursor remains external for now. If bundled runtime cannot resolve it,
         // keep using the system CLI.
