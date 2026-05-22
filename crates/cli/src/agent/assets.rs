@@ -44,18 +44,36 @@ pub fn assets_dir() -> PathBuf {
 ///
 /// Explicit `caretta.toml` overrides (`user_personas` / `issue_tracking`) are kept verbatim.
 pub fn resolve_skill_paths(repo_root: &Path, skills_file: SkillPathsFile) -> SkillPaths {
-    resolve_skill_paths_with_roots(repo_root, skills_file, &assets_dir().join("skills"))
+    resolve_skill_paths_with_roots(repo_root, skills_file, &assets_dir().join("skills"), None)
+}
+
+/// Workspace-aware variant of [`resolve_skill_paths`]. When `workspace` is
+/// `Some(name)`, candidates under `<repo>/.caretta/workspaces/<name>/skills/`
+/// are checked first so users can override skills per workspace without
+/// touching the shared `.caretta/skills/` tree.
+pub fn resolve_skill_paths_with_workspace(
+    repo_root: &Path,
+    skills_file: SkillPathsFile,
+    workspace: Option<&str>,
+) -> SkillPaths {
+    resolve_skill_paths_with_roots(
+        repo_root,
+        skills_file,
+        &assets_dir().join("skills"),
+        workspace,
+    )
 }
 
 pub(crate) fn resolve_skill_paths_with_roots(
     repo_root: &Path,
     skills_file: SkillPathsFile,
     material_skills_root: &Path,
+    workspace: Option<&str>,
 ) -> SkillPaths {
     fn pick(
         repo_root: &Path,
         configured: Option<String>,
-        repo_candidate_paths: &[&str],
+        repo_candidate_paths: &[String],
         material_file: PathBuf,
     ) -> String {
         if let Some(path) = configured {
@@ -63,7 +81,7 @@ pub(crate) fn resolve_skill_paths_with_roots(
         }
         for rel in repo_candidate_paths {
             if repo_root.join(rel).is_file() {
-                return (*rel).to_string();
+                return rel.clone();
             }
         }
         material_file
@@ -73,26 +91,47 @@ pub(crate) fn resolve_skill_paths_with_roots(
             .into_owned()
     }
 
-    const ISSUE_REPO_CANDIDATES: &[&str] = &[
-        DOT_CARETTA_ISSUE_SKILL_REPO_PATH,
-        DEFAULT_ISSUE_SKILL_REPO_PATH,
-    ];
-    const USER_PERSONAS_REPO_CANDIDATES: &[&str] = &[
-        DOT_CARETTA_USER_PERSONAS_REPO_PATH,
-        DEFAULT_USER_PERSONAS_REPO_PATH,
-    ];
+    // Build the candidate list, prepending workspace-local paths when a
+    // workspace is selected so per-workspace overrides win without altering
+    // shared `.caretta/skills/` content.
+    let issue_candidates: Vec<String> = workspace
+        .map(|ws| {
+            vec![format!(
+                ".caretta/workspaces/{ws}/skills/issue-tracking/SKILL.md"
+            )]
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .chain([
+            DOT_CARETTA_ISSUE_SKILL_REPO_PATH.to_string(),
+            DEFAULT_ISSUE_SKILL_REPO_PATH.to_string(),
+        ])
+        .collect();
+    let personas_candidates: Vec<String> = workspace
+        .map(|ws| {
+            vec![format!(
+                ".caretta/workspaces/{ws}/skills/user-personas/SKILL.md"
+            )]
+        })
+        .unwrap_or_default()
+        .into_iter()
+        .chain([
+            DOT_CARETTA_USER_PERSONAS_REPO_PATH.to_string(),
+            DEFAULT_USER_PERSONAS_REPO_PATH.to_string(),
+        ])
+        .collect();
 
     SkillPaths {
         issue_tracking: pick(
             repo_root,
             skills_file.issue_tracking,
-            ISSUE_REPO_CANDIDATES,
+            &issue_candidates,
             material_skills_root.join("issue-tracking/SKILL.md"),
         ),
         user_personas: pick(
             repo_root,
             skills_file.user_personas,
-            USER_PERSONAS_REPO_CANDIDATES,
+            &personas_candidates,
             material_skills_root.join("user-personas/SKILL.md"),
         ),
     }
@@ -148,8 +187,12 @@ mod skill_path_resolve_tests {
 
         let mirror = tempfile::tempdir().expect("mirror tempdir");
 
-        let sp =
-            resolve_skill_paths_with_roots(repo.path(), SkillPathsFile::default(), mirror.path());
+        let sp = resolve_skill_paths_with_roots(
+            repo.path(),
+            SkillPathsFile::default(),
+            mirror.path(),
+            None,
+        );
 
         assert_eq!(sp.issue_tracking, DEFAULT_ISSUE_SKILL_REPO_PATH);
     }
@@ -163,8 +206,12 @@ mod skill_path_resolve_tests {
 
         let mirror = tempfile::tempdir().expect("mirror tempdir");
 
-        let sp =
-            resolve_skill_paths_with_roots(repo.path(), SkillPathsFile::default(), mirror.path());
+        let sp = resolve_skill_paths_with_roots(
+            repo.path(),
+            SkillPathsFile::default(),
+            mirror.path(),
+            None,
+        );
 
         assert_eq!(sp.issue_tracking, DOT_CARETTA_ISSUE_SKILL_REPO_PATH);
         assert_eq!(
@@ -187,6 +234,7 @@ mod skill_path_resolve_tests {
             repo.path(),
             SkillPathsFile::default(),
             tempfile::tempdir().unwrap().path(),
+            None,
         );
         assert_eq!(sp.issue_tracking, DOT_CARETTA_ISSUE_SKILL_REPO_PATH);
         assert_eq!(
@@ -209,8 +257,12 @@ mod skill_path_resolve_tests {
             fs::write(&p, body).expect("write mirror skill");
         }
 
-        let sp =
-            resolve_skill_paths_with_roots(repo.path(), SkillPathsFile::default(), mirror.path());
+        let sp = resolve_skill_paths_with_roots(
+            repo.path(),
+            SkillPathsFile::default(),
+            mirror.path(),
+            None,
+        );
 
         assert_eq!(
             fs::read_to_string(&sp.issue_tracking).expect("read issue skill"),
@@ -242,9 +294,58 @@ mod skill_path_resolve_tests {
                 user_personas: Some("/custom/personas.md".into()),
             },
             mirror.path(),
+            None,
         );
 
         assert_eq!(sp.issue_tracking, "/custom/issue.md");
         assert_eq!(sp.user_personas, "/custom/personas.md");
+    }
+
+    #[test]
+    fn workspace_local_skill_files_win_over_dot_caretta_and_mirror() {
+        let repo = tempfile::tempdir().expect("repo tempdir");
+
+        // Layer 1: dot-caretta default (should lose to workspace override).
+        let dot = repo.path().join(DOT_CARETTA_ISSUE_SKILL_REPO_PATH);
+        fs::create_dir_all(dot.parent().expect("p")).expect("md");
+        fs::write(&dot, "dot wins normally").expect("w");
+
+        // Layer 0: workspace-local override.
+        let ws_rel = ".caretta/workspaces/alpha/skills/issue-tracking/SKILL.md";
+        let ws_path = repo.path().join(ws_rel);
+        fs::create_dir_all(ws_path.parent().expect("p")).expect("md");
+        fs::write(&ws_path, "workspace wins").expect("w");
+
+        let sp = resolve_skill_paths_with_roots(
+            repo.path(),
+            SkillPathsFile::default(),
+            tempfile::tempdir().unwrap().path(),
+            Some("alpha"),
+        );
+
+        assert_eq!(sp.issue_tracking, ws_rel);
+        assert_eq!(
+            fs::read_to_string(repo.path().join(&sp.issue_tracking)).unwrap(),
+            "workspace wins"
+        );
+    }
+
+    #[test]
+    fn unknown_workspace_falls_back_to_default_resolution() {
+        let repo = tempfile::tempdir().expect("repo tempdir");
+        let dot = repo.path().join(DOT_CARETTA_ISSUE_SKILL_REPO_PATH);
+        fs::create_dir_all(dot.parent().expect("p")).expect("md");
+        fs::write(&dot, "dot wins").expect("w");
+
+        // No files under `.caretta/workspaces/missing/...` exist, so the
+        // resolver must fall through to the existing `.caretta/skills/`
+        // location and not invent paths that point at nothing.
+        let sp = resolve_skill_paths_with_roots(
+            repo.path(),
+            SkillPathsFile::default(),
+            tempfile::tempdir().unwrap().path(),
+            Some("missing"),
+        );
+        assert_eq!(sp.issue_tracking, DOT_CARETTA_ISSUE_SKILL_REPO_PATH);
     }
 }

@@ -491,6 +491,7 @@ mod tests {
             bot_settings: Default::default(),
             bot_credentials: None,
             test: TestCommands::default(),
+            workspace: None,
         };
         let report = run_self_test(&cfg);
         assert_eq!(report.agent, "claude");

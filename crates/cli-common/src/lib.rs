@@ -651,6 +651,12 @@ pub struct Config {
     pub bot_settings: BotSettings,
     pub bot_credentials: Option<BotCredentials>,
     pub test: TestCommands,
+    /// Optional context workspace name. When `Some(name)`, the agent resolves
+    /// presets, workflows, skills, discovery-framing, and personas first from
+    /// `<root>/.caretta/workspaces/<name>/...` before falling back to the
+    /// standard `.caretta/skills/`, `assets/`, and materialized locations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<String>,
 }
 
 /// Project-specific test/format commands run after an agent edit.
@@ -756,6 +762,7 @@ impl fmt::Debug for Config {
             .field("pricing", &self.pricing)
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
+            .field("workspace", &self.workspace)
             .finish()
     }
 }

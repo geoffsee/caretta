@@ -32,6 +32,7 @@ pub fn parse_args() -> Config {
         bot_settings: Default::default(),
         bot_credentials: None,
         test: Default::default(),
+        workspace: None,
     }
 }
 
@@ -81,5 +82,6 @@ pub fn parse_args() -> Config {
         bot_settings,
         bot_credentials,
         test,
+        workspace: None,
     }
 }

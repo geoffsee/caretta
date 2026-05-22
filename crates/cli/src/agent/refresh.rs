@@ -32,9 +32,11 @@ fn enumerate_agent_files(cfg: &Config) -> Vec<String> {
         }
     }
 
-    for preset_skill_dir in
-        crate::agent::workflow::preset_skill_dirs(&cfg.root, &cfg.workflow_preset)
-    {
+    for preset_skill_dir in crate::agent::workflow::preset_skill_dirs_with_workspace(
+        &cfg.root,
+        &cfg.workflow_preset,
+        cfg.workspace.as_deref(),
+    ) {
         if preset_skill_dir.is_dir()
             && let Ok(entries) = std::fs::read_dir(&preset_skill_dir)
         {

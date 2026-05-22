@@ -57,7 +57,7 @@ use agent::types::{
     AgentEvent, BotAuthMode, ChangedFile, ClaudeEvent, ContentBlock, EVENT_SENDER, FileChangeKind,
     InterviewTurn, Workflow, save_dev_config,
 };
-use agent::workflow::{list_presets, load_sidebar_entries, load_workflows};
+use agent::workflow::list_presets_with_workspace;
 use clap::{Parser, Subcommand};
 use custom_themes::Theme;
 use dioxus::prelude::*;
@@ -119,6 +119,15 @@ struct Cli {
     /// Write the bundled label taxonomy to .github/labels.yml and exit
     #[arg(long)]
     create_labels: bool,
+
+    /// Opt into the context workspace feature. Use `--workspace <NAME>` to
+    /// pick a directory under `.caretta/workspaces/<NAME>/` for preset,
+    /// workflow, skill, discovery-framing, and persona overrides. Pass
+    /// `--workspace none` (or an empty value) to explicitly disable the
+    /// feature even when workspaces exist on disk. When omitted and one or
+    /// more workspaces are detected, an interactive picker is shown.
+    #[arg(long, value_name = "NAME")]
+    workspace: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -309,12 +318,37 @@ where
         config.dry_run = cli.dry_run;
         overrides(&mut config);
 
+        // Resolve the opt-in context workspace. When `.caretta/workspaces/`
+        // is absent (the common case) `select_workspace` returns `None` and
+        // the rest of the pipeline behaves identically to previous releases.
+        // When the directory exists and `--workspace` was not provided, the
+        // picker is shown only on an interactive terminal so non-interactive
+        // shells (CI, piped stdin) keep working without prompting.
+        let interactive = std::io::IsTerminal::is_terminal(&std::io::stdin());
+        config.workspace = agent::workspace::select_workspace(
+            std::path::Path::new(&config.root),
+            cli.workspace.as_deref(),
+            interactive,
+        );
+
+        // Re-resolve bundled skill paths so workspace-local skill files at
+        // `.caretta/workspaces/<name>/skills/...` win over the default
+        // `.caretta/skills/...` and bundled lookups.
+        config.skill_paths = agent::assets::resolve_skill_paths_with_workspace(
+            std::path::Path::new(&config.root),
+            agent::types::load_dev_config(&config.root).skills.clone(),
+            config.workspace.as_deref(),
+        );
+
         apply_caretta_model_env_and_cli(&mut config, cli.model.as_deref());
 
         // CLI `--preset` wins over caretta.toml and library overrides — fail fast
         // with the available list if the name doesn't match a real preset dir.
         if let Some(preset) = &cli.preset {
-            let available = list_presets(&config.root);
+            let available = agent::workflow::list_presets_with_workspace(
+                &config.root,
+                config.workspace.as_deref(),
+            );
             if !available.iter().any(|p| p == preset) {
                 eprintln!(
                     "unknown preset: {preset}\navailable presets: {}",
@@ -388,7 +422,11 @@ where
                 run_tracker_matrix(&config, tracker, json);
             }
             Some(Commands::Run { workflow }) => {
-                let workflows = load_workflows(&config.root, &config.workflow_preset);
+                let workflows = agent::workflow::load_workflows_with_workspace(
+                    &config.root,
+                    &config.workflow_preset,
+                    config.workspace.as_deref(),
+                );
                 let normalized = workflow.replace('-', "_");
                 let resolved = workflows
                     .get(workflow.as_str())
@@ -429,7 +467,10 @@ where
             Some(Commands::Presets { name }) => match name {
                 None => {
                     let active = &config.workflow_preset;
-                    for preset in list_presets(&config.root) {
+                    for preset in agent::workflow::list_presets_with_workspace(
+                        &config.root,
+                        config.workspace.as_deref(),
+                    ) {
                         if &preset == active {
                             println!("{preset} (active)");
                         } else {
@@ -438,7 +479,10 @@ where
                     }
                 }
                 Some(preset) => {
-                    let available = list_presets(&config.root);
+                    let available = agent::workflow::list_presets_with_workspace(
+                        &config.root,
+                        config.workspace.as_deref(),
+                    );
                     if !available.iter().any(|p| p == &preset) {
                         eprintln!(
                             "unknown preset: {preset}\navailable presets: {}",
@@ -446,7 +490,11 @@ where
                         );
                         std::process::exit(2);
                     }
-                    let workflows = load_workflows(&config.root, &preset);
+                    let workflows = agent::workflow::load_workflows_with_workspace(
+                        &config.root,
+                        &preset,
+                        config.workspace.as_deref(),
+                    );
                     if workflows.is_empty() {
                         eprintln!("preset {preset} has no workflows");
                         std::process::exit(1);
@@ -595,6 +643,7 @@ fn App() -> Element {
     let mut selftest_running = use_signal(|| false);
     let mut selftest_open = use_signal(|| false);
     let mut presets = use_signal(|| vec!["default".to_string()]);
+    let mut workspaces = use_signal(Vec::<String>::new);
     let mut workflow_entries = use_signal(Vec::<crate::agent::workflow::WorkflowEntry>::new);
 
     use_effect(move || {
@@ -812,7 +861,10 @@ fn App() -> Element {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let cfg = config.read().clone();
-            let preset_list = ensure_default_workflow_preset_first(list_presets(&cfg.root));
+            let preset_list = ensure_default_workflow_preset_first(list_presets_with_workspace(
+                &cfg.root,
+                cfg.workspace.as_deref(),
+            ));
             let default_preset = preset_list
                 .first()
                 .cloned()
@@ -821,6 +873,20 @@ fn App() -> Element {
                 config.write().workflow_preset = default_preset;
             }
             presets.set(preset_list);
+
+            // Populate the workspaces list from `<root>/.caretta/workspaces/`.
+            // When the directory is missing the list stays empty and the UI
+            // hides the workspace toggle, matching the opt-in behavior.
+            let ws_list = agent::workspace::list_workspaces(std::path::Path::new(&cfg.root));
+            // If the persisted workspace name no longer exists on disk, drop
+            // it so the UI doesn't show a stale selection. This keeps the
+            // resolver in "default" mode until the user re-selects.
+            if let Some(name) = cfg.workspace.as_deref()
+                && !ws_list.iter().any(|n| n == name)
+            {
+                config.write().workspace = None;
+            }
+            workspaces.set(ws_list);
         }
     });
 
@@ -848,7 +914,11 @@ fn App() -> Element {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let cfg = config.read().clone();
-            let entries = load_sidebar_entries(&cfg.root, &preset);
+            let entries = agent::workflow::load_sidebar_entries_with_workspace(
+                &cfg.root,
+                &preset,
+                cfg.workspace.as_deref(),
+            );
             workflow_entries.set(entries);
         }
     });
@@ -944,7 +1014,46 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let on_preset_change = move |preset: String| {
         config.write().workflow_preset = preset.clone();
-        workflow_entries.set(load_sidebar_entries(&config.read().root, &preset));
+        let cfg = config.read().clone();
+        workflow_entries.set(agent::workflow::load_sidebar_entries_with_workspace(
+            &cfg.root,
+            &preset,
+            cfg.workspace.as_deref(),
+        ));
+    };
+
+    // Workspace selection: `None` disables the per-workspace overrides (opt-out),
+    // `Some(name)` switches the resolver to the named workspace. We refresh the
+    // preset list and the current sidebar entries so workspace-local presets and
+    // workflow overrides appear immediately, without requiring an app restart.
+    #[cfg(not(target_arch = "wasm32"))]
+    let on_workspace_change = move |selection: Option<String>| {
+        config.write().workspace = selection;
+        let cfg = config.read().clone();
+        let preset_list = ensure_default_workflow_preset_first(
+            agent::workflow::list_presets_with_workspace(&cfg.root, cfg.workspace.as_deref()),
+        );
+        // If the active preset disappeared with the workspace change, fall
+        // back to the first available one instead of leaving a stale value.
+        if !preset_list.iter().any(|p| p == &cfg.workflow_preset)
+            && let Some(first) = preset_list.first().cloned()
+        {
+            config.write().workflow_preset = first;
+        }
+        presets.set(preset_list);
+
+        let preset = config.read().workflow_preset.clone();
+        workflow_entries.set(agent::workflow::load_sidebar_entries_with_workspace(
+            &cfg.root,
+            &preset,
+            config.read().workspace.as_deref(),
+        ));
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let on_workspace_change = move |_selection: Option<String>| {
+        // Workspaces are filesystem-backed and not exposed to the web build.
+        info!("Workspace switching not available in web mode");
     };
 
     #[cfg(target_arch = "wasm32")]
@@ -1433,7 +1542,9 @@ fn App() -> Element {
                     start_pr_fix,
                     workflow_entries,
                     presets,
+                    workspaces,
                     on_preset_change,
+                    on_workspace_change,
                     on_start_workflow,
                     save_settings,
                     stop_work,

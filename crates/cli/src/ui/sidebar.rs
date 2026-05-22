@@ -177,7 +177,9 @@ pub fn Sidebar(
     start_pr_fix: EventHandler<u32>,
     workflow_entries: Signal<Vec<crate::agent::workflow::WorkflowEntry>>,
     presets: Signal<Vec<String>>,
+    workspaces: Signal<Vec<String>>,
     on_preset_change: EventHandler<String>,
+    on_workspace_change: EventHandler<Option<String>>,
     on_start_workflow: EventHandler<String>,
     save_settings: EventHandler<MouseEvent>,
     stop_work: EventHandler<MouseEvent>,
@@ -205,6 +207,11 @@ pub fn Sidebar(
         }
         options
     };
+    let workspace_options = workspaces.read().to_vec();
+    let workspaces_available = !workspace_options.is_empty();
+    let active_workspace = config.read().workspace.clone();
+    let workspaces_enabled = active_workspace.is_some();
+    let active_workspace_value = active_workspace.clone().unwrap_or_default();
     let advanced_controls_class = if advanced_open {
         "advanced-controls advanced-controls-open"
     } else {
@@ -516,6 +523,59 @@ pub fn Sidebar(
             div { class: "sidebar-section",
                 div { class: "section-header", "ACTIONS" }
                 div { class: "sidebar-controls",
+                    // Context Workspace — opt-in per-project override layer for
+                    // presets, workflows, skills, discovery-framing and personas.
+                    // The toggle stays disabled (with a hint) when
+                    // `.caretta/workspaces/` is missing so users discover the
+                    // feature without it ever surprising them.
+                    label { class: "checkbox-row",
+                        input {
+                            r#type: "checkbox",
+                            disabled: !workspaces_available,
+                            checked: workspaces_enabled,
+                            onchange: move |evt| {
+                                if evt.value() == "true" {
+                                    // Default to the first available workspace
+                                    // so toggling on always selects something.
+                                    let first = workspaces.read().first().cloned();
+                                    on_workspace_change.call(first);
+                                } else {
+                                    on_workspace_change.call(None);
+                                }
+                            },
+                        }
+                        span { class: "control-label", "Use context workspace" }
+                    }
+                    if workspaces_enabled && workspaces_available {
+                        label { class: "advanced-field",
+                            span { class: "control-label", "Workspace" }
+                            select {
+                                id: "context-workspace",
+                                class: "config-select",
+                                value: "{active_workspace_value}",
+                                onchange: move |evt| {
+                                    let v = evt.value();
+                                    if v.is_empty() {
+                                        on_workspace_change.call(None);
+                                    } else {
+                                        on_workspace_change.call(Some(v));
+                                    }
+                                },
+                                for ws in workspace_options.iter() {
+                                    option { value: "{ws}", "{ws}" }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "advanced-hint",
+                        if !workspaces_available {
+                            "No context workspaces detected. Create directories under .caretta/workspaces/<name>/ to enable per-workspace presets, workflows, skills, discovery-framing, and personas."
+                        } else if workspaces_enabled {
+                            "Workspace overrides are active. Presets, workflows, skills, discovery-framing, and personas resolve from this workspace before the shared defaults."
+                        } else {
+                            "Turn this on to layer .caretta/workspaces/<name>/ overrides on top of the shared assets. Off uses the default resolution chain."
+                        }
+                    }
                     label { class: "advanced-field",
                         span { class: "control-label", "Workflow Preset" }
                         select {

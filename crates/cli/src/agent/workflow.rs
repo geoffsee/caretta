@@ -98,7 +98,16 @@ fn category_rank(category: &str) -> (u8, &str) {
 
 /// Load all workflow configs and return sorted sidebar entries for a preset.
 pub fn load_sidebar_entries(root: &str, preset: &str) -> Vec<WorkflowEntry> {
-    let workflows = load_workflows(root, preset);
+    load_sidebar_entries_with_workspace(root, preset, None)
+}
+
+/// Workspace-aware variant of [`load_sidebar_entries`].
+pub fn load_sidebar_entries_with_workspace(
+    root: &str,
+    preset: &str,
+    workspace: Option<&str>,
+) -> Vec<WorkflowEntry> {
+    let workflows = load_workflows_with_workspace(root, preset, workspace);
     let mut entries: Vec<WorkflowEntry> = workflows
         .values()
         .filter(|wf| wf.ui.visible)
@@ -153,24 +162,48 @@ fn local_workflows_dir(root: &str) -> PathBuf {
     Path::new(root).join(".agents/workflows")
 }
 
-fn preset_dir_roots(root: &str) -> Vec<PathBuf> {
-    vec![
-        materialized_workflows_dir(),
-        bundled_workflows_dir(root),
-        local_workflows_dir(root),
-    ]
+/// Per-workspace workflow override root, e.g.
+/// `<root>/.caretta/workspaces/<workspace>/workflows`.
+fn workspace_workflows_dir(root: &str, workspace: &str) -> PathBuf {
+    Path::new(root)
+        .join(".caretta")
+        .join("workspaces")
+        .join(workspace)
+        .join("workflows")
 }
 
-fn preset_dirs(root: &str, preset: &str) -> Vec<PathBuf> {
-    vec![
-        materialized_workflows_dir().join(preset),
-        bundled_workflows_dir(root).join(preset),
-        local_workflows_dir(root).join(preset),
-    ]
+/// Workspace-aware preset root list — workspace-local presets win over the
+/// bundled, materialized, and project-local locations.
+fn preset_dir_roots_with_workspace(root: &str, workspace: Option<&str>) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::with_capacity(4);
+    if let Some(ws) = workspace {
+        roots.push(workspace_workflows_dir(root, ws));
+    }
+    roots.push(materialized_workflows_dir());
+    roots.push(bundled_workflows_dir(root));
+    roots.push(local_workflows_dir(root));
+    roots
+}
+
+/// Workspace-aware variant — see [`preset_dir_roots_with_workspace`].
+fn preset_dirs_with_workspace(root: &str, preset: &str, workspace: Option<&str>) -> Vec<PathBuf> {
+    preset_dir_roots_with_workspace(root, workspace)
+        .into_iter()
+        .map(|p| p.join(preset))
+        .collect()
 }
 
 pub fn preset_skill_dirs(root: &str, preset: &str) -> Vec<PathBuf> {
-    preset_dirs(root, preset)
+    preset_skill_dirs_with_workspace(root, preset, None)
+}
+
+/// Workspace-aware variant — see [`preset_dir_roots_with_workspace`].
+pub fn preset_skill_dirs_with_workspace(
+    root: &str,
+    preset: &str,
+    workspace: Option<&str>,
+) -> Vec<PathBuf> {
+    preset_dirs_with_workspace(root, preset, workspace)
         .into_iter()
         .map(|p| p.join("skills"))
         .collect()
@@ -180,8 +213,15 @@ pub fn preset_skill_dirs(root: &str, preset: &str) -> Vec<PathBuf> {
 
 /// List available preset names by scanning bundled and project-local workflow roots.
 pub fn list_presets(root: &str) -> Vec<String> {
+    list_presets_with_workspace(root, None)
+}
+
+/// Workspace-aware variant of [`list_presets`]. When `workspace` is `Some`,
+/// presets contributed by `<root>/.caretta/workspaces/<workspace>/workflows/`
+/// are merged into the result alongside the bundled and project-local presets.
+pub fn list_presets_with_workspace(root: &str, workspace: Option<&str>) -> Vec<String> {
     let mut presets = Vec::new();
-    for base in preset_dir_roots(root) {
+    for base in preset_dir_roots_with_workspace(root, workspace) {
         if let Ok(entries) = std::fs::read_dir(&base) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -210,8 +250,21 @@ pub fn list_presets(root: &str) -> Vec<String> {
 /// Scan bundled and project-local workflow directories for the selected preset.
 /// Project-local workflows override bundled workflows with the same `id`.
 pub fn load_workflows(root: &str, preset: &str) -> HashMap<String, WorkflowConfig> {
+    load_workflows_with_workspace(root, preset, None)
+}
+
+/// Workspace-aware variant of [`load_workflows`]. Workspace-local workflow
+/// definitions are scanned first; later scans for the same `id` overwrite
+/// earlier ones, so project-local `.agents/workflows/` still wins overall —
+/// matching the existing precedence and only adding workspace overrides as
+/// the highest-priority *baseline* layer.
+pub fn load_workflows_with_workspace(
+    root: &str,
+    preset: &str,
+    workspace: Option<&str>,
+) -> HashMap<String, WorkflowConfig> {
     let mut map = HashMap::new();
-    for base in preset_dirs(root, preset) {
+    for base in preset_dirs_with_workspace(root, preset, workspace) {
         let entries = match std::fs::read_dir(&base) {
             Ok(e) => e,
             Err(_) => continue,
@@ -245,11 +298,29 @@ pub fn load_workflows(root: &str, preset: &str) -> HashMap<String, WorkflowConfi
 
 /// Read a prompt template file from a workflow directory within a preset.
 pub fn load_template(root: &str, preset: &str, workflow_dir: &str, filename: &str) -> String {
-    for base in [
+    load_template_with_workspace(root, preset, workflow_dir, filename, None)
+}
+
+/// Workspace-aware variant of [`load_template`]. Templates under
+/// `<root>/.caretta/workspaces/<workspace>/workflows/<preset>/<workflow_dir>/`
+/// are tried first when a workspace is selected.
+pub fn load_template_with_workspace(
+    root: &str,
+    preset: &str,
+    workflow_dir: &str,
+    filename: &str,
+    workspace: Option<&str>,
+) -> String {
+    let mut search: Vec<PathBuf> = Vec::with_capacity(4);
+    if let Some(ws) = workspace {
+        search.push(workspace_workflows_dir(root, ws));
+    }
+    search.extend([
         local_workflows_dir(root),
         bundled_workflows_dir(root),
         materialized_workflows_dir(),
-    ] {
+    ]);
+    for base in &search {
         let path = base.join(preset).join(workflow_dir).join(filename);
         if let Ok(content) = std::fs::read_to_string(&path) {
             return content;
@@ -294,6 +365,18 @@ pub fn load_and_render(
     phase: &str,
     vars: &serde_json::Value,
 ) -> Result<String, String> {
+    load_and_render_with_workspace(root, preset, wf, phase, vars, None)
+}
+
+/// Workspace-aware variant of [`load_and_render`].
+pub fn load_and_render_with_workspace(
+    root: &str,
+    preset: &str,
+    wf: &WorkflowConfig,
+    phase: &str,
+    vars: &serde_json::Value,
+    workspace: Option<&str>,
+) -> Result<String, String> {
     let phase_cfg = wf
         .phases
         .get(phase)
@@ -301,7 +384,7 @@ pub fn load_and_render(
 
     // Derive the directory name from the workflow id (underscore → hyphen)
     let dir = wf.id.replace('_', "-");
-    let template = load_template(root, preset, &dir, &phase_cfg.template);
+    let template = load_template_with_workspace(root, preset, &dir, &phase_cfg.template, workspace);
     if template.is_empty() {
         return Err(format!(
             "Empty template '{}' for workflow '{}'",

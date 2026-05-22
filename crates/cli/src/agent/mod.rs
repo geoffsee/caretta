@@ -25,3 +25,4 @@ pub mod tracker;
 pub mod types;
 pub mod workflow;
 pub mod workflows;
+pub mod workspace;

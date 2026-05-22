@@ -18,10 +18,12 @@ fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
 /// Run the draft phase of any two-phase workflow loaded from YAML.
 pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     use crate::agent::workflow::{
-        fetch_extra_context, gather_context_as_json, load_and_render, load_workflows,
+        fetch_extra_context, gather_context_as_json, load_and_render_with_workspace,
+        load_workflows_with_workspace,
     };
 
-    let workflows = load_workflows(&cfg.root, &cfg.workflow_preset);
+    let workspace = cfg.workspace.as_deref();
+    let workflows = load_workflows_with_workspace(&cfg.root, &cfg.workflow_preset, workspace);
     let wf = workflows.get(workflow_id).unwrap_or_else(|| {
         die(&format!("Unknown workflow: {workflow_id}"));
     });
@@ -36,8 +38,15 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
     inject_common_vars(cfg, &mut vars);
     fetch_extra_context(wf, &mut vars);
 
-    let prompt = load_and_render(&cfg.root, &cfg.workflow_preset, wf, "draft", &vars)
-        .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
+    let prompt = load_and_render_with_workspace(
+        &cfg.root,
+        &cfg.workflow_preset,
+        wf,
+        "draft",
+        &vars,
+        workspace,
+    )
+    .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
 
     if cfg.dry_run {
         log_resolved_agent_launch(cfg, &[]);
@@ -97,10 +106,12 @@ fn synthesized_cli_feedback() -> String {
 /// Run the finalize phase of any two-phase workflow loaded from YAML.
 pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     use crate::agent::workflow::{
-        fetch_extra_context, gather_context_as_json, load_and_render, load_workflows,
+        fetch_extra_context, gather_context_as_json, load_and_render_with_workspace,
+        load_workflows_with_workspace,
     };
 
-    let workflows = load_workflows(&cfg.root, &cfg.workflow_preset);
+    let workspace = cfg.workspace.as_deref();
+    let workflows = load_workflows_with_workspace(&cfg.root, &cfg.workflow_preset, workspace);
     let wf = workflows.get(workflow_id).unwrap_or_else(|| {
         die(&format!("Unknown workflow: {workflow_id}"));
     });
@@ -116,8 +127,15 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     fetch_extra_context(wf, &mut vars);
     vars["feedback"] = serde_json::Value::String(feedback.to_string());
 
-    let prompt = load_and_render(&cfg.root, &cfg.workflow_preset, wf, "finalize", &vars)
-        .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
+    let prompt = load_and_render_with_workspace(
+        &cfg.root,
+        &cfg.workflow_preset,
+        wf,
+        "finalize",
+        &vars,
+        workspace,
+    )
+    .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
 
     run_agent(cfg, &prompt);
     if stop_requested() {
