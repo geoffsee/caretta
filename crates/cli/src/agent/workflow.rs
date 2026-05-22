@@ -428,6 +428,11 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
                 "issues_md": issues_md,
             })
         }
+        "discovery" => {
+            serde_json::json!({
+                "discovery_context": read_discovery_context(&cfg.root),
+            })
+        }
         _ => serde_json::json!({}),
     }
 }
@@ -492,6 +497,16 @@ fn read_project_file(root: &str, name: &str) -> String {
     std::fs::read_to_string(format!("{root}/{name}")).unwrap_or_default()
 }
 
+fn read_discovery_context(root: &str) -> String {
+    std::fs::read_to_string(
+        Path::new(root)
+            .join(".caretta")
+            .join("discovery")
+            .join("workspace.json"),
+    )
+    .unwrap_or_default()
+}
+
 fn list_crates_dir(root: &str) -> String {
     let crates_dir = Path::new(root).join("crates");
     let Ok(entries) = std::fs::read_dir(crates_dir) else {
@@ -513,6 +528,8 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    use serde_json::json;
 
     fn write_file(path: &Path, content: &str) {
         if let Some(parent) = path.parent() {
@@ -760,5 +777,28 @@ phases:
             ),
             "local template"
         );
+    }
+
+    #[test]
+    fn discovery_workflow_template_renders_with_fixture_context() {
+        let root = env!("CARGO_MANIFEST_DIR");
+        let fixture = std::fs::read_to_string(
+            Path::new(root)
+                .join("tests/fixtures/discovery-workspace.json"),
+        )
+        .expect("fixture should be readable");
+
+        let template = load_template(root, "default", "discovery-framing", "draft.md");
+        let vars = json!({
+            "project_name": "discovery-fixture",
+            "discovery_context": fixture,
+        });
+        let rendered = render_prompt(&template, &vars, &HashMap::new())
+            .expect("discovery template should render with fixture context");
+
+        assert!(rendered.contains("Structured problem framing"));
+        assert!(rendered.contains("Competing frames"));
+        assert!(rendered.contains("Checkout latency has regressed"));
+        assert!(rendered.contains("Decision gate recommendation"));
     }
 }

@@ -238,6 +238,8 @@ body {
 .btn-report:hover { background: var(--blue); color: var(--bg-primary); }
 .btn-security { border-color: var(--orange); color: var(--orange); width: 100%; }
 .btn-security:hover { background: var(--orange); color: var(--bg-primary); }
+.btn-discovery { border-color: var(--green); color: var(--green); width: 100%; }
+.btn-discovery:hover { background: var(--green); color: var(--bg-primary); }
 .btn-interview { border-color: var(--cyan); color: var(--cyan); width: 100%; }
 .btn-interview:hover { background: var(--cyan); color: var(--bg-primary); }
 .btn-merge { border-color: var(--green); color: var(--green); width: 100%; }
@@ -1289,6 +1291,162 @@ body {
     flex-shrink: 0;
     height: 36px;
     padding: 0 16px;
+}
+
+.discovery-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px 14px 20px;
+    overflow-y: auto;
+}
+.discovery-header {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 10px;
+}
+.discovery-title {
+    font-size: 13px;
+    color: var(--fg-primary);
+}
+.discovery-subtitle {
+    font-size: 11px;
+    color: var(--fg-muted);
+}
+.discovery-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+.discovery-card {
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    min-width: 0;
+}
+.discovery-card-wide {
+    grid-column: 1 / -1;
+}
+.discovery-section-title {
+    margin-bottom: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    color: var(--fg-muted);
+    text-transform: uppercase;
+}
+.discovery-textarea {
+    width: 100%;
+    min-height: 68px;
+    padding: 6px 7px;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--fg-primary);
+    font-size: 11px;
+    resize: vertical;
+    outline: none;
+    margin-bottom: 6px;
+}
+.discovery-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.discovery-status {
+    color: var(--fg-muted);
+    font-size: 11px;
+    font-style: italic;
+}
+.discovery-preview {
+    min-height: 180px;
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", "Menlo", monospace;
+    font-size: 11px;
+}
+.discovery-import {
+    min-height: 96px;
+    font-size: 11px;
+    font-family: inherit;
+}
+.discovery-table-controls {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 6px;
+}
+.discovery-table {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+.discovery-table-head,
+.discovery-table-row {
+    display: grid;
+    gap: 6px;
+    align-items: flex-start;
+    grid-template-columns: 1fr 1fr 2fr 1fr 2fr 92px;
+}
+.discovery-table-frame .discovery-table-head,
+.discovery-table-frame .discovery-table-row {
+    grid-template-columns: 0.9fr 1.3fr 1.3fr 1fr 1fr 92px;
+}
+.discovery-table-decision .discovery-table-head,
+.discovery-table-decision .discovery-table-row {
+    grid-template-columns: 1fr 2fr 2fr 1fr 92px;
+}
+.discovery-table-risk .discovery-table-head,
+.discovery-table-risk .discovery-table-row {
+    grid-template-columns: 1fr 1fr 2fr 2fr 92px;
+}
+.discovery-table-compact .discovery-table-head,
+.discovery-table-compact .discovery-table-row {
+    grid-template-columns: 1fr 1fr 2fr 92px;
+}
+.discovery-cell-head,
+.discovery-cell {
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--fg-primary);
+    font-size: 11px;
+    padding: 4px 6px;
+    min-width: 0;
+}
+.discovery-cell {
+    width: 100%;
+}
+.discovery-cell-head {
+    background: var(--bg-tertiary);
+    border-color: var(--border);
+    color: var(--fg-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+.discovery-cell-evidence {
+    min-height: 52px;
+}
+.discovery-cell-step {
+    min-height: 44px;
+}
+.discovery-cell-action {
+    display: flex;
+    justify-content: center;
+}
+.discovery-table-controls .btn,
+.discovery-cell-action .btn,
+.discovery-actions .btn {
+    width: auto;
+}
+.discovery-empty {
+    padding: 6px 4px;
+    color: var(--fg-muted);
+    font-size: 11px;
+    font-style: italic;
 }
 "#;
 

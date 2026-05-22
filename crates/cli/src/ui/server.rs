@@ -133,13 +133,22 @@ fn serve_static_file(file_path: &str) -> impl IntoResponse {
             ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
         }
         None => {
+            let missing_asset_message = "Web UI assets are not bundled in this build.\nRun a web build first:\n  (from repo root) `cd crates/cli && dx build --platform web`\nThen restart `caretta serve`.";
             if file_path != "index.html"
                 && let Some(content) = WebAssets::get("index.html")
             {
                 let mime = mime_guess::from_path("index.html").first_or_octet_stream();
                 ([(header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
             } else {
-                (StatusCode::NOT_FOUND, "404 Not Found").into_response()
+                (
+                    StatusCode::NOT_FOUND,
+                    [(
+                        header::CONTENT_TYPE,
+                        "text/plain; charset=utf-8",
+                    )],
+                    missing_asset_message,
+                )
+                    .into_response()
             }
         }
     }

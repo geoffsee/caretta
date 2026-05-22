@@ -18,6 +18,7 @@ pub enum Workflow {
     Housekeeping,
     Interview,
     Chat,
+    Discovery,
 }
 
 impl std::fmt::Display for Workflow {
@@ -35,6 +36,7 @@ impl std::fmt::Display for Workflow {
             Workflow::Housekeeping => write!(f, "Housekeeping"),
             Workflow::Interview => write!(f, "Interview"),
             Workflow::Chat => write!(f, "Chat"),
+            Workflow::Discovery => write!(f, "Discovery"),
         }
     }
 }
@@ -54,6 +56,7 @@ impl Workflow {
             "housekeeping" => Some(Self::Housekeeping),
             "interview" => Some(Self::Interview),
             "chat" => Some(Self::Chat),
+            "discovery_framing" => Some(Self::Discovery),
             _ => None,
         }
     }
@@ -72,6 +75,7 @@ impl Workflow {
             Self::Housekeeping => "housekeeping",
             Self::Interview => "interview",
             Self::Chat => "chat",
+            Self::Discovery => "discovery_framing",
         }
     }
 }

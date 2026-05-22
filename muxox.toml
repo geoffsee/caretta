@@ -1,0 +1,5 @@
+[[service]]
+name = "caretta-web"
+cmd = "cargo run -p caretta -- serve"
+cwd = "."
+log_capacity = 5000

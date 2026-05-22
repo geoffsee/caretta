@@ -3,6 +3,7 @@ use crate::agent::types::{
     PricingConfig, Workflow, should_use_event_model,
 };
 use crate::ui::components::EventRow;
+use crate::ui::discovery::{DiscoveryPanel, DiscoveryWorkspace};
 use crate::ui::personas::PersonasPanel;
 use crate::ui::security::{SecurityFinding, SecurityPanel};
 use dioxus::document::eval as js_eval;
@@ -28,6 +29,7 @@ fn build_tool_names(events: &[AgentEvent]) -> HashMap<String, String> {
 enum EditorTab {
     Output,
     Files,
+    Discovery,
     Personas,
     Security,
     Interview,
@@ -101,6 +103,7 @@ pub fn Editor(
     awaiting_feedback: Signal<Option<Workflow>>,
     is_working: Signal<bool>,
     feedback_text: Signal<String>,
+    discovery_workspace: Signal<DiscoveryWorkspace>,
     submit_feedback: EventHandler<MouseEvent>,
     root: Signal<String>,
     persona_skill_path: Signal<String>,
@@ -221,6 +224,11 @@ pub fn Editor(
                     class: if *active_tab.read() == EditorTab::Files { "tab tab-active" } else { "tab" },
                     onclick: move |_| active_tab.set(EditorTab::Files),
                     "Files ({file_count})"
+                }
+                div {
+                    class: if *active_tab.read() == EditorTab::Discovery { "tab tab-active" } else { "tab" },
+                    onclick: move |_| active_tab.set(EditorTab::Discovery),
+                    "Discovery"
                 }
                 div {
                     class: if *active_tab.read() == EditorTab::Personas { "tab tab-active" } else { "tab" },
@@ -386,6 +394,12 @@ pub fn Editor(
                             }
                         }
                         div { id: "monaco-container" }
+                    }
+                },
+                EditorTab::Discovery => rsx! {
+                    DiscoveryPanel {
+                        root,
+                        workspace: discovery_workspace,
                     }
                 },
                 EditorTab::Security => rsx! {

@@ -1,0 +1,21 @@
+name: Discovery & Framing
+id: discovery_framing
+description: Capture and validate high-signal context for future discovery-anchored workflows.
+pattern: two_phase
+context: discovery
+
+ui:
+  category: discovery
+  order: 10
+  visible: true
+  requires_bot: true
+
+phases:
+  draft:
+    template: draft.md
+    log_start: "Starting discovery framing draft..."
+    log_complete: "Draft complete — review the framing and provide feedback."
+  finalize:
+    template: finalize.md
+    log_start: "Finalizing discovery framing..."
+    log_complete: "Discovery context finalized and ready for downstream workflows."

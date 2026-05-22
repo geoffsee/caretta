@@ -1,0 +1,85 @@
+{
+  "problem": "Checkout latency has regressed after the new recommendation pipeline was added.",
+  "stakeholders": "Platform engineering, product, site reliability, finance",
+  "evidence": "Datadog P99 increased from 420ms to 1.4s over 4 days; 22% of checkout attempts error-retry.",
+  "desired_outcome": "Restore checkout median and P99 latencies below 900ms and reduce retries under 5% within one sprint.",
+  "constraints": "Cannot alter payment gateway contract; cannot change public API in the next two sprints.",
+  "dependencies": "Checkout service, recommendation API, Redis cache, feature flag service",
+  "existing_systems": "Legacy Cart API, new Experiments service, SLO dashboard stack",
+  "hypotheses": "N+1 queries in recommendation join; lock contention on stock cache; cold start overhead from sync jobs.",
+  "success_metrics": "Median checkout 600ms, P99 <900ms, retry rate <5%, error budget remaining >80%.",
+  "tradeoffs": "Quick cache-key fix may mask root cause; full refactor requires 3+ days and increases rollback risk.",
+  "risks": "High retry volume may create retry storm during incident windows.",
+  "assumption_summary": "Hypothesis that recommendation service fanout is the biggest latency driver is unverified.",
+  "frame_notes": "Operational frame suggests throttling first; UX frame flags timeout messaging risk.",
+  "decision": "experiment",
+  "decision_rationale": "Need one controlled experiment to compare cache-hit-only recommendation with full recommendation.",
+  "risk_accepted": false,
+  "risk_notes": "No rollback decision logged yet.",
+  "assumptions": [
+    {
+      "status": "Proven",
+      "confidence": "High (0.87)",
+      "evidence": "95th latency spikes align with recommendation cache misses.",
+      "owner": "SRE",
+      "validation_next_step": "Collect service-level traces filtered by cache-miss path."
+    },
+    {
+      "status": "Unverified",
+      "confidence": "Medium (0.6)",
+      "evidence": "Release notes mention recommendation query complexity increase.",
+      "owner": "Platform lead",
+      "validation_next_step": "Run EXPLAIN plans for recommendation query under production replay."
+    }
+  ],
+  "frame_comparisons": [
+    {
+      "frame": "Technical",
+      "framing": "Optimize recommendation query plan and reduce fanout joins before UI changes.",
+      "evidence": "Database wait time up in p99 timeline.",
+      "tradeoffs": "Higher implementation effort; requires DBA review.",
+      "recommendation": "recommended if latency budget is strict"
+    },
+    {
+      "frame": "Operational",
+      "framing": "Roll out a temporary feature-flag-controlled degraded path with safe fallback.",
+      "evidence": "Retry pressure indicates service instability under load.",
+      "tradeoffs": "Customer experience tradeoffs for reduced personalization.",
+      "recommendation": "recommended for incident containment"
+    }
+  ],
+  "decision_log": [
+    {
+      "gate": "experiment",
+      "rationale": "Need comparative evidence before permanent change.",
+      "rejected_alternatives": "Immediate full rewrite rejected due to blast radius.",
+      "reversibility": "Feature flag rollback in <10 minutes."
+    }
+  ],
+  "risk_dashboard": [
+    {
+      "likelihood": "High",
+      "impact": "High",
+      "trigger": "Cache miss rate exceeds 30% for 15 minutes",
+      "mitigation": "Enable circuit-breaker fallback and warm cache aggressively."
+    },
+    {
+      "likelihood": "Medium",
+      "impact": "Medium",
+      "trigger": "Error budget burns 2% in one hour",
+      "mitigation": "Auto-disable recommendations for top 10% traffic users temporarily."
+    }
+  ],
+  "dependency_graph": [
+    {
+      "from": "Checkout service",
+      "to": "Recommendation service",
+      "reason": "Request fanout and latency coupling"
+    },
+    {
+      "from": "Recommendation service",
+      "to": "Redis cache",
+      "reason": "Primary cache invalidation path"
+    }
+  ]
+}

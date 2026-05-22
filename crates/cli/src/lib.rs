@@ -65,7 +65,8 @@ use tokio::sync::mpsc;
 use tracing::info;
 use ui::components::BASE_CSS;
 use ui::security::{SecurityFinding, run_security_scan};
-use ui::{Editor, Sidebar, Statusbar};
+use ui::{DiscoveryWorkspace, Editor, Sidebar, Statusbar};
+use ui::discovery::load_discovery_workspace;
 
 #[cfg(target_arch = "wasm32")]
 #[derive(serde::Deserialize)]
@@ -569,6 +570,9 @@ fn App() -> Element {
     let mut chat_turns = use_signal(Vec::<InterviewTurn>::new);
     let mut chat_active = use_signal(|| false);
     let mut chat_agent_buf = use_signal(String::new);
+    let mut discovery_workspace = use_signal(|| {
+        load_discovery_workspace(&config.read().root)
+    });
     let mut settings_status = use_signal(|| None::<String>);
     let root_sig = use_signal(|| config.read().root.clone());
     let persona_skill_path_sig = use_signal(|| config.read().skill_paths.user_personas.clone());
@@ -1268,6 +1272,7 @@ fn App() -> Element {
                     is_working,
                     feedback_text,
                     submit_feedback,
+                    discovery_workspace,
                     root: root_sig,
                     persona_skill_path: persona_skill_path_sig,
                     follow_mode,
