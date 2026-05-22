@@ -67,7 +67,7 @@ use tracing::info;
 use ui::components::BASE_CSS;
 use ui::discovery::load_discovery_workspace;
 use ui::security::{SecurityFinding, run_security_scan};
-use ui::{DiscoveryWorkspace, Editor, Sidebar, Statusbar};
+use ui::{Editor, Sidebar, Statusbar};
 
 #[cfg(target_arch = "wasm32")]
 #[derive(serde::Deserialize)]
@@ -571,7 +571,7 @@ fn App() -> Element {
     let mut chat_turns = use_signal(Vec::<InterviewTurn>::new);
     let mut chat_active = use_signal(|| false);
     let mut chat_agent_buf = use_signal(String::new);
-    let mut discovery_workspace = use_signal(|| load_discovery_workspace(&config.read().root));
+    let discovery_workspace = use_signal(|| load_discovery_workspace(&config.read().root));
     let mut settings_status = use_signal(|| None::<String>);
     let root_sig = use_signal(|| config.read().root.clone());
     let persona_skill_path_sig = use_signal(|| config.read().skill_paths.user_personas.clone());
@@ -1212,6 +1212,10 @@ fn App() -> Element {
         if *selftest_running.peek() {
             return;
         }
+        if *selftest_open.peek() {
+            selftest_open.set(false);
+            return;
+        }
         selftest_running.set(true);
         selftest_open.set(true);
         info!("Self-test: running...");
@@ -1225,7 +1229,7 @@ fn App() -> Element {
                 })
                 .await
                 .unwrap_or_else(|join_err| {
-                    unsupported_report("", "", format!("self-test task failed: {join_err}"))
+                    unsupported_report("", "", format!("debug checks task failed: {join_err}"))
                 });
                 info!(
                     "Self-test: {} ({})",
@@ -1262,8 +1266,8 @@ fn App() -> Element {
                     Err(e) => unsupported_report(
                         &agent_name,
                         &root_snapshot,
-                        format!(
-                            "/api/selftest is unreachable ({e}). Start `caretta serve` to enable the self-test in web mode."
+                            format!(
+                            "/api/selftest is unreachable ({e}). Start `caretta serve` to enable Debug in web mode."
                         ),
                     ),
                 };
@@ -1283,7 +1287,18 @@ fn App() -> Element {
     rsx! {
         style { "{css}" }
 
-        div { class: "ide",
+        div {
+            class: if *selftest_open.read() {
+                "ide ide-debug-panel-open"
+            } else {
+                "ide"
+            },
+            if *selftest_open.read() {
+                div {
+                    class: "selftest-dismiss-overlay",
+                    onclick: move |_| selftest_open.set(false),
+                }
+            }
             // ── Title bar ──
             div { class: "titlebar",
                 div { class: "titlebar-left",
@@ -1305,17 +1320,17 @@ fn App() -> Element {
                                 }
                                 classes
                             },
-                            title: "Run an operational self-test against the current configuration",
+                            title: "Run environment debug checks against the current configuration",
                             disabled: *selftest_running.read(),
                             onclick: on_run_selftest,
                             span { class: "selftest-btn-dot" }
                             span { class: "selftest-btn-label",
                                 if *selftest_running.read() {
-                                    "Self-test…"
+                                    "Debug…"
                                 } else if let Some(report) = selftest_report.read().as_ref() {
-                                    "Self-test: {report.overall().label()}"
+                                    "Debug: {report.overall().label()}"
                                 } else {
-                                    "Self-test"
+                                    "Debug"
                                 }
                             }
                         }
@@ -1323,7 +1338,7 @@ fn App() -> Element {
                             div { class: "selftest-popover", role: "dialog",
                                 div { class: "selftest-popover-head",
                                     div { class: "selftest-popover-title",
-                                        "Configuration self-test"
+                                        "Configuration debug"
                                     }
                                     button {
                                         class: "selftest-popover-close",

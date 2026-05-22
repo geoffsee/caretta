@@ -1555,7 +1555,19 @@ body {
     border-top: 1px solid var(--border);
 }
 
-/* ---- Title-bar self-test button + popover ---- */
+/* Full-window click catcher: closes Debug panel without blocking the title bar. */
+.selftest-dismiss-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 900;
+    background: transparent;
+}
+.ide.ide-debug-panel-open .titlebar {
+    position: relative;
+    z-index: 901;
+}
+
+/* ---- Title-bar Debug button + popover ---- */
 .selftest-wrap {
     position: relative;
     display: inline-flex;

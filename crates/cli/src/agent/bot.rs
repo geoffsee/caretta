@@ -106,21 +106,90 @@ pub fn resolve_bot_token(creds: &BotCredentials) -> Option<String> {
     }
 }
 
-/// Mint a GitHub App installation token via JWT + REST API.
-fn mint_installation_token(
+/// Pass the Bearer secret to curl via stdin (`--config -`) instead of `-H argv`
+/// values so secrets are never visible via `ps` / `/proc/<pid>/cmdline`.
+fn curl_github_rest_bearer_stdout(
+    bearer_secret: &str,
+    method: &str,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    let mut child = Command::new("curl")
+        .args([
+            "--config",
+            "-",
+            "-s",
+            "-S",
+            "-X",
+            method,
+            "-H",
+            "Accept: application/vnd.github+json",
+            "-H",
+            "X-GitHub-Api-Version: 2022-11-28",
+            url,
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("could not run curl ({e}); install curl to use GitHub App auth"))?;
+
+    {
+        use std::io::Write;
+        let mut stdin = child.stdin.take().ok_or("curl stdin unavailable")?;
+        let auth_config = format!("header = \"Authorization: Bearer {bearer_secret}\"\n");
+        stdin
+            .write_all(auth_config.as_bytes())
+            .map_err(|e| format!("could not pass auth to curl: {e}"))?;
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("curl failed: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "GitHub REST request failed (curl exit {}): {}",
+            output.status.code().unwrap_or(-1),
+            stderr.trim()
+        ));
+    }
+
+    Ok(output.stdout)
+}
+
+/// Verify a PAT / installation / OAuth token against the GitHub REST API.
+pub(crate) fn verify_github_bot_token_rest(token: &str) -> Result<(), String> {
+    let body =
+        curl_github_rest_bearer_stdout(token.trim(), "GET", "https://api.github.com/rate_limit")?;
+    let v: serde_json::Value = serde_json::from_slice(&body).map_err(|_| {
+        "GitHub rate_limit response was not valid JSON (token may be invalid)".to_string()
+    })?;
+    if v.get("resources").is_none() {
+        return Err(
+            "GitHub rate_limit response missing expected fields — token may be invalid".to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Mint a GitHub App installation access token and return failure details for diagnostics.
+pub(crate) fn mint_installation_access_token(
     app_id: &str,
     installation_id: &str,
     private_key_pem: &str,
-) -> Option<String> {
+) -> Result<String, String> {
     use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 
-    let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-        .map_err(|e| log(&format!("Invalid RSA PEM key: {e}")))
-        .ok()?;
+    let key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes()).map_err(|e| {
+        format!(
+            "Could not authenticate as GitHub App — invalid private key PEM ({e}). Check the key file or pasted PEM."
+        )
+    })?;
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
+        .map_err(|e| format!("system clock error: {e}"))?
         .as_secs();
 
     let claims = serde_json::json!({
@@ -129,68 +198,42 @@ fn mint_installation_token(
         "exp": now + 600,
     });
 
-    let jwt = encode(&Header::new(Algorithm::RS256), &claims, &key)
-        .map_err(|e| log(&format!("JWT signing failed: {e}")))
-        .ok()?;
+    let jwt = encode(&Header::new(Algorithm::RS256), &claims, &key).map_err(|e| {
+        format!(
+            "Could not authenticate as GitHub App — failed to sign JWT ({e}). Check App ID and private key pair."
+        )
+    })?;
 
     let url = format!("https://api.github.com/app/installations/{installation_id}/access_tokens");
+    let body = curl_github_rest_bearer_stdout(&jwt, "POST", &url)?;
 
-    // Pass the JWT-bearing Authorization header to curl via stdin (`--config -`)
-    // instead of as a `-H` argv value, so the short-lived JWT is never visible
-    // to other local users via `ps aux` / `/proc/<pid>/cmdline`.
-    let mut child = Command::new("curl")
-        .args([
-            "--config",
-            "-",
-            "-s",
-            "-X",
-            "POST",
-            "-H",
-            "Accept: application/vnd.github+json",
-            "-H",
-            "X-GitHub-Api-Version: 2022-11-28",
-            &url,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| log(&format!("curl spawn failed: {e}")))
-        .ok()?;
+    let value: serde_json::Value = serde_json::from_slice(&body)
+        .map_err(|e| format!("GitHub App token response was not valid JSON: {e}"))?;
 
-    {
-        use std::io::Write;
-        let mut stdin = child.stdin.take()?;
-        let auth_config = format!("header = \"Authorization: Bearer {jwt}\"\n");
-        stdin
-            .write_all(auth_config.as_bytes())
-            .map_err(|e| log(&format!("curl stdin write failed: {e}")))
-            .ok()?;
+    if let Some(token) = value.get("token").and_then(|t| t.as_str()) {
+        return Ok(token.to_string());
     }
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| log(&format!("curl failed: {e}")))
-        .ok()?;
+    let msg = value
+        .get("message")
+        .and_then(|m| m.as_str())
+        .unwrap_or("unknown error");
+    Err(format!(
+        "Could not authenticate as GitHub App — GitHub API: {msg}. Check App ID, Installation ID, and that the key belongs to this app."
+    ))
+}
 
-    if !output.status.success() {
-        log("Failed to mint bot installation token (curl error)");
-        return None;
+/// Mint a GitHub App installation token via JWT + REST API.
+fn mint_installation_token(
+    app_id: &str,
+    installation_id: &str,
+    private_key_pem: &str,
+) -> Option<String> {
+    match mint_installation_access_token(app_id, installation_id, private_key_pem) {
+        Ok(token) => Some(token),
+        Err(e) => {
+            log(&e);
+            None
+        }
     }
-
-    let body: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|e| log(&format!("Failed to parse installation token response: {e}")))
-        .ok()?;
-
-    let token = body.get("token").and_then(|t| t.as_str()).map(String::from);
-    if token.is_none() {
-        let msg = body
-            .get("message")
-            .and_then(|m| m.as_str())
-            .unwrap_or("unknown error");
-        log(&format!(
-            "GitHub API error minting installation token: {msg}"
-        ));
-    }
-    token
 }

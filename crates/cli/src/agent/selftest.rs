@@ -6,11 +6,14 @@
 //! from the `caretta serve` API at `/api/selftest` so the web build (running
 //! through `dx serve`) can render the same report.
 //!
-//! Checks are intentionally cheap and read-only:
+//! Checks are intentionally cheap and read-only (except verification of optional
+//! **GitHub review bot** credentials, which performs a live `github.com` REST
+//! call when a token or GitHub App is configured):
 //! - the configured agent CLI is on `PATH`,
 //! - host tools `git` and `gh` are on `PATH`,
 //! - the workspace root exists and is a git repository,
-//! - bundled / overridden skill files are reachable on disk.
+//! - bundled / overridden skill files are reachable on disk,
+//! - review bot PAT / GitHub App credentials authenticate when present.
 //!
 //! Each check is a [`SelfTestCheck`] with a [`CheckStatus`]; the report's
 //! [`SelfTestReport::overall`] collapses them into a single status that the
@@ -23,7 +26,7 @@ use crate::agent::adapter_dispatch::native_base_command;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::agent::cmd::has_command;
 #[cfg(not(target_arch = "wasm32"))]
-use crate::agent::types::Config;
+use crate::agent::types::{BotAuthMode, BotCredentials, Config};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
@@ -154,7 +157,7 @@ pub fn unsupported_report(
         agent: agent.into(),
         root: root.into(),
         checks: vec![SelfTestCheck::new(
-            "Self-test runtime",
+            "Debug runtime",
             CheckStatus::Skipped,
             detail,
         )],
@@ -238,7 +241,10 @@ pub fn run_self_test(cfg: &Config) -> SelfTestReport {
         ));
     }
 
-    // 4. Skill paths. Paths in caretta.toml may be repo-relative, so resolve
+    // 4. GitHub review bot (credentials from DES / DEV_BOT_*; live GitHub check when configured).
+    push_review_bot_checks(&mut checks, cfg);
+
+    // 5. Skill paths. Paths in caretta.toml may be repo-relative, so resolve
     //    them against the workspace root before checking existence.
     let resolve = |p: &str| -> std::path::PathBuf {
         let candidate = Path::new(p);
@@ -271,7 +277,7 @@ pub fn run_self_test(cfg: &Config) -> SelfTestReport {
         }
     }
 
-    // 5. Model selection: warn if the selected agent supports models but none
+    // 6. Model selection: warn if the selected agent supports models but none
     //    is configured. This is a frequent cause of "the run starts but the
     //    agent picks the wrong model".
     use crate::agent::types::AgentExt;
@@ -309,6 +315,81 @@ pub fn run_self_test(cfg: &Config) -> SelfTestReport {
         agent: cfg.agent.to_string(),
         root: cfg.root.clone(),
         checks,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn push_review_bot_checks(checks: &mut Vec<SelfTestCheck>, cfg: &Config) {
+    use crate::agent::{bot, cmd::has_command};
+
+    if cfg.bot_settings.mode != BotAuthMode::Disabled && !cfg.has_bot_credentials() {
+        checks.push(SelfTestCheck::new(
+            "GitHub review bot",
+            CheckStatus::Warn,
+            format!(
+                "{} credentials are incomplete — approve/review-bot flows cannot authenticate.",
+                cfg.bot_settings.mode
+            ),
+        ));
+        return;
+    }
+
+    match cfg.effective_bot_credentials() {
+        None => checks.push(SelfTestCheck::new(
+            "GitHub review bot",
+            CheckStatus::Warn,
+            "Not configured — GitHub does not allow a user to approve their own pull request. Set up reviewer bot credentials (token or GitHub App) when you need approvals from a separate bot identity.",
+        )),
+        Some(BotCredentials::Token(tok)) => {
+            if !has_command("curl") {
+                checks.push(SelfTestCheck::new(
+                    "GitHub review bot",
+                    CheckStatus::Warn,
+                    "`curl` not found on PATH — skipped token verification.",
+                ));
+                return;
+            }
+            match bot::verify_github_bot_token_rest(&tok) {
+                Ok(()) => checks.push(SelfTestCheck::new(
+                    "GitHub review bot",
+                    CheckStatus::Pass,
+                    "Token accepted by the GitHub REST API.",
+                )),
+                Err(e) => checks.push(SelfTestCheck::new(
+                    "GitHub review bot",
+                    CheckStatus::Fail,
+                    e,
+                )),
+            }
+        }
+        Some(BotCredentials::GitHubApp {
+            app_id,
+            installation_id,
+            private_key_pem,
+        }) => {
+            if !has_command("curl") {
+                checks.push(SelfTestCheck::new(
+                    "GitHub review bot",
+                    CheckStatus::Fail,
+                    "`curl` must be on PATH to authenticate a GitHub App.",
+                ));
+                return;
+            }
+            match bot::mint_installation_access_token(
+                app_id.as_str(),
+                installation_id.as_str(),
+                private_key_pem.as_str(),
+            ) {
+                Ok(_) => checks.push(SelfTestCheck::new(
+                    "GitHub review bot",
+                    CheckStatus::Pass,
+                    format!(
+                        "GitHub App authenticated (installation `{installation_id}` for app `{app_id}`)."
+                    ),
+                )),
+                Err(e) => checks.push(SelfTestCheck::new("GitHub review bot", CheckStatus::Fail, e)),
+            }
+        }
     }
 }
 
