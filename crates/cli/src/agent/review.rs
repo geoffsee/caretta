@@ -1,8 +1,9 @@
 use crate::agent::bot::resolve_bot_token;
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, log};
-use crate::agent::gh::{Gh, PullRequestActions};
+use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
+use crate::agent::platform::PullRequestActions;
 use crate::agent::process::{emit_event, stop_requested};
 use crate::agent::run::{run_agent_with_env, run_agent_with_env_in_dir};
 use crate::agent::tracker::{

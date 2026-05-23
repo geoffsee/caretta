@@ -1,8 +1,9 @@
 use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_stdout, count_tokens, die, has_command, log, origin_default_branch,
 };
-use crate::agent::gh::{Gh, PullRequestActions};
+use crate::agent::gh::Gh;
 use crate::agent::launch::log_resolved_agent_launch;
+use crate::agent::platform::PullRequestActions;
 use crate::agent::process::stop_requested;
 use crate::agent::review::run_issue_pr_review_resume;
 use crate::agent::run::run_agent;

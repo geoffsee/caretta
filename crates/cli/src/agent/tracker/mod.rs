@@ -1,4 +1,5 @@
-use crate::agent::gh::{Gh, IssueActions, PullRequestActions};
+use crate::agent::gh::Gh;
+use crate::agent::platform::{IssueActions, PullRequestActions};
 use crate::agent::shell::log;
 pub use cli_common::{PendingIssue, PrAuthor, PrSummary, TrackerInfo};
 use std::collections::{HashMap, HashSet};

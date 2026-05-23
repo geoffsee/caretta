@@ -20,8 +20,9 @@
 //! else can safely run until conflicts are resolved.
 
 use crate::agent::cmd::{cmd_run, cmd_stdout, log};
-use crate::agent::gh::{Gh, PullRequestActions};
+use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
+use crate::agent::platform::PullRequestActions;
 use crate::agent::process::emit_event;
 use crate::agent::review::{
     commit_and_push_worktree_changes, run_pr_review_fix, setup_pr_worktree,

@@ -1,7 +1,8 @@
 //! Lineage-aware batch merge for `agent/issue-N` stacked pull requests.
 
 use crate::agent::conflicts::CONFLICT_RESOLUTION_MARKER;
-use crate::agent::gh::{Gh, PullRequestActions};
+use crate::agent::gh::Gh;
+use crate::agent::platform::PullRequestActions;
 use crate::agent::shell::log;
 use crate::agent::tracker::{
     enable_auto_merge, find_tracker, find_upstream_branch, get_tracker_body, is_auto_merge_enabled,

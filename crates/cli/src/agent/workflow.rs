@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::agent::assets::assets_dir;
-use crate::agent::gh::{Gh, IssueActions, PullRequestActions};
+use crate::agent::gh::Gh;
+use crate::agent::platform::{IssueActions, PullRequestActions};
 use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;

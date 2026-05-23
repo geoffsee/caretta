@@ -1,6 +1,7 @@
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, log};
-use crate::agent::gh::{Gh, PullRequestActions};
+use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
+use crate::agent::platform::PullRequestActions;
 use crate::agent::review::{
     PrepareBranchOutcome, WorktreeGuard, prepare_branch_for_worktree_add, restore_main_head,
 };
