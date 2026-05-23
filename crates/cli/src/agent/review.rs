@@ -1,5 +1,6 @@
 use crate::agent::bot::resolve_bot_token;
-use crate::agent::cmd::{cmd_capture, cmd_run, cmd_run_env, cmd_stdout, log};
+use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, log};
+use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::{emit_event, stop_requested};
@@ -685,8 +686,7 @@ pub fn try_approve_pr(cfg: &Config, pr_num: u32) -> bool {
     let pr_num_s = pr_num.to_string();
     let body =
         "All requested changes have been addressed. Approving via caretta code-review follow-up.";
-    let ok = cmd_run_env(
-        "gh",
+    let ok = Gh::run_env(
         &["pr", "review", &pr_num_s, "--approve", "--body", body],
         &env,
     );

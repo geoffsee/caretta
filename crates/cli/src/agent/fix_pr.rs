@@ -20,6 +20,7 @@
 //! else can safely run until conflicts are resolved.
 
 use crate::agent::cmd::{cmd_run, cmd_stdout, log};
+use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
 use crate::agent::process::emit_event;
 use crate::agent::review::{
@@ -220,16 +221,13 @@ fn head_is_behind_base_via_git(head_branch: &str, base_branch: &str) -> bool {
 
 fn diagnose_pr(pr_num: u32) -> Option<PrFixDiagnostic> {
     let num_s = pr_num.to_string();
-    let raw = cmd_stdout(
-        "gh",
-        &[
-            "pr",
-            "view",
-            &num_s,
-            "--json",
-            "number,title,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup",
-        ],
-    )?;
+    let raw = Gh::stdout(&[
+        "pr",
+        "view",
+        &num_s,
+        "--json",
+        "number,title,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup",
+    ])?;
     let thread_count = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN).len();
     let mut diag = parse_pr_view_json(&raw, thread_count)?;
 
@@ -397,7 +395,7 @@ fn run_update_branch_from_base(pr_num: u32) {
     log(&format!(
         "PR #{pr_num} is BEHIND base; running `gh pr update-branch`..."
     ));
-    if !cmd_run("gh", &["pr", "update-branch", &num_s]) {
+    if !Gh::run(&["pr", "update-branch", &num_s]) {
         log(&format!(
             "`gh pr update-branch` failed for PR #{pr_num}; downstream fixes may not stick until the head branch is current with its base."
         ));

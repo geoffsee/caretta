@@ -1,7 +1,7 @@
 //! Lineage-aware batch merge for `agent/issue-N` stacked pull requests.
 
-use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, cmd_stdout_or_die, has_command};
 use crate::agent::conflicts::CONFLICT_RESOLUTION_MARKER;
+use crate::agent::gh::Gh;
 use crate::agent::shell::log;
 use crate::agent::tracker::{
     enable_auto_merge, find_tracker, find_upstream_branch, get_tracker_body, is_auto_merge_enabled,
@@ -44,8 +44,7 @@ struct PrStatusRefresh {
 }
 
 fn gh_list_merge_candidate_prs() -> Vec<GhPrMergeRow> {
-    let out = cmd_stdout_or_die(
-        "gh",
+    let out = Gh::stdout_or_die(
         &[
             "pr",
             "list",
@@ -256,7 +255,7 @@ fn pr_update_branch(pr_num: u32, dry_run: bool) -> bool {
     log(&format!(
         "Merging latest base into PR #{pr_num} (`gh pr update-branch`)…"
     ));
-    let (ok, out) = cmd_capture("gh", &["pr", "update-branch", &pr_num.to_string()]);
+    let (ok, out) = Gh::capture(&["pr", "update-branch", &pr_num.to_string()]);
     if !ok {
         log(&format!(
             "`gh pr update-branch` failed for PR #{pr_num}: {out}"
@@ -294,18 +293,15 @@ Please merge `{expected_base_branch}` into `{head}`, resolve the conflicts, run 
 
 fn conflict_marker_already_present(pr_num: u32) -> bool {
     let num_s = pr_num.to_string();
-    cmd_stdout(
-        "gh",
-        &[
-            "pr",
-            "view",
-            &num_s,
-            "--json",
-            "comments",
-            "--jq",
-            ".comments[].body",
-        ],
-    )
+    Gh::stdout(&[
+        "pr",
+        "view",
+        &num_s,
+        "--json",
+        "comments",
+        "--jq",
+        ".comments[].body",
+    ])
     .is_some_and(|comments| comments.contains(CONFLICT_RESOLUTION_MARKER))
 }
 
@@ -333,7 +329,7 @@ fn post_conflict_resolution_marker(
     }
 
     let num_s = row.number.to_string();
-    let (ok, out) = cmd_capture("gh", &["pr", "comment", &num_s, "--body", &body]);
+    let (ok, out) = Gh::capture(&["pr", "comment", &num_s, "--body", &body]);
     if ok {
         log(&format!(
             "Posted caretta conflict-resolution marker on PR #{}.",
@@ -358,10 +354,7 @@ fn retarget_pull_base(pr_num: u32, new_base: &str, dry_run: bool) -> bool {
     log(&format!(
         "Retargeting PR #{pr_num} to merge into '{new_base}'…"
     ));
-    cmd_run(
-        "gh",
-        &["pr", "edit", &pr_num.to_string(), "--base", new_base],
-    )
+    Gh::run(&["pr", "edit", &pr_num.to_string(), "--base", new_base])
 }
 
 fn merge_pull_squash(pr_num: u32, dry_run: bool) -> bool {
@@ -370,7 +363,7 @@ fn merge_pull_squash(pr_num: u32, dry_run: bool) -> bool {
         return true;
     }
     log(&format!("Squash-merge PR #{pr_num}…"));
-    let (ok, out) = cmd_capture("gh", &["pr", "merge", &pr_num.to_string(), "--squash"]);
+    let (ok, out) = Gh::capture(&["pr", "merge", &pr_num.to_string(), "--squash"]);
     if !ok {
         log(&format!("Merge failed for PR #{pr_num}: {out}"));
     }
@@ -434,7 +427,7 @@ pub fn run_branch_sync(cfg: &Config, tracker_override: Option<u32>) {
 }
 
 fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePassMode) {
-    if !cfg.dry_run && !has_command("gh") {
+    if !cfg.dry_run && !Gh::is_installed() {
         log("auto-merge: `gh` CLI not installed — abort.");
         return;
     }
@@ -446,23 +439,20 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
     };
     log(&format!("auto-merge ({pass_label}): trunk base '{trunk}'"));
 
-    let gh_rows = if has_command("gh") {
+    let gh_rows = if Gh::is_installed() {
         if cfg.dry_run {
             log("[dry-run] Listing open PRs (read-only)");
         }
-        match cmd_stdout(
-            "gh",
-            &[
-                "pr",
-                "list",
-                "--state",
-                "open",
-                "--limit",
-                "150",
-                "--json",
-                "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
-            ],
-        ) {
+        match Gh::stdout(&[
+            "pr",
+            "list",
+            "--state",
+            "open",
+            "--limit",
+            "150",
+            "--json",
+            "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
+        ]) {
             Some(raw) => parse_gh_pr_merge_rows(&raw),
             None => Vec::new(),
         }
@@ -561,33 +551,27 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
             row_snapshot.base_ref.clone_from(&expected_base_branch);
         } else {
             let num_s = row_snapshot.number.to_string();
-            if let Some(b) = cmd_stdout(
-                "gh",
-                &[
-                    "pr",
-                    "view",
-                    &num_s,
-                    "--json",
-                    "baseRefName",
-                    "--jq",
-                    ".baseRefName",
-                ],
-            )
+            if let Some(b) = Gh::stdout(&[
+                "pr",
+                "view",
+                &num_s,
+                "--json",
+                "baseRefName",
+                "--jq",
+                ".baseRefName",
+            ])
             .filter(|s| !s.trim().is_empty())
             {
                 row_snapshot.base_ref = b.trim().to_owned();
             }
 
-            let out = cmd_stdout(
-                "gh",
-                &[
-                    "pr",
-                    "view",
-                    &num_s,
-                    "--json",
-                    "mergeStateStatus,reviewDecision,isDraft",
-                ],
-            );
+            let out = Gh::stdout(&[
+                "pr",
+                "view",
+                &num_s,
+                "--json",
+                "mergeStateStatus,reviewDecision,isDraft",
+            ]);
             if let Some(json) = out.filter(|s| !s.trim().is_empty())
                 && let Ok(partial) = serde_json::from_str::<PrStatusRefresh>(&json)
             {

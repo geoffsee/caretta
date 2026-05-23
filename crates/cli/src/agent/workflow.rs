@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::agent::assets::assets_dir;
+use crate::agent::gh::Gh;
 use crate::agent::shell::{cmd_stdout, log};
 use crate::agent::tracker::list_open_prs;
 use crate::agent::types::Config;
@@ -431,33 +432,27 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
         "retro" => {
             let recent_commits = cmd_stdout("git", &["log", "--oneline", "--no-decorate", "-50"])
                 .unwrap_or_default();
-            let closed_issues = cmd_stdout(
-                "gh",
-                &[
-                    "issue",
-                    "list",
-                    "--state",
-                    "closed",
-                    "--json",
-                    "number,title,closedAt",
-                    "--limit",
-                    "30",
-                ],
-            )
+            let closed_issues = Gh::stdout(&[
+                "issue",
+                "list",
+                "--state",
+                "closed",
+                "--json",
+                "number,title,closedAt",
+                "--limit",
+                "30",
+            ])
             .unwrap_or_else(|| "[]".to_string());
-            let merged_prs = cmd_stdout(
-                "gh",
-                &[
-                    "pr",
-                    "list",
-                    "--state",
-                    "merged",
-                    "--json",
-                    "number,title,mergedAt",
-                    "--limit",
-                    "30",
-                ],
-            )
+            let merged_prs = Gh::stdout(&[
+                "pr",
+                "list",
+                "--state",
+                "merged",
+                "--json",
+                "number,title,mergedAt",
+                "--limit",
+                "30",
+            ])
             .unwrap_or_else(|| "[]".to_string());
             let open_issues = gh_open_issues(50);
             let open_prs = open_prs_json();
@@ -474,19 +469,16 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
             })
         }
         "housekeeping" => {
-            let open_issues = cmd_stdout(
-                "gh",
-                &[
-                    "issue",
-                    "list",
-                    "--state",
-                    "open",
-                    "--json",
-                    "number,title,labels,updatedAt,assignees",
-                    "--limit",
-                    "100",
-                ],
-            )
+            let open_issues = Gh::stdout(&[
+                "issue",
+                "list",
+                "--state",
+                "open",
+                "--json",
+                "number,title,labels,updatedAt,assignees",
+                "--limit",
+                "100",
+            ])
             .unwrap_or_else(|| "[]".to_string());
             let open_prs = open_prs_json();
             let local_branches =
@@ -532,42 +524,36 @@ pub fn fetch_extra_context(wf: &WorkflowConfig, vars: &mut serde_json::Value) {
 /// Fetch the body of the most recent open GitHub issue with the given label.
 /// Returns `"# <title>\n\n<body>"` or empty string if none found.
 fn fetch_issue_by_label(label: &str) -> String {
-    cmd_stdout(
-        "gh",
-        &[
-            "issue",
-            "list",
-            "--label",
-            label,
-            "--state",
-            "open",
-            "--limit",
-            "1",
-            "--json",
-            "number,title,body",
-            "--jq",
-            ".[0] // empty | \"# \\(.title)\\n\\n\\(.body)\"",
-        ],
-    )
+    Gh::stdout(&[
+        "issue",
+        "list",
+        "--label",
+        label,
+        "--state",
+        "open",
+        "--limit",
+        "1",
+        "--json",
+        "number,title,body",
+        "--jq",
+        ".[0] // empty | \"# \\(.title)\\n\\n\\(.body)\"",
+    ])
     .unwrap_or_default()
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 fn gh_open_issues(limit: u32) -> String {
-    cmd_stdout(
-        "gh",
-        &[
-            "issue",
-            "list",
-            "--state",
-            "open",
-            "--json",
-            "number,title,labels",
-            "--limit",
-            &limit.to_string(),
-        ],
-    )
+    Gh::stdout(&[
+        "issue",
+        "list",
+        "--state",
+        "open",
+        "--json",
+        "number,title,labels",
+        "--limit",
+        &limit.to_string(),
+    ])
     .unwrap_or_else(|| "[]".to_string())
 }
 

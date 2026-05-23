@@ -1,4 +1,5 @@
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, log};
+use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
 use crate::agent::review::{
     PrepareBranchOutcome, WorktreeGuard, prepare_branch_for_worktree_add, restore_main_head,
@@ -108,22 +109,19 @@ fn merge_bases_for_pr_head(
 
 fn fetch_conflict_marker_context(pr_num: u32) -> Option<ConflictMarkerContext> {
     let num_s = pr_num.to_string();
-    let raw = cmd_stdout("gh", &["pr", "view", &num_s, "--json", "comments"])?;
+    let raw = Gh::stdout(&["pr", "view", &num_s, "--json", "comments"])?;
     parse_latest_conflict_marker(&raw)
 }
 
 fn fetch_pr_conflict_view(pr_num: u32) -> Option<PrConflictView> {
     let num_s = pr_num.to_string();
-    let raw = cmd_stdout(
-        "gh",
-        &[
-            "pr",
-            "view",
-            &num_s,
-            "--json",
-            "headRefName,baseRefName,mergeStateStatus,title",
-        ],
-    )?;
+    let raw = Gh::stdout(&[
+        "pr",
+        "view",
+        &num_s,
+        "--json",
+        "headRefName,baseRefName,mergeStateStatus,title",
+    ])?;
     serde_json::from_str(&raw).ok()
 }
 
