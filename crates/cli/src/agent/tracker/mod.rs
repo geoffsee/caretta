@@ -1,4 +1,4 @@
-use crate::agent::gh::Gh;
+use crate::agent::gh::{Gh, IssueActions, PullRequestActions};
 use crate::agent::shell::log;
 pub use cli_common::{PendingIssue, PrAuthor, PrSummary, TrackerInfo};
 use std::collections::{HashMap, HashSet};
@@ -330,19 +330,7 @@ pub fn mark_completed(body: &str, issue_num: u32) -> String {
 /// These are retrospective action items that should be worked on before
 /// regular sprint tracker issues.
 pub fn find_retro_issues() -> Vec<u32> {
-    let out = Gh::stdout(&[
-        "issue",
-        "list",
-        "--search",
-        "retro in:title",
-        "--state",
-        "open",
-        "--json",
-        "number",
-        "--jq",
-        ".[].number",
-    ])
-    .unwrap_or_default();
+    let out = Gh::open_issue_numbers_matching_title("retro in:title").unwrap_or_default();
     out.lines()
         .filter_map(|l| l.trim().parse::<u32>().ok())
         .collect()
@@ -376,16 +364,7 @@ pub fn find_tracker() -> Vec<TrackerInfo> {
     // "sprint" or "tracker" in its title (e.g. "Dev UI: agent must read parent
     // tracker before working a child issue"). The label is the authoritative
     // source — see #85 for the standardized label taxonomy.
-    let out = Gh::stdout(&[
-        "issue",
-        "list",
-        "--label",
-        labels::TRACKER,
-        "--state",
-        "open",
-        "--json",
-        "number,title",
-    ]);
+    let out = Gh::open_issue_summaries_with_label_json(labels::TRACKER);
     match out {
         Some(json) => parse_tracker_list(&json),
         None => Vec::new(),
@@ -407,26 +386,20 @@ pub fn open_pr_map_from(prs: &[PrSummary]) -> std::collections::HashMap<u32, u32
 }
 
 pub fn get_tracker_body(tracker: u32) -> String {
-    let num = tracker.to_string();
-    Gh::stdout_or_die(
-        &["issue", "view", &num, "--json", "body", "--jq", ".body"],
-        "failed to read tracker body",
-    )
+    Gh::issue_body_or_die(tracker, "failed to read tracker body")
 }
 
 pub fn check_off_issue(tracker: u32, issue_num: u32) {
     let body = get_tracker_body(tracker);
     let updated = mark_completed(&body, issue_num);
-    let tracker_s = tracker.to_string();
-    if !Gh::run(&["issue", "edit", &tracker_s, "--body", &updated]) {
+    if !Gh::edit_issue_body(tracker, &updated) {
         crate::agent::shell::die(&format!("failed to check off #{issue_num} in tracker"));
     }
     log(&format!("Checked off #{issue_num} in tracker"));
 }
 
 pub fn close_issue(issue_num: u32) {
-    let num_s = issue_num.to_string();
-    if !Gh::run(&["issue", "close", &num_s]) {
+    if !Gh::close_issue(issue_num) {
         log(&format!("WARNING: failed to close #{issue_num}"));
     } else {
         log(&format!("Closed #{issue_num}"));
@@ -440,19 +413,7 @@ pub fn close_issue(issue_num: u32) {
 pub fn find_upstream_branch(blockers: &[u32]) -> String {
     for &blocker in blockers {
         let head = format!("agent/issue-{blocker}");
-        let out = Gh::stdout(&[
-            "pr",
-            "list",
-            "--head",
-            &head,
-            "--state",
-            "open",
-            "--json",
-            "headRefName",
-            "--jq",
-            ".[0].headRefName",
-        ]);
-        if let Some(branch) = out
+        if let Some(branch) = Gh::find_open_pr_head_for_head(&head)
             && !branch.is_empty()
         {
             return branch;
@@ -462,15 +423,9 @@ pub fn find_upstream_branch(blockers: &[u32]) -> String {
 }
 
 pub fn fetch_issue(issue_num: u32) -> (String, String) {
-    let num_s = issue_num.to_string();
-    let title = Gh::stdout_or_die(
-        &["issue", "view", &num_s, "--json", "title", "--jq", ".title"],
-        &format!("failed to fetch issue #{issue_num}"),
-    );
-    let body = Gh::stdout_or_die(
-        &["issue", "view", &num_s, "--json", "body", "--jq", ".body"],
-        &format!("failed to fetch issue #{issue_num}"),
-    );
+    let context = format!("failed to fetch issue #{issue_num}");
+    let title = Gh::issue_title_or_die(issue_num, &context);
+    let body = Gh::issue_body_or_die(issue_num, &context);
     (title, body)
 }
 
@@ -608,50 +563,23 @@ Do NOT commit — the calling script handles commits."#
 /// callers (including context gatherers used in `--dry-run`) treat the PR
 /// list as best-effort context, not a hard dependency.
 pub fn list_open_prs() -> Vec<PrSummary> {
-    let out = Gh::stdout(&[
-        "pr",
-        "list",
-        "--state",
-        "open",
-        "--json",
-        "number,title,headRefName,author",
-        "--limit",
-        "50",
-    ])
-    .unwrap_or_default();
+    let out = Gh::open_pr_summaries_json(50).unwrap_or_default();
     serde_json::from_str(&out).unwrap_or_default()
 }
 
 /// Open pull request number for `head` equal to `branch`, if one exists.
 pub fn open_pr_number_for_head_branch(branch: &str) -> Option<u32> {
-    let out = Gh::stdout(&[
-        "pr",
-        "list",
-        "--head",
-        branch,
-        "--state",
-        "open",
-        "--json",
-        "number",
-        "--jq",
-        ".[0].number // empty",
-    ])?;
-    let s = out.trim();
-    if s.is_empty() {
-        return None;
-    }
-    s.parse().ok()
+    Gh::find_open_pr_number_for_head(branch)
 }
 
 /// Fetch the diff for a single PR.
 pub fn pr_diff(pr_num: u32) -> String {
-    let num_s = pr_num.to_string();
-    Gh::stdout_or_die(&["pr", "diff", &num_s], "failed to fetch PR diff")
+    Gh::pr_diff_or_die(pr_num)
 }
 
 /// Find the open PR for the current branch, if any.
 pub fn current_branch_pr() -> Option<PrSummary> {
-    let out = Gh::stdout(&["pr", "view", "--json", "number,title,headRefName"])?;
+    let out = Gh::current_branch_pr_summary_json()?;
     serde_json::from_str(&out).ok()
 }
 
@@ -664,24 +592,13 @@ fn parse_auto_merge_response(output: Option<String>) -> bool {
 
 /// Check whether auto-merge is currently enabled on a PR.
 pub fn is_auto_merge_enabled(pr_num: u32) -> bool {
-    let num_s = pr_num.to_string();
-    let out = Gh::stdout(&[
-        "pr",
-        "view",
-        &num_s,
-        "--json",
-        "autoMergeRequest",
-        "--jq",
-        ".autoMergeRequest",
-    ]);
-    parse_auto_merge_response(out)
+    parse_auto_merge_response(Gh::pr_auto_merge_status_raw(pr_num))
 }
 
 /// Enable auto-merge (squash) on a PR. Returns true on success.
 pub fn enable_auto_merge(pr_num: u32) -> bool {
-    let num_s = pr_num.to_string();
     log(&format!("Enabling auto-merge on PR #{pr_num}..."));
-    let (ok, output) = Gh::capture(&["pr", "merge", &num_s, "--auto", "--squash"]);
+    let (ok, output) = Gh::enable_pr_auto_merge_squash(pr_num);
     if ok {
         log(&format!("Auto-merge enabled on PR #{pr_num}"));
     } else {
@@ -694,11 +611,7 @@ pub fn enable_auto_merge(pr_num: u32) -> bool {
 
 /// Fetch PR body/description.
 pub fn pr_body(pr_num: u32) -> String {
-    let num_s = pr_num.to_string();
-    Gh::stdout_or_die(
-        &["pr", "view", &num_s, "--json", "body", "--jq", ".body"],
-        "failed to fetch PR body",
-    )
+    Gh::pr_body_or_die(pr_num)
 }
 
 /// Fetch the head branch (ref name) of a pull request.
@@ -707,19 +620,7 @@ pub fn pr_body(pr_num: u32) -> String {
 /// out the right branch into a worktree before launching the agent against
 /// the PR's review threads.
 pub fn pr_head_branch(pr_num: u32) -> String {
-    let num_s = pr_num.to_string();
-    Gh::stdout_or_die(
-        &[
-            "pr",
-            "view",
-            &num_s,
-            "--json",
-            "headRefName",
-            "--jq",
-            ".headRefName",
-        ],
-        "failed to fetch PR head branch",
-    )
+    Gh::pr_head_ref_or_die(pr_num)
 }
 
 /// Current GitHub `reviewDecision` for a PR.
@@ -728,17 +629,7 @@ pub fn pr_head_branch(pr_num: u32) -> String {
 /// an empty string when no reviews have been submitted. Returns `None` if
 /// `gh` is unreachable so callers can decide whether to retry or skip.
 pub fn pr_review_decision(pr_num: u32) -> Option<String> {
-    let num_s = pr_num.to_string();
-    Gh::stdout(&[
-        "pr",
-        "view",
-        &num_s,
-        "--json",
-        "reviewDecision",
-        "--jq",
-        ".reviewDecision // \"\"",
-    ])
-    .map(|s| s.trim().to_string())
+    Gh::pr_review_decision(pr_num).map(|s| s.trim().to_string())
 }
 
 /// One unresolved review thread on a pull request.
@@ -794,59 +685,13 @@ fn has_human_fix_marker(body: &str) -> bool {
 /// Raw JSON from GitHub's `reviewThreads` GraphQL query for `pr_num`, or
 /// `None` when the repo or request cannot be resolved.
 fn pull_request_review_threads_json(pr_num: u32) -> Option<String> {
-    let owner_repo = match Gh::stdout(&[
-        "repo",
-        "view",
-        "--json",
-        "nameWithOwner",
-        "-q",
-        ".nameWithOwner",
-    ]) {
-        Some(s) if !s.is_empty() => s,
-        _ => {
-            log("WARNING: could not resolve owner/repo via `gh repo view`");
-            return None;
-        }
-    };
-    let (owner, repo) = match owner_repo.split_once('/') {
-        Some((o, r)) => (o.to_string(), r.to_string()),
-        None => {
-            log(&format!(
-                "WARNING: unexpected repo identifier '{owner_repo}'"
-            ));
-            return None;
-        }
-    };
-
-    // Leading newline keeps gh from interpreting the value as a file reference.
-    let query = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 100) {\n            nodes {\n              author { login __typename }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
-
-    let pr_num_s = pr_num.to_string();
-    let owner_arg = format!("owner={owner}");
-    let repo_arg = format!("repo={repo}");
-    let number_arg = format!("number={pr_num_s}");
-    let query_arg = format!("query={query}");
-
-    match Gh::stdout(&[
-        "api",
-        "graphql",
-        "-F",
-        &owner_arg,
-        "-F",
-        &repo_arg,
-        "-F",
-        &number_arg,
-        "-f",
-        &query_arg,
-    ]) {
-        Some(s) => Some(s),
-        None => {
-            log(&format!(
-                "WARNING: failed to fetch review threads for PR #{pr_num}"
-            ));
-            None
-        }
+    let out = Gh::fetch_pr_review_threads_json(pr_num);
+    if out.is_none() {
+        log(&format!(
+            "WARNING: failed to fetch review threads for PR #{pr_num}"
+        ));
     }
+    out
 }
 
 /// Fetch all unresolved bot-authored review threads on a PR via the GitHub
@@ -881,15 +726,10 @@ pub fn fetch_all_unresolved_review_threads(pr_num: u32) -> Vec<ReviewThread> {
 
 /// Fetch compact prior PR review summaries for prompt context.
 pub fn fetch_pr_reviews(pr_num: u32) -> Vec<ReviewSummary> {
-    let num_s = pr_num.to_string();
-    Gh::stdout(&["pr", "view", &num_s, "--json", "reviews"])
+    Gh::pr_reviews_json(pr_num)
         .map(|out| parse_pr_reviews(&out))
         .unwrap_or_default()
 }
-
-/// GraphQL mutation that marks one review thread as resolved on a pull
-/// request.
-const RESOLVE_REVIEW_THREAD_MUTATION: &str = "\nmutation($threadId: ID!) {\n  resolveReviewThread(input: {threadId: $threadId}) {\n    thread { id isResolved }\n  }\n}";
 
 /// Phase 3 (#145): mark a single review thread as resolved on GitHub via the
 /// `resolveReviewThread` GraphQL mutation.
@@ -901,9 +741,7 @@ const RESOLVE_REVIEW_THREAD_MUTATION: &str = "\nmutation($threadId: ID!) {\n  re
 /// abort a Fix Comments run — the fix is already pushed; an unresolved
 /// thread is cosmetic.
 pub fn resolve_review_thread(thread_id: &str) -> bool {
-    let thread_arg = format!("threadId={thread_id}");
-    let query_arg = format!("query={RESOLVE_REVIEW_THREAD_MUTATION}");
-    let resp = match Gh::stdout(&["api", "graphql", "-F", &thread_arg, "-f", &query_arg]) {
+    let resp = match Gh::mark_review_thread_resolved(thread_id) {
         Some(r) => r,
         None => {
             log(&format!(
@@ -1209,46 +1047,13 @@ fn cap_review_body(body: &str) -> String {
 /// `repository.pullRequests(states: OPEN, first: 100)` query satisfies that
 /// — N PRs cost one round-trip, not N.
 pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::HashMap<u32, u32> {
-    let owner_repo = match Gh::stdout(&[
-        "repo",
-        "view",
-        "--json",
-        "nameWithOwner",
-        "-q",
-        ".nameWithOwner",
-    ]) {
-        Some(s) if !s.is_empty() => s,
-        _ => {
-            log("WARNING: could not resolve owner/repo via `gh repo view`");
-            return std::collections::HashMap::new();
-        }
-    };
-    let (owner, repo) = match owner_repo.split_once('/') {
-        Some((o, r)) => (o.to_string(), r.to_string()),
-        None => {
-            log(&format!(
-                "WARNING: unexpected repo identifier '{owner_repo}'"
-            ));
-            return std::collections::HashMap::new();
-        }
-    };
-
-    let query = "\nquery($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequests(states: OPEN, first: 100) {\n      nodes {\n        number\n        reviewThreads(first: 100) {\n          nodes {\n            isResolved\n            comments(first: 1) {\n              nodes {\n                author { login __typename }\n                body\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}";
-
-    let owner_arg = format!("owner={owner}");
-    let repo_arg = format!("repo={repo}");
-    let query_arg = format!("query={query}");
-
-    let out = match Gh::stdout(&[
-        "api", "graphql", "-F", &owner_arg, "-F", &repo_arg, "-f", &query_arg,
-    ]) {
+    let out = match Gh::fetch_open_pr_review_threads_batched_json() {
         Some(s) => s,
         None => {
             log("WARNING: failed to fetch open-PR thread counts");
             return std::collections::HashMap::new();
         }
     };
-
     parse_pr_thread_counts(&out, bot_login)
 }
 

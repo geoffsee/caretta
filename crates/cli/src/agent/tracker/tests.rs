@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::gh::RESOLVE_REVIEW_THREAD_MUTATION;
 
 /// #88 / #137: `find_tracker` must return one entry per row in the
 /// `gh issue list --label tracker` JSON, sorted by issue number.
@@ -65,18 +66,18 @@ fn find_tracker_uses_label_filter_not_title_search() {
         .unwrap_or(src.len());
     let body = &src[body_start..body_end];
     assert!(
-        body.contains("\"--label\""),
-        "find_tracker must call gh with --label, body was: {body}"
+        body.contains("open_issue_summaries_with_label_json"),
+        "find_tracker must filter open issues by label via the gh wrapper, body was: {body}"
     );
     assert!(
         body.contains("labels::TRACKER"),
         "find_tracker must filter by labels::TRACKER, body was: {body}"
     );
-    // Defensive: the deprecated title-search path used `--search`
-    // with quoted title keywords. Make sure it's not back.
+    // Defensive: the deprecated title-search path used the title-search
+    // helper on the wrapper. Make sure it's not back.
     assert!(
-        !body.contains("\"--search\""),
-        "find_tracker must not use --search (title-keyword regression)"
+        !body.contains("open_issue_numbers_matching_title"),
+        "find_tracker must not search issue titles (title-keyword regression)"
     );
 }
 

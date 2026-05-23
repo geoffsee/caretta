@@ -1,7 +1,7 @@
 use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_stdout, count_tokens, die, has_command, log, origin_default_branch,
 };
-use crate::agent::gh::Gh;
+use crate::agent::gh::{Gh, PullRequestActions};
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::stop_requested;
 use crate::agent::review::run_issue_pr_review_resume;
@@ -252,18 +252,7 @@ pub fn work_on_issue(cfg: &Config, tracker_num: u32, issue_num: u32, blockers: &
 /// head branch. Idempotent: re-runs of the same issue won't fail just because
 /// the PR is already open.
 pub fn create_pr_if_missing(branch: &str, base: &str, title: &str, body: &str) -> bool {
-    let (ok, existing) = Gh::capture(&[
-        "pr",
-        "list",
-        "--head",
-        branch,
-        "--state",
-        "open",
-        "--json",
-        "url",
-        "-q",
-        ".[0].url // empty",
-    ]);
+    let (ok, existing) = Gh::find_open_pr_url_for_head(branch);
     if ok && !existing.trim().is_empty() {
         log(&format!(
             "PR already open for branch '{branch}': {}",
@@ -271,9 +260,7 @@ pub fn create_pr_if_missing(branch: &str, base: &str, title: &str, body: &str) -
         ));
         return true;
     }
-    if Gh::run(&[
-        "pr", "create", "--head", branch, "--base", base, "--title", title, "--body", body,
-    ]) {
+    if Gh::create_pr(branch, base, title, body) {
         log(&format!(
             "Opened PR for branch '{branch}' against '{base}'."
         ));

@@ -1,7 +1,7 @@
 //! Lineage-aware batch merge for `agent/issue-N` stacked pull requests.
 
 use crate::agent::conflicts::CONFLICT_RESOLUTION_MARKER;
-use crate::agent::gh::Gh;
+use crate::agent::gh::{Gh, PullRequestActions};
 use crate::agent::shell::log;
 use crate::agent::tracker::{
     enable_auto_merge, find_tracker, find_upstream_branch, get_tracker_body, is_auto_merge_enabled,
@@ -44,19 +44,7 @@ struct PrStatusRefresh {
 }
 
 fn gh_list_merge_candidate_prs() -> Vec<GhPrMergeRow> {
-    let out = Gh::stdout_or_die(
-        &[
-            "pr",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "150",
-            "--json",
-            "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
-        ],
-        "failed to list open PRs for auto-merge",
-    );
+    let out = Gh::open_merge_candidate_pr_rows_or_die("failed to list open PRs for auto-merge");
     parse_gh_pr_merge_rows(&out)
 }
 
@@ -255,7 +243,7 @@ fn pr_update_branch(pr_num: u32, dry_run: bool) -> bool {
     log(&format!(
         "Merging latest base into PR #{pr_num} (`gh pr update-branch`)…"
     ));
-    let (ok, out) = Gh::capture(&["pr", "update-branch", &pr_num.to_string()]);
+    let (ok, out) = Gh::update_pr_branch_capture(pr_num);
     if !ok {
         log(&format!(
             "`gh pr update-branch` failed for PR #{pr_num}: {out}"
@@ -292,17 +280,8 @@ Please merge `{expected_base_branch}` into `{head}`, resolve the conflicts, run 
 }
 
 fn conflict_marker_already_present(pr_num: u32) -> bool {
-    let num_s = pr_num.to_string();
-    Gh::stdout(&[
-        "pr",
-        "view",
-        &num_s,
-        "--json",
-        "comments",
-        "--jq",
-        ".comments[].body",
-    ])
-    .is_some_and(|comments| comments.contains(CONFLICT_RESOLUTION_MARKER))
+    Gh::pr_comment_bodies(pr_num)
+        .is_some_and(|comments| comments.contains(CONFLICT_RESOLUTION_MARKER))
 }
 
 fn post_conflict_resolution_marker(
@@ -328,8 +307,7 @@ fn post_conflict_resolution_marker(
         return true;
     }
 
-    let num_s = row.number.to_string();
-    let (ok, out) = Gh::capture(&["pr", "comment", &num_s, "--body", &body]);
+    let (ok, out) = Gh::comment_on_pr(row.number, &body);
     if ok {
         log(&format!(
             "Posted caretta conflict-resolution marker on PR #{}.",
@@ -354,7 +332,7 @@ fn retarget_pull_base(pr_num: u32, new_base: &str, dry_run: bool) -> bool {
     log(&format!(
         "Retargeting PR #{pr_num} to merge into '{new_base}'…"
     ));
-    Gh::run(&["pr", "edit", &pr_num.to_string(), "--base", new_base])
+    Gh::edit_pr_base(pr_num, new_base)
 }
 
 fn merge_pull_squash(pr_num: u32, dry_run: bool) -> bool {
@@ -363,7 +341,7 @@ fn merge_pull_squash(pr_num: u32, dry_run: bool) -> bool {
         return true;
     }
     log(&format!("Squash-merge PR #{pr_num}…"));
-    let (ok, out) = Gh::capture(&["pr", "merge", &pr_num.to_string(), "--squash"]);
+    let (ok, out) = Gh::merge_pr_squash(pr_num);
     if !ok {
         log(&format!("Merge failed for PR #{pr_num}: {out}"));
     }
@@ -443,16 +421,7 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
         if cfg.dry_run {
             log("[dry-run] Listing open PRs (read-only)");
         }
-        match Gh::stdout(&[
-            "pr",
-            "list",
-            "--state",
-            "open",
-            "--limit",
-            "150",
-            "--json",
-            "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
-        ]) {
+        match Gh::try_open_merge_candidate_pr_rows() {
             Some(raw) => parse_gh_pr_merge_rows(&raw),
             None => Vec::new(),
         }
@@ -550,29 +519,12 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
         if cfg.dry_run && needs_retarget {
             row_snapshot.base_ref.clone_from(&expected_base_branch);
         } else {
-            let num_s = row_snapshot.number.to_string();
-            if let Some(b) = Gh::stdout(&[
-                "pr",
-                "view",
-                &num_s,
-                "--json",
-                "baseRefName",
-                "--jq",
-                ".baseRefName",
-            ])
-            .filter(|s| !s.trim().is_empty())
-            {
+            if let Some(b) = Gh::pr_base_ref(row_snapshot.number).filter(|s| !s.trim().is_empty()) {
                 row_snapshot.base_ref = b.trim().to_owned();
             }
 
-            let out = Gh::stdout(&[
-                "pr",
-                "view",
-                &num_s,
-                "--json",
-                "mergeStateStatus,reviewDecision,isDraft",
-            ]);
-            if let Some(json) = out.filter(|s| !s.trim().is_empty())
+            if let Some(json) =
+                Gh::pr_status_refresh_json(row_snapshot.number).filter(|s| !s.trim().is_empty())
                 && let Ok(partial) = serde_json::from_str::<PrStatusRefresh>(&json)
             {
                 row_snapshot.merge_state_status = partial.merge_state_status;
