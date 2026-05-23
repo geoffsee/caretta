@@ -22,7 +22,9 @@
 use crate::agent::cmd::{cmd_run, cmd_stdout, log};
 use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
-use crate::agent::platform::PullRequestActions;
+use crate::agent::platform::{
+    ApprovalGate, IntegrationReadiness, PrDiagnostic, PullRequestActions,
+};
 use crate::agent::process::emit_event;
 use crate::agent::review::{
     commit_and_push_worktree_changes, run_pr_review_fix, setup_pr_worktree,
@@ -144,59 +146,51 @@ impl CheckStatus {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct PrViewJson {
-    #[serde(default)]
-    number: Option<u32>,
-    #[serde(default)]
-    title: Option<String>,
-    #[serde(default, rename = "headRefName")]
-    head_ref: Option<String>,
-    #[serde(default, rename = "baseRefName")]
-    base_ref: Option<String>,
-    #[serde(default, rename = "isDraft")]
-    is_draft: Option<bool>,
-    #[serde(default, rename = "mergeStateStatus")]
-    merge_state_status: Option<String>,
-    #[serde(default, rename = "reviewDecision")]
-    review_decision: Option<String>,
-    #[serde(default, rename = "statusCheckRollup")]
-    status_check_rollup: Option<Vec<CheckStatus>>,
-}
-
-/// Parse the JSON returned by
-/// `gh pr view <N> --json number,title,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup`
-/// into a [`PrFixDiagnostic`]. `unresolved_bot_thread_count` is supplied
-/// separately (the threads query uses GraphQL, not the REST-shaped `pr view`).
-///
-/// Returns `None` if the JSON itself is malformed; missing fields default to
-/// empty/false so a partially populated payload still produces a usable
-/// diagnostic.
-pub fn parse_pr_view_json(
-    json: &str,
+pub fn build_pr_fix_diagnostic(
+    view: PrDiagnostic,
     unresolved_bot_thread_count: usize,
-) -> Option<PrFixDiagnostic> {
-    let v: PrViewJson = serde_json::from_str(json).ok()?;
-    let rollup = v.status_check_rollup.unwrap_or_default();
+) -> PrFixDiagnostic {
+    let rollup = view
+        .status_check_rollup
+        .into_iter()
+        .map(|c| CheckStatus {
+            typename: c.typename,
+            name: c.name,
+            context: c.context,
+            state: c.state,
+            conclusion: c.conclusion,
+            status: c.status,
+            target_url: c.target_url,
+            details_url: c.details_url,
+        })
+        .collect::<Vec<_>>();
     let (failing_checks, rest): (Vec<_>, Vec<_>) = rollup.into_iter().partition(|c| c.is_failing());
     let pending_checks = rest.into_iter().filter(|c| c.is_pending()).collect();
-    let head_behind_base = v
-        .merge_state_status
-        .as_deref()
-        .is_some_and(|s| s.eq_ignore_ascii_case("BEHIND"));
-    Some(PrFixDiagnostic {
-        number: v.number.unwrap_or(0),
-        title: v.title.unwrap_or_default(),
-        head_branch: v.head_ref.unwrap_or_default(),
-        base_branch: v.base_ref.unwrap_or_default(),
-        is_draft: v.is_draft.unwrap_or(false),
-        merge_state: v.merge_state_status,
-        review_decision: v.review_decision,
+    let head_behind_base = matches!(
+        view.integration_readiness,
+        Some(IntegrationReadiness::Behind)
+    );
+    PrFixDiagnostic {
+        number: view.number,
+        title: view.title,
+        head_branch: view.head_ref,
+        base_branch: view.base_ref,
+        is_draft: view.is_draft,
+        merge_state: view
+            .integration_readiness
+            .map(|v| format!("{v:?}").to_ascii_uppercase()),
+        review_decision: view.approval_gate.map(|v| match v {
+            ApprovalGate::Approved => "APPROVED".to_string(),
+            ApprovalGate::ChangesRequested => "CHANGES_REQUESTED".to_string(),
+            ApprovalGate::ReviewRequired => "REVIEW_REQUIRED".to_string(),
+            ApprovalGate::None => String::new(),
+            ApprovalGate::Unknown(s) => s,
+        }),
         failing_checks,
         pending_checks,
         unresolved_bot_thread_count,
         head_behind_base,
-    })
+    }
 }
 
 /// True when `origin/{base}` has commits not on `origin/{head}` — i.e. the
@@ -221,9 +215,9 @@ fn head_is_behind_base_via_git(head_branch: &str, base_branch: &str) -> bool {
 }
 
 fn diagnose_pr(pr_num: u32) -> Option<PrFixDiagnostic> {
-    let raw = Gh::pr_diagnostic_json(pr_num)?;
+    let view = Gh::pr_diagnostic(pr_num)?;
     let thread_count = fetch_unresolved_review_threads(pr_num, DEFAULT_REVIEW_BOT_LOGIN).len();
-    let mut diag = parse_pr_view_json(&raw, thread_count)?;
+    let mut diag = build_pr_fix_diagnostic(view, thread_count);
 
     // GitHub computes mergeStateStatus asynchronously; a freshly-opened PR
     // (or one whose mergeability check is stuck) can report UNKNOWN/empty
@@ -639,18 +633,40 @@ mod tests {
     }
 
     #[test]
-    fn parse_pr_view_json_sets_head_behind_base_for_behind() {
-        let json = r#"{"mergeStateStatus": "BEHIND"}"#;
-        let diag = parse_pr_view_json(json, 0).expect("parse");
+    fn build_pr_fix_diagnostic_sets_head_behind_base_for_behind() {
+        let diag = build_pr_fix_diagnostic(
+            PrDiagnostic {
+                number: 0,
+                title: String::new(),
+                head_ref: String::new(),
+                base_ref: String::new(),
+                is_draft: false,
+                integration_readiness: Some(IntegrationReadiness::Behind),
+                approval_gate: None,
+                status_check_rollup: Vec::new(),
+            },
+            0,
+        );
         assert!(diag.head_behind_base);
     }
 
     #[test]
-    fn parse_pr_view_json_leaves_head_behind_base_false_for_unknown() {
+    fn build_pr_fix_diagnostic_leaves_head_behind_base_false_for_unknown() {
         // Without git ancestry data, the pure parser can't decide — that
         // overlay is applied by `diagnose_pr`. Pure parser keeps `false` here.
-        let json = r#"{"mergeStateStatus": "UNKNOWN"}"#;
-        let diag = parse_pr_view_json(json, 0).expect("parse");
+        let diag = build_pr_fix_diagnostic(
+            PrDiagnostic {
+                number: 0,
+                title: String::new(),
+                head_ref: String::new(),
+                base_ref: String::new(),
+                is_draft: false,
+                integration_readiness: Some(IntegrationReadiness::Unknown("UNKNOWN".to_string())),
+                approval_gate: None,
+                status_check_rollup: Vec::new(),
+            },
+            0,
+        );
         assert!(!diag.head_behind_base);
     }
 
@@ -675,21 +691,29 @@ mod tests {
     }
 
     #[test]
-    fn parse_pr_view_json_extracts_full_state() {
-        // Shaped like real `gh pr view --json …` output for the PR #141 case.
-        let json = r#"{
-            "number": 141,
-            "title": "implement #135",
-            "headRefName": "agent/issue-135",
-            "baseRefName": "main",
-            "isDraft": false,
-            "mergeStateStatus": "BEHIND",
-            "reviewDecision": "APPROVED",
-            "statusCheckRollup": [
-                {"__typename": "StatusContext", "context": "Test", "state": "PENDING", "targetUrl": ""}
-            ]
-        }"#;
-        let diag = parse_pr_view_json(json, 0).expect("parse");
+    fn build_pr_fix_diagnostic_extracts_full_state() {
+        let diag = build_pr_fix_diagnostic(
+            PrDiagnostic {
+                number: 141,
+                title: "implement #135".to_string(),
+                head_ref: "agent/issue-135".to_string(),
+                base_ref: "main".to_string(),
+                is_draft: false,
+                integration_readiness: Some(IntegrationReadiness::Behind),
+                approval_gate: Some(ApprovalGate::Approved),
+                status_check_rollup: vec![crate::agent::platform::PlatformCheckStatus {
+                    typename: Some("StatusContext".to_string()),
+                    name: None,
+                    context: Some("Test".to_string()),
+                    state: Some("PENDING".to_string()),
+                    conclusion: None,
+                    status: None,
+                    target_url: Some(String::new()),
+                    details_url: None,
+                }],
+            },
+            0,
+        );
         assert_eq!(diag.number, 141);
         assert_eq!(diag.head_branch, "agent/issue-135");
         assert_eq!(diag.base_branch, "main");
@@ -703,21 +727,41 @@ mod tests {
     }
 
     #[test]
-    fn parse_pr_view_json_with_failing_check_run() {
-        let json = r#"{
-            "number": 200,
-            "title": "x",
-            "headRefName": "agent/issue-200",
-            "baseRefName": "main",
-            "isDraft": false,
-            "mergeStateStatus": "CLEAN",
-            "reviewDecision": "",
-            "statusCheckRollup": [
-                {"__typename": "CheckRun", "name": "Test", "conclusion": "FAILURE", "status": "COMPLETED", "detailsUrl": "https://example/run/123"},
-                {"__typename": "CheckRun", "name": "Lint", "conclusion": "SUCCESS", "status": "COMPLETED"}
-            ]
-        }"#;
-        let diag = parse_pr_view_json(json, 0).expect("parse");
+    fn build_pr_fix_diagnostic_with_failing_check_run() {
+        let diag = build_pr_fix_diagnostic(
+            PrDiagnostic {
+                number: 200,
+                title: "x".to_string(),
+                head_ref: "agent/issue-200".to_string(),
+                base_ref: "main".to_string(),
+                is_draft: false,
+                integration_readiness: Some(IntegrationReadiness::Clean),
+                approval_gate: Some(ApprovalGate::None),
+                status_check_rollup: vec![
+                    crate::agent::platform::PlatformCheckStatus {
+                        typename: Some("CheckRun".to_string()),
+                        name: Some("Test".to_string()),
+                        context: None,
+                        state: None,
+                        conclusion: Some("FAILURE".to_string()),
+                        status: Some("COMPLETED".to_string()),
+                        target_url: None,
+                        details_url: Some("https://example/run/123".to_string()),
+                    },
+                    crate::agent::platform::PlatformCheckStatus {
+                        typename: Some("CheckRun".to_string()),
+                        name: Some("Lint".to_string()),
+                        context: None,
+                        state: None,
+                        conclusion: Some("SUCCESS".to_string()),
+                        status: Some("COMPLETED".to_string()),
+                        target_url: None,
+                        details_url: None,
+                    },
+                ],
+            },
+            0,
+        );
         assert_eq!(diag.failing_checks.len(), 1);
         assert_eq!(diag.failing_checks[0].display_name(), "Test");
         assert_eq!(
@@ -728,9 +772,20 @@ mod tests {
     }
 
     #[test]
-    fn parse_pr_view_json_tolerates_missing_optional_fields() {
-        let json = r#"{}"#;
-        let diag = parse_pr_view_json(json, 5).expect("parse");
+    fn build_pr_fix_diagnostic_tolerates_missing_optional_fields() {
+        let diag = build_pr_fix_diagnostic(
+            PrDiagnostic {
+                number: 0,
+                title: String::new(),
+                head_ref: String::new(),
+                base_ref: String::new(),
+                is_draft: false,
+                integration_readiness: None,
+                approval_gate: None,
+                status_check_rollup: Vec::new(),
+            },
+            5,
+        );
         assert_eq!(diag.number, 0);
         assert_eq!(diag.head_branch, "");
         assert!(!diag.is_draft);

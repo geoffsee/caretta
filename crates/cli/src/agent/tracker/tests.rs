@@ -1,15 +1,118 @@
 use super::*;
 use crate::agent::gh::RESOLVE_REVIEW_THREAD_MUTATION;
 
+fn review_threads_from_graphql_fixture(json: &str) -> Vec<crate::agent::platform::PrReviewThread> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let nodes = v
+        .pointer("/data/repository/pullRequest/reviewThreads/nodes")
+        .and_then(|n| n.as_array())
+        .cloned()
+        .unwrap_or_default();
+    nodes
+        .into_iter()
+        .map(|thread| {
+            let comments = thread
+                .pointer("/comments/nodes")
+                .and_then(|n| n.as_array())
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|c| crate::agent::platform::PrReviewThreadComment {
+                    author_login: c
+                        .pointer("/author/login")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                    author_type: c
+                        .pointer("/author/__typename")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned),
+                    path: c
+                        .get("path")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned),
+                    line: c
+                        .get("line")
+                        .and_then(serde_json::Value::as_u64)
+                        .map(|n| n as u32),
+                    original_line: c
+                        .get("originalLine")
+                        .and_then(serde_json::Value::as_u64)
+                        .map(|n| n as u32),
+                    body: c
+                        .get("body")
+                        .and_then(serde_json::Value::as_str)
+                        .unwrap_or("")
+                        .to_string(),
+                })
+                .collect();
+            crate::agent::platform::PrReviewThread {
+                id: thread
+                    .get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .to_string(),
+                is_resolved: thread
+                    .get("isResolved")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false),
+                comments,
+            }
+        })
+        .collect()
+}
+
+fn reviews_from_fixture(json: &str) -> Vec<crate::agent::platform::PrReviewSummaryRecord> {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    v.get("reviews")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|review| crate::agent::platform::PrReviewSummaryRecord {
+            author_login: review
+                .pointer("/author/login")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            state: review
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            submitted_at: review
+                .get("submittedAt")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            body: review
+                .get("body")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        })
+        .collect()
+}
+
 /// #88 / #137: `find_tracker` must return one entry per row in the
 /// `gh issue list --label tracker` JSON, sorted by issue number.
 #[test]
 fn parse_tracker_list_extracts_number_and_title() {
-    let json = r#"[
-            {"number": 102, "title": "Agents: behavior, skills, and issue hygiene"},
-            {"number": 14, "title": "Sprint 1 Tracker"}
-        ]"#;
-    let trackers = parse_tracker_list(json);
+    let rows = vec![
+        crate::agent::platform::IssueSummary {
+            number: 102,
+            title: "Agents: behavior, skills, and issue hygiene".to_string(),
+        },
+        crate::agent::platform::IssueSummary {
+            number: 14,
+            title: "Sprint 1 Tracker".to_string(),
+        },
+    ];
+    let trackers = parse_tracker_list(&rows);
     assert_eq!(trackers.len(), 2);
     // Sorted ascending by number, regardless of input order.
     assert_eq!(trackers[0].number, 14);
@@ -25,12 +128,21 @@ fn parse_tracker_list_extracts_number_and_title() {
 /// label paging quirks that have surfaced doubles).
 #[test]
 fn parse_tracker_list_dedupes_repeated_numbers() {
-    let json = r#"[
-            {"number": 5, "title": "tracker A"},
-            {"number": 5, "title": "tracker A"},
-            {"number": 7, "title": "tracker B"}
-        ]"#;
-    let trackers = parse_tracker_list(json);
+    let rows = vec![
+        crate::agent::platform::IssueSummary {
+            number: 5,
+            title: "tracker A".to_string(),
+        },
+        crate::agent::platform::IssueSummary {
+            number: 5,
+            title: "tracker A".to_string(),
+        },
+        crate::agent::platform::IssueSummary {
+            number: 7,
+            title: "tracker B".to_string(),
+        },
+    ];
+    let trackers = parse_tracker_list(&rows);
     assert_eq!(trackers.len(), 2);
     assert_eq!(trackers[0].number, 5);
     assert_eq!(trackers[1].number, 7);
@@ -40,8 +152,7 @@ fn parse_tracker_list_dedupes_repeated_numbers() {
 /// than panicking.
 #[test]
 fn parse_tracker_list_handles_empty_input() {
-    assert!(parse_tracker_list("[]").is_empty());
-    assert!(parse_tracker_list("").is_empty());
+    assert!(parse_tracker_list(&[]).is_empty());
 }
 
 /// #88 / #137: regression guard for the title-keyword bug. Before
@@ -66,7 +177,7 @@ fn find_tracker_uses_label_filter_not_title_search() {
         .unwrap_or(src.len());
     let body = &src[body_start..body_end];
     assert!(
-        body.contains("open_issue_summaries_with_label_json"),
+        body.contains("open_issue_summaries_with_label"),
         "find_tracker must filter open issues by label via the gh wrapper, body was: {body}"
     );
     assert!(
@@ -407,62 +518,94 @@ fn pr_summary_unresolved_thread_count_defaults_to_zero() {
 /// Fix Comments dispatch would actually act on.
 #[test]
 fn parse_pr_thread_counts_filters_resolved_and_human_authors() {
-    let json = r#"{
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 143,
-                                "reviewThreads": {
-                                    "nodes": [
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{"author": {"login": "llm-overlord"}}]}
-                                        },
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{"author": {"login": "llm-overlord"}}]}
-                                        },
-                                        {
-                                            "isResolved": true,
-                                            "comments": {"nodes": [{"author": {"login": "llm-overlord"}}]}
-                                        },
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{"author": {"login": "geoffsee"}}]}
-                                        }
-                                    ]
-                                }
-                            },
-                            {
-                                "number": 144,
-                                "reviewThreads": {
-                                    "nodes": [
-                                        {
-                                            "isResolved": true,
-                                            "comments": {"nodes": [{"author": {"login": "llm-overlord"}}]}
-                                        }
-                                    ]
-                                }
-                            },
-                            {
-                                "number": 145,
-                                "reviewThreads": {
-                                    "nodes": [
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{"author": {"login": "dependabot[bot]"}}]}
-                                        }
-                                    ]
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }"#;
-    let counts = parse_pr_thread_counts(json, "llm-overlord");
+    let counts = parse_pr_thread_counts(
+        &[
+            crate::agent::platform::OpenPrReviewThreads {
+                pr_number: 143,
+                review_threads: vec![
+                    crate::agent::platform::PrReviewThread {
+                        id: "t1".to_string(),
+                        is_resolved: false,
+                        comments: vec![crate::agent::platform::PrReviewThreadComment {
+                            author_login: "llm-overlord".to_string(),
+                            author_type: None,
+                            path: None,
+                            line: None,
+                            original_line: None,
+                            body: String::new(),
+                        }],
+                    },
+                    crate::agent::platform::PrReviewThread {
+                        id: "t2".to_string(),
+                        is_resolved: false,
+                        comments: vec![crate::agent::platform::PrReviewThreadComment {
+                            author_login: "llm-overlord".to_string(),
+                            author_type: None,
+                            path: None,
+                            line: None,
+                            original_line: None,
+                            body: String::new(),
+                        }],
+                    },
+                    crate::agent::platform::PrReviewThread {
+                        id: "t3".to_string(),
+                        is_resolved: true,
+                        comments: vec![crate::agent::platform::PrReviewThreadComment {
+                            author_login: "llm-overlord".to_string(),
+                            author_type: None,
+                            path: None,
+                            line: None,
+                            original_line: None,
+                            body: String::new(),
+                        }],
+                    },
+                    crate::agent::platform::PrReviewThread {
+                        id: "t4".to_string(),
+                        is_resolved: false,
+                        comments: vec![crate::agent::platform::PrReviewThreadComment {
+                            author_login: "geoffsee".to_string(),
+                            author_type: None,
+                            path: None,
+                            line: None,
+                            original_line: None,
+                            body: String::new(),
+                        }],
+                    },
+                ],
+            },
+            crate::agent::platform::OpenPrReviewThreads {
+                pr_number: 144,
+                review_threads: vec![crate::agent::platform::PrReviewThread {
+                    id: "t5".to_string(),
+                    is_resolved: true,
+                    comments: vec![crate::agent::platform::PrReviewThreadComment {
+                        author_login: "llm-overlord".to_string(),
+                        author_type: None,
+                        path: None,
+                        line: None,
+                        original_line: None,
+                        body: String::new(),
+                    }],
+                }],
+            },
+            crate::agent::platform::OpenPrReviewThreads {
+                pr_number: 145,
+                review_threads: vec![crate::agent::platform::PrReviewThread {
+                    id: "t6".to_string(),
+                    is_resolved: false,
+                    comments: vec![crate::agent::platform::PrReviewThreadComment {
+                        author_login: "dependabot[bot]".to_string(),
+                        author_type: None,
+                        path: None,
+                        line: None,
+                        original_line: None,
+                        body: String::new(),
+                    }],
+                }],
+            },
+        ],
+        "llm-overlord",
+    );
 
     // PR #143: 4 threads total, but only 2 are unresolved AND bot-authored.
     assert_eq!(counts.get(&143), Some(&2));
@@ -477,38 +620,38 @@ fn parse_pr_thread_counts_filters_resolved_and_human_authors() {
 /// the sidebar badge does not under-report human opt-in threads.
 #[test]
 fn parse_pr_thread_counts_accepts_human_with_fix_marker() {
-    let json = r#"{
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 99,
-                                "reviewThreads": {
-                                    "nodes": [
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{
-                                                "author": {"login": "geoffsee", "__typename": "User"},
-                                                "body": "@caretta fix: please rename this"
-                                            }]}
-                                        },
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{
-                                                "author": {"login": "geoffsee", "__typename": "User"},
-                                                "body": "thoughts?"
-                                            }]}
-                                        }
-                                    ]
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }"#;
-    let counts = parse_pr_thread_counts(json, "llm-overlord");
+    let counts = parse_pr_thread_counts(
+        &[crate::agent::platform::OpenPrReviewThreads {
+            pr_number: 99,
+            review_threads: vec![
+                crate::agent::platform::PrReviewThread {
+                    id: "h1".to_string(),
+                    is_resolved: false,
+                    comments: vec![crate::agent::platform::PrReviewThreadComment {
+                        author_login: "geoffsee".to_string(),
+                        author_type: Some("User".to_string()),
+                        path: None,
+                        line: None,
+                        original_line: None,
+                        body: "@caretta fix: please rename this".to_string(),
+                    }],
+                },
+                crate::agent::platform::PrReviewThread {
+                    id: "h2".to_string(),
+                    is_resolved: false,
+                    comments: vec![crate::agent::platform::PrReviewThreadComment {
+                        author_login: "geoffsee".to_string(),
+                        author_type: Some("User".to_string()),
+                        path: None,
+                        line: None,
+                        original_line: None,
+                        body: "thoughts?".to_string(),
+                    }],
+                },
+            ],
+        }],
+        "llm-overlord",
+    );
     assert_eq!(counts.get(&99), Some(&1));
 }
 
@@ -517,32 +660,38 @@ fn parse_pr_thread_counts_accepts_human_with_fix_marker() {
 /// threads or the badge under-reports for App-installation reviewers.
 #[test]
 fn parse_pr_thread_counts_accepts_bot_typename() {
-    let json = r#"{
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 77,
-                                "reviewThreads": {
-                                    "nodes": [
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{"author": {"login": "caretta-ai", "__typename": "Bot"}}]}
-                                        },
-                                        {
-                                            "isResolved": false,
-                                            "comments": {"nodes": [{"author": {"login": "caretta-ai", "__typename": "Bot"}}]}
-                                        }
-                                    ]
-                                }
-                            }
-                        ]
-                    }
-                }
-            }
-        }"#;
-    let counts = parse_pr_thread_counts(json, "llm-overlord");
+    let counts = parse_pr_thread_counts(
+        &[crate::agent::platform::OpenPrReviewThreads {
+            pr_number: 77,
+            review_threads: vec![
+                crate::agent::platform::PrReviewThread {
+                    id: "b1".to_string(),
+                    is_resolved: false,
+                    comments: vec![crate::agent::platform::PrReviewThreadComment {
+                        author_login: "caretta-ai".to_string(),
+                        author_type: Some("Bot".to_string()),
+                        path: None,
+                        line: None,
+                        original_line: None,
+                        body: String::new(),
+                    }],
+                },
+                crate::agent::platform::PrReviewThread {
+                    id: "b2".to_string(),
+                    is_resolved: false,
+                    comments: vec![crate::agent::platform::PrReviewThreadComment {
+                        author_login: "caretta-ai".to_string(),
+                        author_type: Some("Bot".to_string()),
+                        path: None,
+                        line: None,
+                        original_line: None,
+                        body: String::new(),
+                    }],
+                },
+            ],
+        }],
+        "llm-overlord",
+    );
     assert_eq!(counts.get(&77), Some(&2));
 }
 
@@ -550,21 +699,13 @@ fn parse_pr_thread_counts_accepts_bot_typename() {
 /// must NOT appear in the map — callers treat absence as zero.
 #[test]
 fn parse_pr_thread_counts_omits_zero_count_prs() {
-    let json = r#"{
-            "data": {
-                "repository": {
-                    "pullRequests": {
-                        "nodes": [
-                            {
-                                "number": 200,
-                                "reviewThreads": {"nodes": []}
-                            }
-                        ]
-                    }
-                }
-            }
-        }"#;
-    let counts = parse_pr_thread_counts(json, "llm-overlord");
+    let counts = parse_pr_thread_counts(
+        &[crate::agent::platform::OpenPrReviewThreads {
+            pr_number: 200,
+            review_threads: vec![],
+        }],
+        "llm-overlord",
+    );
     assert!(counts.is_empty());
 }
 
@@ -572,23 +713,7 @@ fn parse_pr_thread_counts_omits_zero_count_prs() {
 /// not a panic.
 #[test]
 fn parse_pr_thread_counts_handles_empty_response() {
-    let json = r#"{
-            "data": {
-                "repository": {
-                    "pullRequests": {"nodes": []}
-                }
-            }
-        }"#;
-    assert!(parse_pr_thread_counts(json, "llm-overlord").is_empty());
-}
-
-/// Malformed JSON / unrelated payloads return an empty map without
-/// panicking — Phase 4 must NOT crash refresh on a parse error.
-#[test]
-fn parse_pr_thread_counts_survives_garbage() {
-    assert!(parse_pr_thread_counts("not json", "llm-overlord").is_empty());
-    assert!(parse_pr_thread_counts("", "llm-overlord").is_empty());
-    assert!(parse_pr_thread_counts("{}", "llm-overlord").is_empty());
+    assert!(parse_pr_thread_counts(&[], "llm-overlord").is_empty());
 }
 
 // ── Prompt builder: issue implementation ──
@@ -1528,7 +1653,7 @@ fn parse_review_threads_filters_resolved_and_human_authors() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].id, "PRT_kw1");
     assert_eq!(threads[0].path, "test-review-fixture.md");
@@ -1573,7 +1698,7 @@ fn parse_review_threads_keeps_all_comments_in_actionable_thread() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].author, "llm-overlord");
     assert_eq!(threads[0].body, "Item 5 is incorrect.");
@@ -1602,7 +1727,7 @@ fn parse_pr_reviews_extracts_compact_review_summaries() {
                 }
             ]
         }"#;
-    let reviews = parse_pr_reviews(json);
+    let reviews = parse_pr_reviews(&reviews_from_fixture(json));
     assert_eq!(reviews.len(), 2);
     assert_eq!(reviews[0].author, "alice");
     assert_eq!(reviews[0].state, "APPROVED");
@@ -1674,7 +1799,7 @@ fn parse_all_unresolved_review_threads_includes_human_authors_without_marker() {
                 }
             }
         }"#;
-    let threads = parse_all_unresolved_review_threads(json);
+    let threads = parse_all_unresolved_review_threads(&review_threads_from_graphql_fixture(json));
     assert_eq!(threads.len(), 2);
     assert_eq!(threads[0].id, "PRT_kw1");
     assert_eq!(threads[1].id, "PRT_kw3");
@@ -1714,7 +1839,7 @@ fn parse_review_threads_accepts_bracket_bot_suffix() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].author, "dependabot[bot]");
 }
@@ -1764,7 +1889,7 @@ fn parse_review_threads_accepts_human_with_fix_marker() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].id, "PRT_human_opt_in");
     assert_eq!(threads[0].author, "geoffsee");
@@ -1800,7 +1925,7 @@ fn parse_review_threads_marker_is_case_insensitive() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
 }
 
@@ -1837,7 +1962,7 @@ fn parse_review_threads_accepts_bot_typename() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].author, "caretta-ai");
 }
@@ -1874,7 +1999,7 @@ fn parse_review_threads_falls_back_to_original_line() {
                 }
             }
         }"#;
-    let threads = parse_review_threads(json, "llm-overlord");
+    let threads = parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord");
     assert_eq!(threads.len(), 1);
     assert_eq!(threads[0].line, 42);
 }
@@ -1894,15 +2019,25 @@ fn parse_review_threads_handles_empty_response() {
                 }
             }
         }"#;
-    assert!(parse_review_threads(json, "llm-overlord").is_empty());
+    assert!(
+        parse_review_threads(&review_threads_from_graphql_fixture(json), "llm-overlord").is_empty()
+    );
 }
 
 /// Malformed JSON must not panic — the function logs a warning and
 /// returns an empty Vec so the calling Fix run can bail cleanly.
 #[test]
 fn parse_review_threads_survives_malformed_json() {
-    assert!(parse_review_threads("not json at all", "llm-overlord").is_empty());
-    assert!(parse_review_threads("", "llm-overlord").is_empty());
+    assert!(
+        parse_review_threads(
+            &review_threads_from_graphql_fixture("not json at all"),
+            "llm-overlord"
+        )
+        .is_empty()
+    );
+    assert!(
+        parse_review_threads(&review_threads_from_graphql_fixture(""), "llm-overlord").is_empty()
+    );
 }
 
 // ── Phase 3: resolveReviewThread mutation parser (#145) ──

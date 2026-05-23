@@ -2,7 +2,9 @@
 
 use crate::agent::conflicts::CONFLICT_RESOLUTION_MARKER;
 use crate::agent::gh::Gh;
-use crate::agent::platform::PullRequestActions;
+use crate::agent::platform::{
+    ApprovalGate, IntegrationReadiness, OpenMergeCandidatePr, PullRequestActions,
+};
 use crate::agent::shell::log;
 use crate::agent::tracker::{
     enable_auto_merge, find_tracker, find_upstream_branch, get_tracker_body, is_auto_merge_enabled,
@@ -11,42 +13,10 @@ use crate::agent::tracker::{
 use crate::agent::types::{BRANCH_PREFIX, Config};
 use std::collections::{HashMap, HashSet, VecDeque};
 
-#[derive(Clone, Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct GhPrMergeRow {
-    number: u32,
-    #[serde(rename = "headRefName")]
-    head_ref: String,
-    #[serde(rename = "baseRefName")]
-    base_ref: String,
-    is_draft: bool,
-    merge_state_status: Option<String>,
-    review_decision: Option<String>,
-}
-
-fn parse_gh_pr_merge_rows(raw: &str) -> Vec<GhPrMergeRow> {
-    match serde_json::from_str(raw) {
-        Ok(rows) => rows,
-        Err(err) => {
-            log(&format!(
-                "auto-merge (lineage): failed to parse `gh pr list` output: {err}"
-            ));
-            Vec::new()
-        }
-    }
-}
-
-#[derive(Clone, Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PrStatusRefresh {
-    merge_state_status: Option<String>,
-    review_decision: Option<String>,
-    is_draft: bool,
-}
+pub(crate) type GhPrMergeRow = OpenMergeCandidatePr;
 
 fn gh_list_merge_candidate_prs() -> Vec<GhPrMergeRow> {
-    let out = Gh::open_merge_candidate_pr_rows_or_die("failed to list open PRs for auto-merge");
-    parse_gh_pr_merge_rows(&out)
+    Gh::open_merge_candidate_prs_or_die("failed to list open PRs for auto-merge")
 }
 
 fn issue_num_from_agent_head(branch: &str) -> Option<u32> {
@@ -198,33 +168,20 @@ fn eligible_for_immediate_merge(row: &GhPrMergeRow) -> bool {
     if row.is_draft {
         return false;
     }
-    if matches!(
-        row.merge_state_status.as_deref(),
-        Some(s) if s.eq_ignore_ascii_case("DIRTY")
-    ) {
+    if matches!(row.integration_readiness, Some(IntegrationReadiness::Dirty)) {
         return false;
     }
-    matches!(
-        row.review_decision.as_deref(),
-        Some(d) if d.trim().eq_ignore_ascii_case("APPROVED")
-    )
+    matches!(row.approval_gate, Some(ApprovalGate::Approved))
 }
 
 /// Approved, non-draft rows — may still be `DIRTY` until `gh pr update-branch`
 /// merges the latest base.
 fn eligible_for_automerge_queue(row: &GhPrMergeRow) -> bool {
-    !row.is_draft
-        && matches!(
-            row.review_decision.as_deref(),
-            Some(d) if d.trim().eq_ignore_ascii_case("APPROVED")
-        )
+    !row.is_draft && matches!(row.approval_gate, Some(ApprovalGate::Approved))
 }
 
 fn is_dirty(row: &GhPrMergeRow) -> bool {
-    matches!(
-        row.merge_state_status.as_deref(),
-        Some(s) if s.eq_ignore_ascii_case("DIRTY")
-    )
+    matches!(row.integration_readiness, Some(IntegrationReadiness::Dirty))
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -269,14 +226,14 @@ Context:
 - Head branch: `{head}`
 - Current base: `{base}`
 - Expected base: `{expected_base_branch}`
-- Merge state: `{merge_state}`
+- Merge state: `{merge_state:?}`
 - Sync reason: {reason}
 
 Please merge `{expected_base_branch}` into `{head}`, resolve the conflicts, run the relevant checks, and push the result back to `{head}`."#,
         pr = row.number,
         head = row.head_ref.as_str(),
         base = row.base_ref.as_str(),
-        merge_state = row.merge_state_status.as_deref().unwrap_or("UNKNOWN"),
+        merge_state = row.integration_readiness,
     )
 }
 
@@ -422,10 +379,7 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
         if cfg.dry_run {
             log("[dry-run] Listing open PRs (read-only)");
         }
-        match Gh::try_open_merge_candidate_pr_rows() {
-            Some(raw) => parse_gh_pr_merge_rows(&raw),
-            None => Vec::new(),
-        }
+        Gh::try_open_merge_candidate_prs().unwrap_or_default()
     } else {
         log("[dry-run] `gh` missing — pretending no open PR rows.");
         Vec::new()
@@ -524,12 +478,9 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
                 row_snapshot.base_ref = b.trim().to_owned();
             }
 
-            if let Some(json) =
-                Gh::pr_status_refresh_json(row_snapshot.number).filter(|s| !s.trim().is_empty())
-                && let Ok(partial) = serde_json::from_str::<PrStatusRefresh>(&json)
-            {
-                row_snapshot.merge_state_status = partial.merge_state_status;
-                row_snapshot.review_decision = partial.review_decision;
+            if let Some(partial) = Gh::pr_status_refresh(row_snapshot.number) {
+                row_snapshot.integration_readiness = partial.integration_readiness;
+                row_snapshot.approval_gate = partial.approval_gate;
                 row_snapshot.is_draft = partial.is_draft;
             }
         }
@@ -578,8 +529,8 @@ fn run_lineage_pass(cfg: &Config, tracker_override: Option<u32>, mode: MergePass
             log(&format!(
                 "Skipping PR #{} (#{issue}); mergeState={:?} reviewDecision={:?} draft={} (mode={:?})",
                 row_snapshot.number,
-                row_snapshot.merge_state_status,
-                row_snapshot.review_decision,
+                row_snapshot.integration_readiness,
+                row_snapshot.approval_gate,
                 row_snapshot.is_draft,
                 mode,
             ));
@@ -636,25 +587,21 @@ mod tests {
             head_ref: branch_for_issue(issue_head),
             base_ref: base_ref.into(),
             is_draft: false,
-            merge_state_status: None,
-            review_decision: None,
+            integration_readiness: None,
+            approval_gate: None,
         }
     }
 
     #[test]
     fn gh_pr_list_json_fields_deserialize_into_merge_rows() {
-        let raw = r#"[
-            {
-                "number": 77,
-                "headRefName": "agent/issue-70",
-                "baseRefName": "master",
-                "isDraft": false,
-                "mergeStateStatus": "BEHIND",
-                "reviewDecision": "APPROVED"
-            }
-        ]"#;
-
-        let rows = parse_gh_pr_merge_rows(raw);
+        let rows = vec![GhPrMergeRow {
+            number: 77,
+            head_ref: "agent/issue-70".to_string(),
+            base_ref: "master".to_string(),
+            is_draft: false,
+            integration_readiness: Some(IntegrationReadiness::Behind),
+            approval_gate: Some(ApprovalGate::Approved),
+        }];
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].head_ref, "agent/issue-70");
@@ -679,7 +626,7 @@ mod tests {
     #[test]
     fn conflict_resolution_comment_has_caretta_marker_and_context() {
         let mut row = fixture_row(77, 70, "master");
-        row.merge_state_status = Some("DIRTY".to_string());
+        row.integration_readiness = Some(IntegrationReadiness::Dirty);
 
         let body = build_conflict_resolution_comment_body(
             70,

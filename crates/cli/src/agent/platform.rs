@@ -66,29 +66,29 @@ pub trait PullRequestActions {
 
     /// Raw JSON: `{"comments": [...]}` for a PR. Used by the conflicts
     /// module to parse latest marker context out of comment metadata.
-    fn pr_comments_json(pr_num: u32) -> Option<String>;
+    fn pr_comments(pr_num: u32) -> Option<PrComments>;
 
     /// Raw JSON of the fields needed for conflict-aware PR views:
     /// `headRefName`, `baseRefName`, `mergeStateStatus`, `title`.
-    fn pr_conflict_view_json(pr_num: u32) -> Option<String>;
+    fn pr_conflict_view(pr_num: u32) -> Option<PrConflictView>;
 
     /// Raw JSON of the fields needed for [`crate::agent::fix_pr`]'s
     /// diagnostic — `number`, `title`, `headRefName`, `baseRefName`,
     /// `isDraft`, `mergeStateStatus`, `reviewDecision`, `statusCheckRollup`.
-    fn pr_diagnostic_json(pr_num: u32) -> Option<String>;
+    fn pr_diagnostic(pr_num: u32) -> Option<PrDiagnostic>;
 
     /// Raw JSON of the fields auto-merge refreshes after a retarget:
     /// `mergeStateStatus`, `reviewDecision`, `isDraft`.
-    fn pr_status_refresh_json(pr_num: u32) -> Option<String>;
+    fn pr_status_refresh(pr_num: u32) -> Option<PrStatusRefresh>;
 
     /// Raw JSON of `reviews` on a PR — list of submitted reviews used to
     /// render prior-review context for the agent.
-    fn pr_reviews_json(pr_num: u32) -> Option<String>;
+    fn pr_reviews(pr_num: u32) -> Option<Vec<PrReviewSummaryRecord>>;
 
     /// Raw JSON of `number,title,headRefName` for the PR backing the
     /// current branch (no PR number argument — the platform infers it from
     /// the working tree).
-    fn current_branch_pr_summary_json() -> Option<String>;
+    fn current_branch_pr_summary() -> Option<CurrentBranchPrSummary>;
 
     /// URL of the first open PR whose head matches `branch`, or empty
     /// string when none exist. Returns `(call_succeeded, url_or_empty)` so
@@ -106,22 +106,22 @@ pub trait PullRequestActions {
 
     /// Open PR summaries (`number`, `title`, `headRefName`, `author`) up to
     /// `limit`. Used to populate the tracker sidebar and workflow context.
-    fn open_pr_summaries_json(limit: u32) -> Option<String>;
+    fn open_pr_summaries(limit: u32) -> Option<Vec<cli_common::PrSummary>>;
 
     /// Recently merged PR summaries (`number`, `title`, `mergedAt`) up to
     /// `limit`. Used by the retrospective workflow.
-    fn merged_pr_summaries_json(limit: u32) -> Option<String>;
+    fn merged_pr_summaries(limit: u32) -> Option<Vec<MergedPrSummary>>;
 
     /// Open PR rows shaped for auto-merge lineage analysis: `number`,
     /// `headRefName`, `baseRefName`, `isDraft`, `mergeStateStatus`,
     /// `reviewDecision`. Aborts with `context` on failure since auto-merge
     /// can't proceed without the roster.
-    fn open_merge_candidate_pr_rows_or_die(context: &str) -> String;
+    fn open_merge_candidate_prs_or_die(context: &str) -> Vec<OpenMergeCandidatePr>;
 
     /// Open PR rows shaped for auto-merge lineage analysis, returned as
     /// raw JSON or `None` when the platform call fails (best-effort
     /// variant used by the lineage refresh pass).
-    fn try_open_merge_candidate_pr_rows() -> Option<String>;
+    fn try_open_merge_candidate_prs() -> Option<Vec<OpenMergeCandidatePr>>;
 
     /// Create a PR with the given head, base, title, and body. True on
     /// success. Caller is responsible for checking no PR already exists
@@ -166,13 +166,13 @@ pub trait PullRequestActions {
     /// Raw JSON of review threads for `pr_num`. Resolves the working
     /// directory's repository internally. `None` when the repo can't be
     /// identified or the platform call fails.
-    fn fetch_pr_review_threads_json(pr_num: u32) -> Option<String>;
+    fn fetch_pr_review_threads(pr_num: u32) -> Option<Vec<PrReviewThread>>;
 
     /// Raw JSON of every open PR's review threads in one round-trip.
     /// Resolves the working directory's repository internally. Used by
     /// tracker refresh so per-PR `(N)` badges stay in sync without N
     /// round-trips.
-    fn fetch_open_pr_review_threads_batched_json() -> Option<String>;
+    fn fetch_open_pr_review_threads_batched() -> Option<Vec<OpenPrReviewThreads>>;
 }
 
 // ── Issues ──────────────────────────────────────────────────────────────
@@ -194,20 +194,20 @@ pub trait IssueActions {
 
     /// Open issue summaries (`number`, `title`) for issues carrying
     /// `label`.
-    fn open_issue_summaries_with_label_json(label: &str) -> Option<String>;
+    fn open_issue_summaries_with_label(label: &str) -> Option<Vec<IssueSummary>>;
 
     /// Open issue summaries (`number`, `title`, `labels`) up to `limit`.
     /// Used by workflow context gatherers that need a quick roster.
-    fn open_issue_summaries_json(limit: u32) -> Option<String>;
+    fn open_issue_summaries(limit: u32) -> Option<Vec<OpenIssueSummary>>;
 
     /// Open issue rows with the extra fields housekeeping needs
     /// (`number`, `title`, `labels`, `updatedAt`, `assignees`) up to
     /// `limit`.
-    fn open_issue_housekeeping_json(limit: u32) -> Option<String>;
+    fn open_issue_housekeeping(limit: u32) -> Option<Vec<OpenIssueHousekeeping>>;
 
     /// Recently closed issue summaries (`number`, `title`, `closedAt`)
     /// up to `limit`. Used by the retrospective workflow.
-    fn closed_issue_summaries_json(limit: u32) -> Option<String>;
+    fn closed_issue_summaries(limit: u32) -> Option<Vec<ClosedIssueSummary>>;
 
     /// Open issue numbers whose titles match the search expression
     /// `search` (e.g. `"retro in:title"`). Returned as one
@@ -240,3 +240,191 @@ pub trait RepoActions {
 /// becomes the dyn-compatible surface used by a future factory returning
 /// `Box<dyn DeveloperPlatform>`.
 pub trait DeveloperPlatform: PullRequestActions + IssueActions + RepoActions {}
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum IntegrationReadiness {
+    Clean,
+    Behind,
+    Dirty,
+    Blocked,
+    Unstable,
+    HasHooks,
+    Draft,
+    Unknown(String),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApprovalGate {
+    Approved,
+    ChangesRequested,
+    ReviewRequired,
+    None,
+    Unknown(String),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlatformCheckStatus {
+    pub typename: Option<String>,
+    pub name: Option<String>,
+    pub context: Option<String>,
+    pub state: Option<String>,
+    pub conclusion: Option<String>,
+    pub status: Option<String>,
+    pub target_url: Option<String>,
+    pub details_url: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrCommentRecord {
+    pub body: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrComments {
+    pub comments: Vec<PrCommentRecord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrConflictView {
+    pub head_ref: String,
+    pub base_ref: String,
+    pub integration_readiness: Option<IntegrationReadiness>,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrDiagnostic {
+    pub number: u32,
+    pub title: String,
+    pub head_ref: String,
+    pub base_ref: String,
+    pub is_draft: bool,
+    pub integration_readiness: Option<IntegrationReadiness>,
+    pub approval_gate: Option<ApprovalGate>,
+    pub status_check_rollup: Vec<PlatformCheckStatus>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrStatusRefresh {
+    pub integration_readiness: Option<IntegrationReadiness>,
+    pub approval_gate: Option<ApprovalGate>,
+    pub is_draft: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrReviewSummaryRecord {
+    pub author_login: String,
+    pub state: String,
+    pub submitted_at: String,
+    pub body: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentBranchPrSummary {
+    pub number: u32,
+    pub title: String,
+    pub head_ref: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MergedPrSummary {
+    pub number: u32,
+    pub title: String,
+    pub merged_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenMergeCandidatePr {
+    pub number: u32,
+    pub head_ref: String,
+    pub base_ref: String,
+    pub is_draft: bool,
+    pub integration_readiness: Option<IntegrationReadiness>,
+    pub approval_gate: Option<ApprovalGate>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrReviewThreadComment {
+    pub author_login: String,
+    pub author_type: Option<String>,
+    pub path: Option<String>,
+    pub line: Option<u32>,
+    pub original_line: Option<u32>,
+    pub body: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrReviewThread {
+    pub id: String,
+    pub is_resolved: bool,
+    pub comments: Vec<PrReviewThreadComment>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenPrReviewThreads {
+    pub pr_number: u32,
+    pub review_threads: Vec<PrReviewThread>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueSummary {
+    pub number: u32,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueLabel {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueAssignee {
+    pub login: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenIssueSummary {
+    pub number: u32,
+    pub title: String,
+    pub labels: Vec<IssueLabel>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenIssueHousekeeping {
+    pub number: u32,
+    pub title: String,
+    pub labels: Vec<IssueLabel>,
+    pub updated_at: String,
+    pub assignees: Vec<IssueAssignee>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClosedIssueSummary {
+    pub number: u32,
+    pub title: String,
+    pub closed_at: String,
+}
+
+pub fn map_integration_readiness(raw: &str) -> IntegrationReadiness {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "CLEAN" => IntegrationReadiness::Clean,
+        "BEHIND" => IntegrationReadiness::Behind,
+        "DIRTY" => IntegrationReadiness::Dirty,
+        "BLOCKED" => IntegrationReadiness::Blocked,
+        "UNSTABLE" => IntegrationReadiness::Unstable,
+        "HAS_HOOKS" => IntegrationReadiness::HasHooks,
+        "DRAFT" => IntegrationReadiness::Draft,
+        other => IntegrationReadiness::Unknown(other.to_string()),
+    }
+}
+
+pub fn map_approval_gate(raw: &str) -> ApprovalGate {
+    match raw.trim().to_ascii_uppercase().as_str() {
+        "APPROVED" => ApprovalGate::Approved,
+        "CHANGES_REQUESTED" => ApprovalGate::ChangesRequested,
+        "REVIEW_REQUIRED" => ApprovalGate::ReviewRequired,
+        "" => ApprovalGate::None,
+        other => ApprovalGate::Unknown(other.to_string()),
+    }
+}

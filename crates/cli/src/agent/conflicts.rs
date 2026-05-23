@@ -1,7 +1,7 @@
 use crate::agent::cmd::{cmd_capture, cmd_run, cmd_stdout, log};
 use crate::agent::gh::Gh;
 use crate::agent::issue::preflight;
-use crate::agent::platform::PullRequestActions;
+use crate::agent::platform::{PrConflictView, PullRequestActions};
 use crate::agent::review::{
     PrepareBranchOutcome, WorktreeGuard, prepare_branch_for_worktree_add, restore_main_head,
 };
@@ -18,27 +18,6 @@ pub const CONFLICT_RESOLUTION_MARKER: &str = "<!-- caretta:branch-sync-conflict 
 struct ConflictMarkerContext {
     head_branch: String,
     expected_base: String,
-    body: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct PrConflictView {
-    #[serde(rename = "headRefName")]
-    head_ref: String,
-    #[serde(rename = "baseRefName")]
-    base_ref: String,
-    #[serde(rename = "mergeStateStatus")]
-    merge_state_status: Option<String>,
-    title: String,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct PrCommentsView {
-    comments: Vec<PrComment>,
-}
-
-#[derive(Debug, serde::Deserialize)]
-struct PrComment {
     body: String,
 }
 
@@ -78,13 +57,11 @@ fn parse_conflict_marker_body(body: &str) -> Option<ConflictMarkerContext> {
     })
 }
 
-fn parse_latest_conflict_marker(raw: &str) -> Option<ConflictMarkerContext> {
-    let parsed: PrCommentsView = serde_json::from_str(raw).ok()?;
-    parsed
-        .comments
+fn parse_latest_conflict_marker(comments: &[String]) -> Option<ConflictMarkerContext> {
+    comments
         .iter()
         .rev()
-        .filter_map(|comment| parse_conflict_marker_body(&comment.body))
+        .filter_map(|comment| parse_conflict_marker_body(comment))
         .next()
 }
 
@@ -109,13 +86,16 @@ fn merge_bases_for_pr_head(
 }
 
 fn fetch_conflict_marker_context(pr_num: u32) -> Option<ConflictMarkerContext> {
-    let raw = Gh::pr_comments_json(pr_num)?;
-    parse_latest_conflict_marker(&raw)
+    let comments = Gh::pr_comments(pr_num)?
+        .comments
+        .into_iter()
+        .map(|comment| comment.body)
+        .collect::<Vec<_>>();
+    parse_latest_conflict_marker(&comments)
 }
 
 fn fetch_pr_conflict_view(pr_num: u32) -> Option<PrConflictView> {
-    let raw = Gh::pr_conflict_view_json(pr_num)?;
-    serde_json::from_str(&raw).ok()
+    Gh::pr_conflict_view(pr_num)
 }
 
 fn build_conflict_fix_prompt(ctx: &ConflictFixPromptContext<'_>) -> String {
@@ -252,7 +232,10 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
                 .join(", ")
         ));
     }
-    let merge_state = pr.merge_state_status.as_deref().unwrap_or("UNKNOWN");
+    let merge_state = match pr.integration_readiness {
+        Some(ref state) => format!("{state:?}"),
+        None => "UNKNOWN".to_string(),
+    };
 
     if branch != pr.head_ref {
         log(&format!(
@@ -378,7 +361,7 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
                 title: &pr.title,
                 branch: &branch,
                 expected_base: active_merge_base_for_prompt.as_str(),
-                merge_state,
+                merge_state: &merge_state,
                 marker_body: &marker_body,
                 diff: &diff,
             });
@@ -494,7 +477,8 @@ pub fn run_pr_conflict_fix(cfg: &Config, pr_num: u32) {
         .find(|summary| summary.number == pr_num)
         .map(|_| {
             fetch_pr_conflict_view(pr_num)
-                .and_then(|view| view.merge_state_status)
+                .and_then(|view| view.integration_readiness)
+                .map(|state| format!("{state:?}"))
                 .unwrap_or_default()
         })
         .unwrap_or_default();
@@ -576,15 +560,15 @@ Context:
 
     #[test]
     fn latest_marker_wins() {
-        let raw = serde_json::json!({
-            "comments": [
-                {"body": format!("{CONFLICT_RESOLUTION_MARKER}\n- Head branch: `agent/issue-1`\n- Expected base: `master`")},
-                {"body": format!("{CONFLICT_RESOLUTION_MARKER}\n- Head branch: `agent/issue-2`\n- Expected base: `agent/issue-1`")}
-            ]
-        })
-        .to_string();
-
-        let parsed = parse_latest_conflict_marker(&raw).expect("latest marker should parse");
+        let comments = vec![
+            format!(
+                "{CONFLICT_RESOLUTION_MARKER}\n- Head branch: `agent/issue-1`\n- Expected base: `master`"
+            ),
+            format!(
+                "{CONFLICT_RESOLUTION_MARKER}\n- Head branch: `agent/issue-2`\n- Expected base: `agent/issue-1`"
+            ),
+        ];
+        let parsed = parse_latest_conflict_marker(&comments).expect("latest marker should parse");
 
         assert_eq!(parsed.head_branch, "agent/issue-2");
         assert_eq!(parsed.expected_base, "agent/issue-1");

@@ -434,8 +434,11 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
             let recent_commits = cmd_stdout("git", &["log", "--oneline", "--no-decorate", "-50"])
                 .unwrap_or_default();
             let closed_issues =
-                Gh::closed_issue_summaries_json(30).unwrap_or_else(|| "[]".to_string());
-            let merged_prs = Gh::merged_pr_summaries_json(30).unwrap_or_else(|| "[]".to_string());
+                serde_json::to_string_pretty(&Gh::closed_issue_summaries(30).unwrap_or_default())
+                    .unwrap_or_else(|_| "[]".to_string());
+            let merged_prs =
+                serde_json::to_string_pretty(&Gh::merged_pr_summaries(30).unwrap_or_default())
+                    .unwrap_or_else(|_| "[]".to_string());
             let open_issues = gh_open_issues(50);
             let open_prs = open_prs_json();
             let status = read_project_file(&cfg.root, "STATUS.md");
@@ -452,7 +455,8 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
         }
         "housekeeping" => {
             let open_issues =
-                Gh::open_issue_housekeeping_json(100).unwrap_or_else(|| "[]".to_string());
+                serde_json::to_string_pretty(&Gh::open_issue_housekeeping(100).unwrap_or_default())
+                    .unwrap_or_else(|_| "[]".to_string());
             let open_prs = open_prs_json();
             let local_branches =
                 cmd_stdout("git", &["branch", "--format=%(refname:short)"]).unwrap_or_default();
@@ -503,7 +507,8 @@ fn fetch_issue_by_label(label: &str) -> String {
 // ── Helpers ──────────────────────────────────────────────────────────────
 
 fn gh_open_issues(limit: u32) -> String {
-    Gh::open_issue_summaries_json(limit).unwrap_or_else(|| "[]".to_string())
+    serde_json::to_string_pretty(&Gh::open_issue_summaries(limit).unwrap_or_default())
+        .unwrap_or_else(|_| "[]".to_string())
 }
 
 fn open_prs_json() -> String {

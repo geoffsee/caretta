@@ -22,7 +22,14 @@
 use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_run_env, cmd_stdout, cmd_stdout_or_die, die, has_command,
 };
-use crate::agent::platform::{DeveloperPlatform, IssueActions, PullRequestActions, RepoActions};
+use crate::agent::platform::{
+    ClosedIssueSummary, CurrentBranchPrSummary, DeveloperPlatform, IssueActions, IssueAssignee,
+    IssueLabel, IssueSummary, MergedPrSummary, OpenIssueHousekeeping, OpenIssueSummary,
+    OpenMergeCandidatePr, OpenPrReviewThreads, PlatformCheckStatus, PrCommentRecord, PrComments,
+    PrConflictView, PrDiagnostic, PrReviewSummaryRecord, PrReviewThread, PrReviewThreadComment,
+    PrStatusRefresh, PullRequestActions, RepoActions, map_approval_gate, map_integration_readiness,
+};
+use serde::Deserialize;
 
 const GH: &str = "gh";
 
@@ -35,6 +42,212 @@ pub(crate) const RESOLVE_REVIEW_THREAD_MUTATION: &str = "\nmutation($threadId: I
 
 /// Namespace handle for `gh` CLI invocations.
 pub struct Gh;
+
+#[derive(Debug, Deserialize)]
+struct GhPrComments {
+    comments: Vec<GhPrComment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrComment {
+    body: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrConflictView {
+    #[serde(rename = "headRefName")]
+    head_ref: String,
+    #[serde(rename = "baseRefName")]
+    base_ref: String,
+    #[serde(rename = "mergeStateStatus")]
+    merge_state_status: Option<String>,
+    title: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrDiagnostic {
+    number: u32,
+    title: String,
+    #[serde(rename = "headRefName")]
+    head_ref: String,
+    #[serde(rename = "baseRefName")]
+    base_ref: String,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+    #[serde(rename = "mergeStateStatus")]
+    merge_state_status: Option<String>,
+    #[serde(rename = "reviewDecision")]
+    review_decision: Option<String>,
+    #[serde(rename = "statusCheckRollup", default)]
+    status_check_rollup: Vec<GhPlatformCheckStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPlatformCheckStatus {
+    #[serde(rename = "__typename", default)]
+    typename: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    state: Option<String>,
+    #[serde(default)]
+    conclusion: Option<String>,
+    #[serde(default)]
+    status: Option<String>,
+    #[serde(rename = "targetUrl", default)]
+    target_url: Option<String>,
+    #[serde(rename = "detailsUrl", default)]
+    details_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrStatusRefresh {
+    #[serde(rename = "mergeStateStatus")]
+    merge_state_status: Option<String>,
+    #[serde(rename = "reviewDecision")]
+    review_decision: Option<String>,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrReviews {
+    reviews: Vec<GhPrReview>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPrReview {
+    author: Option<GhAuthor>,
+    state: Option<String>,
+    #[serde(rename = "submittedAt")]
+    submitted_at: Option<String>,
+    body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhAuthor {
+    login: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewThreadsResponse {
+    data: GhReviewThreadsData,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewThreadsData {
+    repository: GhReviewThreadsRepo,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewThreadsRepo {
+    #[serde(rename = "pullRequest")]
+    pull_request: GhPullRequestThreads,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhPullRequestThreads {
+    #[serde(rename = "reviewThreads")]
+    review_threads: GhReviewThreadsNodes,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewThreadsNodes {
+    nodes: Vec<GhReviewThread>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewThread {
+    id: String,
+    #[serde(rename = "isResolved")]
+    is_resolved: bool,
+    comments: GhReviewThreadComments,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewThreadComments {
+    nodes: Vec<GhReviewComment>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewComment {
+    author: Option<GhReviewCommentAuthor>,
+    path: Option<String>,
+    line: Option<u32>,
+    #[serde(rename = "originalLine")]
+    original_line: Option<u32>,
+    body: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhReviewCommentAuthor {
+    login: Option<String>,
+    #[serde(rename = "__typename")]
+    typename: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GhOpenMergeCandidatePr {
+    number: u32,
+    #[serde(rename = "headRefName")]
+    head_ref: String,
+    #[serde(rename = "baseRefName")]
+    base_ref: String,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+    #[serde(rename = "mergeStateStatus")]
+    merge_state_status: Option<String>,
+    #[serde(rename = "reviewDecision")]
+    review_decision: Option<String>,
+}
+
+impl From<GhOpenMergeCandidatePr> for OpenMergeCandidatePr {
+    fn from(value: GhOpenMergeCandidatePr) -> Self {
+        Self {
+            number: value.number,
+            head_ref: value.head_ref,
+            base_ref: value.base_ref,
+            is_draft: value.is_draft,
+            integration_readiness: value
+                .merge_state_status
+                .map(|s| map_integration_readiness(&s)),
+            approval_gate: value.review_decision.map(|s| map_approval_gate(&s)),
+        }
+    }
+}
+
+fn parse_open_merge_candidate_prs_or_die(raw: &str, context: &str) -> Vec<OpenMergeCandidatePr> {
+    match serde_json::from_str::<Vec<GhOpenMergeCandidatePr>>(raw) {
+        Ok(rows) => rows.into_iter().map(Into::into).collect(),
+        Err(err) => die(&format!("{context}: failed to parse open PR rows: {err}")),
+    }
+}
+
+fn map_review_thread(thread: GhReviewThread) -> PrReviewThread {
+    PrReviewThread {
+        id: thread.id,
+        is_resolved: thread.is_resolved,
+        comments: thread
+            .comments
+            .nodes
+            .into_iter()
+            .map(|c| PrReviewThreadComment {
+                author_login: c
+                    .author
+                    .as_ref()
+                    .and_then(|a| a.login.clone())
+                    .unwrap_or_default(),
+                author_type: c.author.and_then(|a| a.typename),
+                path: c.path,
+                line: c.line,
+                original_line: c.original_line,
+                body: c.body.unwrap_or_default(),
+            })
+            .collect(),
+    }
+}
 
 impl Gh {
     /// Whether the `gh` binary is reachable on `PATH`.
@@ -166,51 +379,128 @@ impl PullRequestActions for Gh {
         Self::stdout_or_die(&["pr", "diff", &num_s], "failed to fetch PR diff")
     }
 
-    fn pr_comments_json(pr_num: u32) -> Option<String> {
+    fn pr_comments(pr_num: u32) -> Option<PrComments> {
         let num_s = pr_num.to_string();
-        Self::stdout(&["pr", "view", &num_s, "--json", "comments"])
+        let raw = Self::stdout(&["pr", "view", &num_s, "--json", "comments"])?;
+        let parsed: GhPrComments = serde_json::from_str(&raw).ok()?;
+        Some(PrComments {
+            comments: parsed
+                .comments
+                .into_iter()
+                .map(|c| PrCommentRecord { body: c.body })
+                .collect(),
+        })
     }
 
-    fn pr_conflict_view_json(pr_num: u32) -> Option<String> {
+    fn pr_conflict_view(pr_num: u32) -> Option<PrConflictView> {
         let num_s = pr_num.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "pr",
             "view",
             &num_s,
             "--json",
             "headRefName,baseRefName,mergeStateStatus,title",
-        ])
+        ])?;
+        let parsed: GhPrConflictView = serde_json::from_str(&raw).ok()?;
+        Some(PrConflictView {
+            head_ref: parsed.head_ref,
+            base_ref: parsed.base_ref,
+            integration_readiness: parsed
+                .merge_state_status
+                .map(|s| map_integration_readiness(&s)),
+            title: parsed.title,
+        })
     }
 
-    fn pr_diagnostic_json(pr_num: u32) -> Option<String> {
+    fn pr_diagnostic(pr_num: u32) -> Option<PrDiagnostic> {
         let num_s = pr_num.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "pr",
             "view",
             &num_s,
             "--json",
             "number,title,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup",
-        ])
+        ])?;
+        let parsed: GhPrDiagnostic = serde_json::from_str(&raw).ok()?;
+        Some(PrDiagnostic {
+            number: parsed.number,
+            title: parsed.title,
+            head_ref: parsed.head_ref,
+            base_ref: parsed.base_ref,
+            is_draft: parsed.is_draft,
+            integration_readiness: parsed
+                .merge_state_status
+                .map(|s| map_integration_readiness(&s)),
+            approval_gate: parsed.review_decision.map(|s| map_approval_gate(&s)),
+            status_check_rollup: parsed
+                .status_check_rollup
+                .into_iter()
+                .map(|c| PlatformCheckStatus {
+                    typename: c.typename,
+                    name: c.name,
+                    context: c.context,
+                    state: c.state,
+                    conclusion: c.conclusion,
+                    status: c.status,
+                    target_url: c.target_url,
+                    details_url: c.details_url,
+                })
+                .collect(),
+        })
     }
 
-    fn pr_status_refresh_json(pr_num: u32) -> Option<String> {
+    fn pr_status_refresh(pr_num: u32) -> Option<PrStatusRefresh> {
         let num_s = pr_num.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "pr",
             "view",
             &num_s,
             "--json",
             "mergeStateStatus,reviewDecision,isDraft",
-        ])
+        ])?;
+        let parsed: GhPrStatusRefresh = serde_json::from_str(&raw).ok()?;
+        Some(PrStatusRefresh {
+            integration_readiness: parsed
+                .merge_state_status
+                .map(|s| map_integration_readiness(&s)),
+            approval_gate: parsed.review_decision.map(|s| map_approval_gate(&s)),
+            is_draft: parsed.is_draft,
+        })
     }
 
-    fn pr_reviews_json(pr_num: u32) -> Option<String> {
+    fn pr_reviews(pr_num: u32) -> Option<Vec<PrReviewSummaryRecord>> {
         let num_s = pr_num.to_string();
-        Self::stdout(&["pr", "view", &num_s, "--json", "reviews"])
+        let raw = Self::stdout(&["pr", "view", &num_s, "--json", "reviews"])?;
+        let parsed: GhPrReviews = serde_json::from_str(&raw).ok()?;
+        Some(
+            parsed
+                .reviews
+                .into_iter()
+                .map(|r| PrReviewSummaryRecord {
+                    author_login: r.author.map(|a| a.login).unwrap_or_default(),
+                    state: r.state.unwrap_or_default(),
+                    submitted_at: r.submitted_at.unwrap_or_default(),
+                    body: r.body.unwrap_or_default(),
+                })
+                .collect(),
+        )
     }
 
-    fn current_branch_pr_summary_json() -> Option<String> {
-        Self::stdout(&["pr", "view", "--json", "number,title,headRefName"])
+    fn current_branch_pr_summary() -> Option<CurrentBranchPrSummary> {
+        let raw = Self::stdout(&["pr", "view", "--json", "number,title,headRefName"])?;
+        #[derive(Deserialize)]
+        struct Row {
+            number: u32,
+            title: String,
+            #[serde(rename = "headRefName")]
+            head_ref: String,
+        }
+        let row: Row = serde_json::from_str(&raw).ok()?;
+        Some(CurrentBranchPrSummary {
+            number: row.number,
+            title: row.title,
+            head_ref: row.head_ref,
+        })
     }
 
     fn find_open_pr_url_for_head(branch: &str) -> (bool, String) {
@@ -263,9 +553,9 @@ impl PullRequestActions for Gh {
         trimmed.parse().ok()
     }
 
-    fn open_pr_summaries_json(limit: u32) -> Option<String> {
+    fn open_pr_summaries(limit: u32) -> Option<Vec<cli_common::PrSummary>> {
         let limit_s = limit.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "pr",
             "list",
             "--state",
@@ -274,12 +564,13 @@ impl PullRequestActions for Gh {
             "number,title,headRefName,author",
             "--limit",
             &limit_s,
-        ])
+        ])?;
+        serde_json::from_str(&raw).ok()
     }
 
-    fn merged_pr_summaries_json(limit: u32) -> Option<String> {
+    fn merged_pr_summaries(limit: u32) -> Option<Vec<MergedPrSummary>> {
         let limit_s = limit.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "pr",
             "list",
             "--state",
@@ -288,11 +579,28 @@ impl PullRequestActions for Gh {
             "number,title,mergedAt",
             "--limit",
             &limit_s,
-        ])
+        ])?;
+        #[derive(Deserialize)]
+        struct Row {
+            number: u32,
+            title: String,
+            #[serde(rename = "mergedAt")]
+            merged_at: String,
+        }
+        let rows: Vec<Row> = serde_json::from_str(&raw).ok()?;
+        Some(
+            rows.into_iter()
+                .map(|r| MergedPrSummary {
+                    number: r.number,
+                    title: r.title,
+                    merged_at: r.merged_at,
+                })
+                .collect(),
+        )
     }
 
-    fn open_merge_candidate_pr_rows_or_die(context: &str) -> String {
-        Self::stdout_or_die(
+    fn open_merge_candidate_prs_or_die(context: &str) -> Vec<OpenMergeCandidatePr> {
+        let raw = Self::stdout_or_die(
             &[
                 "pr",
                 "list",
@@ -304,11 +612,12 @@ impl PullRequestActions for Gh {
                 "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
             ],
             context,
-        )
+        );
+        parse_open_merge_candidate_prs_or_die(&raw, context)
     }
 
-    fn try_open_merge_candidate_pr_rows() -> Option<String> {
-        Self::stdout(&[
+    fn try_open_merge_candidate_prs() -> Option<Vec<OpenMergeCandidatePr>> {
+        let raw = Self::stdout(&[
             "pr",
             "list",
             "--state",
@@ -317,7 +626,10 @@ impl PullRequestActions for Gh {
             "150",
             "--json",
             "number,headRefName,baseRefName,isDraft,mergeStateStatus,reviewDecision",
-        ])
+        ])?;
+        serde_json::from_str::<Vec<GhOpenMergeCandidatePr>>(&raw)
+            .ok()
+            .map(|rows| rows.into_iter().map(Into::into).collect())
     }
 
     fn create_pr(head: &str, base: &str, title: &str, body: &str) -> bool {
@@ -366,7 +678,7 @@ impl PullRequestActions for Gh {
         Self::graphql_query(RESOLVE_REVIEW_THREAD_MUTATION, &[("threadId", thread_id)])
     }
 
-    fn fetch_pr_review_threads_json(pr_num: u32) -> Option<String> {
+    fn fetch_pr_review_threads(pr_num: u32) -> Option<Vec<PrReviewThread>> {
         let owner_repo = Self::repo_name_with_owner().filter(|s| !s.is_empty())?;
         let (owner, repo) = owner_repo.split_once('/')?;
         let owner = owner.to_string();
@@ -375,17 +687,29 @@ impl PullRequestActions for Gh {
         const QUERY: &str = "\nquery($owner: String!, $repo: String!, $number: Int!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequest(number: $number) {\n      reviewThreads(first: 100) {\n        nodes {\n          id\n          isResolved\n          comments(first: 100) {\n            nodes {\n              author { login __typename }\n              path\n              line\n              originalLine\n              body\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
         let pr_num_s = pr_num.to_string();
-        Self::graphql_query(
+        let raw = Self::graphql_query(
             QUERY,
             &[
                 ("owner", owner.as_str()),
                 ("repo", repo.as_str()),
                 ("number", pr_num_s.as_str()),
             ],
+        )?;
+        let parsed: GhReviewThreadsResponse = serde_json::from_str(&raw).ok()?;
+        Some(
+            parsed
+                .data
+                .repository
+                .pull_request
+                .review_threads
+                .nodes
+                .into_iter()
+                .map(map_review_thread)
+                .collect(),
         )
     }
 
-    fn fetch_open_pr_review_threads_batched_json() -> Option<String> {
+    fn fetch_open_pr_review_threads_batched() -> Option<Vec<OpenPrReviewThreads>> {
         let owner_repo = Self::repo_name_with_owner().filter(|s| !s.is_empty())?;
         let (owner, repo) = owner_repo.split_once('/')?;
         let owner = owner.to_string();
@@ -393,7 +717,50 @@ impl PullRequestActions for Gh {
 
         const QUERY: &str = "\nquery($owner: String!, $repo: String!) {\n  repository(owner: $owner, name: $repo) {\n    pullRequests(states: OPEN, first: 100) {\n      nodes {\n        number\n        reviewThreads(first: 100) {\n          nodes {\n            isResolved\n            comments(first: 1) {\n              nodes {\n                author { login __typename }\n                body\n              }\n            }\n          }\n        }\n      }\n    }\n  }\n}";
 
-        Self::graphql_query(QUERY, &[("owner", owner.as_str()), ("repo", repo.as_str())])
+        let raw =
+            Self::graphql_query(QUERY, &[("owner", owner.as_str()), ("repo", repo.as_str())])?;
+        #[derive(Deserialize)]
+        struct Root {
+            data: Data,
+        }
+        #[derive(Deserialize)]
+        struct Data {
+            repository: Repo,
+        }
+        #[derive(Deserialize)]
+        struct Repo {
+            #[serde(rename = "pullRequests")]
+            pull_requests: PullRequests,
+        }
+        #[derive(Deserialize)]
+        struct PullRequests {
+            nodes: Vec<PullRequestNode>,
+        }
+        #[derive(Deserialize)]
+        struct PullRequestNode {
+            number: u32,
+            #[serde(rename = "reviewThreads")]
+            review_threads: GhReviewThreadsNodes,
+        }
+        let parsed: Root = serde_json::from_str(&raw).ok()?;
+        Some(
+            parsed
+                .data
+                .repository
+                .pull_requests
+                .nodes
+                .into_iter()
+                .map(|pr| OpenPrReviewThreads {
+                    pr_number: pr.number,
+                    review_threads: pr
+                        .review_threads
+                        .nodes
+                        .into_iter()
+                        .map(map_review_thread)
+                        .collect(),
+                })
+                .collect(),
+        )
     }
 }
 
@@ -424,8 +791,8 @@ impl IssueActions for Gh {
         Self::run(&["issue", "close", &issue_num.to_string()])
     }
 
-    fn open_issue_summaries_with_label_json(label: &str) -> Option<String> {
-        Self::stdout(&[
+    fn open_issue_summaries_with_label(label: &str) -> Option<Vec<IssueSummary>> {
+        let raw = Self::stdout(&[
             "issue",
             "list",
             "--label",
@@ -434,12 +801,13 @@ impl IssueActions for Gh {
             "open",
             "--json",
             "number,title",
-        ])
+        ])?;
+        serde_json::from_str(&raw).ok()
     }
 
-    fn open_issue_summaries_json(limit: u32) -> Option<String> {
+    fn open_issue_summaries(limit: u32) -> Option<Vec<OpenIssueSummary>> {
         let limit_s = limit.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "issue",
             "list",
             "--state",
@@ -448,12 +816,36 @@ impl IssueActions for Gh {
             "number,title,labels",
             "--limit",
             &limit_s,
-        ])
+        ])?;
+        #[derive(Deserialize)]
+        struct Row {
+            number: u32,
+            title: String,
+            labels: Vec<Label>,
+        }
+        #[derive(Deserialize)]
+        struct Label {
+            name: String,
+        }
+        let rows: Vec<Row> = serde_json::from_str(&raw).ok()?;
+        Some(
+            rows.into_iter()
+                .map(|r| OpenIssueSummary {
+                    number: r.number,
+                    title: r.title,
+                    labels: r
+                        .labels
+                        .into_iter()
+                        .map(|l| IssueLabel { name: l.name })
+                        .collect(),
+                })
+                .collect(),
+        )
     }
 
-    fn open_issue_housekeeping_json(limit: u32) -> Option<String> {
+    fn open_issue_housekeeping(limit: u32) -> Option<Vec<OpenIssueHousekeeping>> {
         let limit_s = limit.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "issue",
             "list",
             "--state",
@@ -462,12 +854,49 @@ impl IssueActions for Gh {
             "number,title,labels,updatedAt,assignees",
             "--limit",
             &limit_s,
-        ])
+        ])?;
+        #[derive(Deserialize)]
+        struct Row {
+            number: u32,
+            title: String,
+            labels: Vec<Label>,
+            #[serde(rename = "updatedAt")]
+            updated_at: String,
+            assignees: Vec<Assignee>,
+        }
+        #[derive(Deserialize)]
+        struct Label {
+            name: String,
+        }
+        #[derive(Deserialize)]
+        struct Assignee {
+            login: String,
+        }
+        let rows: Vec<Row> = serde_json::from_str(&raw).ok()?;
+        Some(
+            rows.into_iter()
+                .map(|r| OpenIssueHousekeeping {
+                    number: r.number,
+                    title: r.title,
+                    labels: r
+                        .labels
+                        .into_iter()
+                        .map(|l| IssueLabel { name: l.name })
+                        .collect(),
+                    updated_at: r.updated_at,
+                    assignees: r
+                        .assignees
+                        .into_iter()
+                        .map(|a| IssueAssignee { login: a.login })
+                        .collect(),
+                })
+                .collect(),
+        )
     }
 
-    fn closed_issue_summaries_json(limit: u32) -> Option<String> {
+    fn closed_issue_summaries(limit: u32) -> Option<Vec<ClosedIssueSummary>> {
         let limit_s = limit.to_string();
-        Self::stdout(&[
+        let raw = Self::stdout(&[
             "issue",
             "list",
             "--state",
@@ -476,7 +905,24 @@ impl IssueActions for Gh {
             "number,title,closedAt",
             "--limit",
             &limit_s,
-        ])
+        ])?;
+        #[derive(Deserialize)]
+        struct Row {
+            number: u32,
+            title: String,
+            #[serde(rename = "closedAt")]
+            closed_at: String,
+        }
+        let rows: Vec<Row> = serde_json::from_str(&raw).ok()?;
+        Some(
+            rows.into_iter()
+                .map(|r| ClosedIssueSummary {
+                    number: r.number,
+                    title: r.title,
+                    closed_at: r.closed_at,
+                })
+                .collect(),
+        )
     }
 
     fn open_issue_numbers_matching_title(search: &str) -> Option<String> {

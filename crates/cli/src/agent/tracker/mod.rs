@@ -1,5 +1,7 @@
 use crate::agent::gh::Gh;
-use crate::agent::platform::{IssueActions, PullRequestActions};
+use crate::agent::platform::{
+    IssueActions, OpenPrReviewThreads, PrReviewThread, PullRequestActions,
+};
 use crate::agent::shell::log;
 pub use cli_common::{PendingIssue, PrAuthor, PrSummary, TrackerInfo};
 use std::collections::{HashMap, HashSet};
@@ -340,18 +342,14 @@ pub fn find_retro_issues() -> Vec<u32> {
 /// Parse the JSON output of `gh issue list --label tracker --json number,title`
 /// into the canonical, sorted, deduped tracker list. Pure helper so the
 /// behavior is unit-testable without invoking `gh`.
-pub(crate) fn parse_tracker_list(json: &str) -> Vec<TrackerInfo> {
-    #[derive(serde::Deserialize)]
-    struct Row {
-        number: u32,
-        title: String,
-    }
-    let rows: Vec<Row> = serde_json::from_str(json).unwrap_or_default();
+pub(crate) fn parse_tracker_list(
+    rows: &[crate::agent::platform::IssueSummary],
+) -> Vec<TrackerInfo> {
     let mut nums: Vec<TrackerInfo> = rows
-        .into_iter()
+        .iter()
         .map(|row| TrackerInfo {
             number: row.number,
-            title: row.title,
+            title: row.title.clone(),
         })
         .collect();
     nums.sort_by_key(|t| t.number);
@@ -365,11 +363,8 @@ pub fn find_tracker() -> Vec<TrackerInfo> {
     // "sprint" or "tracker" in its title (e.g. "Dev UI: agent must read parent
     // tracker before working a child issue"). The label is the authoritative
     // source — see #85 for the standardized label taxonomy.
-    let out = Gh::open_issue_summaries_with_label_json(labels::TRACKER);
-    match out {
-        Some(json) => parse_tracker_list(&json),
-        None => Vec::new(),
-    }
+    let out = Gh::open_issue_summaries_with_label(labels::TRACKER).unwrap_or_default();
+    parse_tracker_list(&out)
 }
 
 /// Build a map from issue number to PR number for the given list of open PRs
@@ -564,8 +559,7 @@ Do NOT commit — the calling script handles commits."#
 /// callers (including context gatherers used in `--dry-run`) treat the PR
 /// list as best-effort context, not a hard dependency.
 pub fn list_open_prs() -> Vec<PrSummary> {
-    let out = Gh::open_pr_summaries_json(50).unwrap_or_default();
-    serde_json::from_str(&out).unwrap_or_default()
+    Gh::open_pr_summaries(50).unwrap_or_default()
 }
 
 /// Open pull request number for `head` equal to `branch`, if one exists.
@@ -580,8 +574,14 @@ pub fn pr_diff(pr_num: u32) -> String {
 
 /// Find the open PR for the current branch, if any.
 pub fn current_branch_pr() -> Option<PrSummary> {
-    let out = Gh::current_branch_pr_summary_json()?;
-    serde_json::from_str(&out).ok()
+    let out = Gh::current_branch_pr_summary()?;
+    Some(PrSummary {
+        number: out.number,
+        title: out.title,
+        head_ref_name: out.head_ref,
+        author: None,
+        unresolved_thread_count: 0,
+    })
 }
 
 fn parse_auto_merge_response(output: Option<String>) -> bool {
@@ -685,8 +685,8 @@ fn has_human_fix_marker(body: &str) -> bool {
 
 /// Raw JSON from GitHub's `reviewThreads` GraphQL query for `pr_num`, or
 /// `None` when the repo or request cannot be resolved.
-fn pull_request_review_threads_json(pr_num: u32) -> Option<String> {
-    let out = Gh::fetch_pr_review_threads_json(pr_num);
+fn pull_request_review_threads(pr_num: u32) -> Option<Vec<PrReviewThread>> {
+    let out = Gh::fetch_pr_review_threads(pr_num);
     if out.is_none() {
         log(&format!(
             "WARNING: failed to fetch review threads for PR #{pr_num}"
@@ -708,7 +708,7 @@ fn pull_request_review_threads_json(pr_num: u32) -> Option<String> {
 /// contains [`HUMAN_FIX_MARKER`] (a human opt-in so the agent can act on
 /// specific human-authored review comments without blanket-trusting them).
 pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<ReviewThread> {
-    pull_request_review_threads_json(pr_num)
+    pull_request_review_threads(pr_num)
         .map(|out| parse_review_threads(&out, bot_login))
         .unwrap_or_default()
 }
@@ -720,14 +720,14 @@ pub fn fetch_unresolved_review_threads(pr_num: u32, bot_login: &str) -> Vec<Revi
 /// Resolved threads and comments without a file path are still omitted (see
 /// [`parse_all_unresolved_review_threads`]).
 pub fn fetch_all_unresolved_review_threads(pr_num: u32) -> Vec<ReviewThread> {
-    pull_request_review_threads_json(pr_num)
+    pull_request_review_threads(pr_num)
         .map(|out| parse_all_unresolved_review_threads(&out))
         .unwrap_or_default()
 }
 
 /// Fetch compact prior PR review summaries for prompt context.
 pub fn fetch_pr_reviews(pr_num: u32) -> Vec<ReviewSummary> {
-    Gh::pr_reviews_json(pr_num)
+    Gh::pr_reviews(pr_num)
         .map(|out| parse_pr_reviews(&out))
         .unwrap_or_default()
 }
@@ -780,79 +780,33 @@ fn parse_resolve_review_thread_response(json: &str) -> bool {
 ///
 /// Split out from [`fetch_unresolved_review_threads`] so it can be unit-tested
 /// against fixture JSON without needing a live GitHub PR.
-fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
-    let v: serde_json::Value = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(e) => {
-            log(&format!("WARNING: review-threads JSON parse failed: {e}"));
-            return Vec::new();
-        }
-    };
-    let nodes = v
-        .pointer("/data/repository/pullRequest/reviewThreads/nodes")
-        .and_then(|n| n.as_array())
-        .cloned()
-        .unwrap_or_default();
-
+fn parse_review_threads(nodes: &[PrReviewThread], bot_login: &str) -> Vec<ReviewThread> {
     let mut out = Vec::new();
     for thread in nodes {
-        let resolved = thread
-            .get("isResolved")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        if resolved {
+        if thread.is_resolved {
             continue;
         }
-        let id = thread
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let id = thread.id.clone();
         if id.is_empty() {
             continue;
         }
-        let comments = thread
-            .pointer("/comments/nodes")
-            .and_then(|n| n.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let comments = &thread.comments;
         let Some(c) = comments.first() else {
             continue;
         };
-        let thread_comments = parse_review_thread_comments(&comments);
-        let author = c
-            .pointer("/author/login")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let typename = c
-            .pointer("/author/__typename")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("");
-        let body = c
-            .get("body")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let thread_comments = parse_review_thread_comments(comments);
+        let author = c.author_login.clone();
+        let typename = c.author_type.as_deref().unwrap_or("");
+        let body = c.body.clone();
         let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
         if !is_bot && !has_human_fix_marker(&body) {
             continue;
         }
-        let path = c
-            .get("path")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let path = c.path.clone().unwrap_or_default();
         if path.is_empty() {
             continue;
         }
-        // `line` can be null on outdated threads — fall back to originalLine
-        // so we still anchor the finding somewhere meaningful in the prompt.
-        let line = c
-            .get("line")
-            .and_then(serde_json::Value::as_u64)
-            .or_else(|| c.get("originalLine").and_then(serde_json::Value::as_u64))
-            .unwrap_or(0) as u32;
+        let line = c.line.or(c.original_line).unwrap_or(0);
         out.push(ReviewThread {
             id,
             path,
@@ -867,69 +821,28 @@ fn parse_review_threads(json: &str, bot_login: &str) -> Vec<ReviewThread> {
 
 /// Parse the same `reviewThreads` JSON as [`parse_review_threads`], but keep
 /// every unresolved thread with a file path (human reviewers included).
-fn parse_all_unresolved_review_threads(json: &str) -> Vec<ReviewThread> {
-    let v: serde_json::Value = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(e) => {
-            log(&format!("WARNING: review-threads JSON parse failed: {e}"));
-            return Vec::new();
-        }
-    };
-    let nodes = v
-        .pointer("/data/repository/pullRequest/reviewThreads/nodes")
-        .and_then(|n| n.as_array())
-        .cloned()
-        .unwrap_or_default();
-
+fn parse_all_unresolved_review_threads(nodes: &[PrReviewThread]) -> Vec<ReviewThread> {
     let mut out = Vec::new();
     for thread in nodes {
-        let resolved = thread
-            .get("isResolved")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        if resolved {
+        if thread.is_resolved {
             continue;
         }
-        let id = thread
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let id = thread.id.clone();
         if id.is_empty() {
             continue;
         }
-        let comments = thread
-            .pointer("/comments/nodes")
-            .and_then(|n| n.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let comments = &thread.comments;
         let Some(c) = comments.first() else {
             continue;
         };
-        let thread_comments = parse_review_thread_comments(&comments);
-        let author = c
-            .pointer("/author/login")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let body = c
-            .get("body")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let path = c
-            .get("path")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("")
-            .to_string();
+        let thread_comments = parse_review_thread_comments(comments);
+        let author = c.author_login.clone();
+        let body = c.body.clone();
+        let path = c.path.clone().unwrap_or_default();
         if path.is_empty() {
             continue;
         }
-        let line = c
-            .get("line")
-            .and_then(serde_json::Value::as_u64)
-            .or_else(|| c.get("originalLine").and_then(serde_json::Value::as_u64))
-            .unwrap_or(0) as u32;
+        let line = c.line.or(c.original_line).unwrap_or(0);
         out.push(ReviewThread {
             id,
             path,
@@ -942,57 +855,28 @@ fn parse_all_unresolved_review_threads(json: &str) -> Vec<ReviewThread> {
     out
 }
 
-fn parse_review_thread_comments(comments: &[serde_json::Value]) -> Vec<ReviewThreadComment> {
+fn parse_review_thread_comments(
+    comments: &[crate::agent::platform::PrReviewThreadComment],
+) -> Vec<ReviewThreadComment> {
     comments
         .iter()
         .map(|c| ReviewThreadComment {
-            author: c
-                .pointer("/author/login")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            body: c
-                .get("body")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            author: c.author_login.clone(),
+            body: c.body.clone(),
         })
         .collect()
 }
 
-fn parse_pr_reviews(json: &str) -> Vec<ReviewSummary> {
-    let v: serde_json::Value = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(e) => {
-            log(&format!("WARNING: PR reviews JSON parse failed: {e}"));
-            return Vec::new();
-        }
-    };
-    v.get("reviews")
-        .and_then(|n| n.as_array())
-        .into_iter()
-        .flatten()
+fn parse_pr_reviews(
+    reviews: &[crate::agent::platform::PrReviewSummaryRecord],
+) -> Vec<ReviewSummary> {
+    reviews
+        .iter()
         .map(|review| ReviewSummary {
-            author: review
-                .pointer("/author/login")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            state: review
-                .get("state")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            submitted_at: review
-                .get("submittedAt")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
-            body: review
-                .get("body")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            author: review.author_login.clone(),
+            state: review.state.clone(),
+            submitted_at: review.submitted_at.clone(),
+            body: review.body.clone(),
         })
         .collect()
 }
@@ -1048,7 +932,7 @@ fn cap_review_body(body: &str) -> String {
 /// `repository.pullRequests(states: OPEN, first: 100)` query satisfies that
 /// — N PRs cost one round-trip, not N.
 pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::HashMap<u32, u32> {
-    let out = match Gh::fetch_open_pr_review_threads_batched_json() {
+    let out = match Gh::fetch_open_pr_review_threads_batched() {
         Some(s) => s,
         None => {
             log("WARNING: failed to fetch open-PR thread counts");
@@ -1068,53 +952,30 @@ pub fn fetch_unresolved_thread_counts(bot_login: &str) -> std::collections::Hash
 /// match, `[bot]` suffix, or GraphQL `author.__typename == "Bot"`) OR its
 /// body contains [`HUMAN_FIX_MARKER`]. Badge count and Fix Comments agent
 /// must see the same set of threads.
-fn parse_pr_thread_counts(json: &str, bot_login: &str) -> std::collections::HashMap<u32, u32> {
+fn parse_pr_thread_counts(
+    prs: &[OpenPrReviewThreads],
+    bot_login: &str,
+) -> std::collections::HashMap<u32, u32> {
     let mut counts = std::collections::HashMap::new();
-    let v: serde_json::Value = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(e) => {
-            log(&format!("WARNING: pr-thread-counts JSON parse failed: {e}"));
-            return counts;
-        }
-    };
-    let prs = v
-        .pointer("/data/repository/pullRequests/nodes")
-        .and_then(|n| n.as_array())
-        .cloned()
-        .unwrap_or_default();
     for pr in prs {
-        let Some(number) = pr
-            .get("number")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|n| u32::try_from(n).ok())
-        else {
-            continue;
-        };
-        let threads = pr
-            .pointer("/reviewThreads/nodes")
-            .and_then(|n| n.as_array())
-            .cloned()
-            .unwrap_or_default();
+        let number = pr.pr_number;
+        let threads = &pr.review_threads;
         let mut count: u32 = 0;
         for t in threads {
-            if t.get("isResolved")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false)
-            {
+            if t.is_resolved {
                 continue;
             }
             let author = t
-                .pointer("/comments/nodes/0/author/login")
-                .and_then(serde_json::Value::as_str)
+                .comments
+                .first()
+                .map(|c| c.author_login.as_str())
                 .unwrap_or("");
             let typename = t
-                .pointer("/comments/nodes/0/author/__typename")
-                .and_then(serde_json::Value::as_str)
+                .comments
+                .first()
+                .and_then(|c| c.author_type.as_deref())
                 .unwrap_or("");
-            let body = t
-                .pointer("/comments/nodes/0/body")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("");
+            let body = t.comments.first().map(|c| c.body.as_str()).unwrap_or("");
             let is_bot = author == bot_login || author.ends_with("[bot]") || typename == "Bot";
             if is_bot || has_human_fix_marker(body) {
                 count += 1;
