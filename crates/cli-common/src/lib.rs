@@ -597,7 +597,15 @@ impl BotSettings {
 /// build time); downstream projects vendor or fork skills here instead.
 pub const DOT_CARETTA_ISSUE_SKILL_REPO_PATH: &str = ".caretta/skills/issue-tracking/SKILL.md";
 pub const DOT_CARETTA_USER_PERSONAS_REPO_PATH: &str = ".caretta/skills/user-personas/SKILL.md";
-/// Personas JSON directory when using the `.caretta/skills/` layout.
+/// Canonical project-relative directory where user-created personas are
+/// stored as JSON. This sits at the project root under `.caretta/` so it
+/// matches the convention used by other UI artifacts (e.g. Discovery's
+/// `.caretta/discovery/`) and so personas are version-controlled with the
+/// project rather than the agent's app-data directory.
+pub const DOT_CARETTA_PERSONAS_DIR: &str = ".caretta/personas";
+/// Legacy personas JSON directory under the `.caretta/skills/` layout.
+/// Kept for read-only fallback so existing persona files remain visible
+/// after migrating to [`DOT_CARETTA_PERSONAS_DIR`].
 pub const DOT_CARETTA_USER_PERSONAS_PERSONAS_DIR: &str = ".caretta/skills/user-personas/personas";
 
 /// Canonical bundled skill paths in the upstream **`assets/skills/`** tree (this

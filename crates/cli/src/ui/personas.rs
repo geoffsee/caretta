@@ -1,5 +1,6 @@
 use crate::agent::types::{
-    DOT_CARETTA_USER_PERSONAS_PERSONAS_DIR, LEGACY_ASSETS_USER_PERSONAS_PERSONAS_DIR,
+    DOT_CARETTA_PERSONAS_DIR, DOT_CARETTA_USER_PERSONAS_PERSONAS_DIR,
+    LEGACY_ASSETS_USER_PERSONAS_PERSONAS_DIR,
 };
 use dioxus::prelude::*;
 use serde_json::{Map, Value, json};
@@ -74,23 +75,40 @@ fn resolve_skill_path(root: &str, skill_path: &str) -> PathBuf {
     }
 }
 
-pub fn personas_dir(root: &str, skill_path: &str) -> PathBuf {
-    resolve_skill_path(root, skill_path)
-        .parent()
-        .map(|path| path.join("personas"))
-        .unwrap_or_else(|| fallback_personas_data_dir(Path::new(root)))
+/// Project-relative directory where the Persona Studio writes new personas.
+///
+/// All user-created persona JSON now lives at `<root>/.caretta/personas/`
+/// so it stays inside the project's working tree (mirroring Discovery's
+/// `.caretta/discovery/` layout) instead of leaking into the OS app-data
+/// directory via the materialized skill fallback. The `skill_path`
+/// argument is accepted purely so call sites and the public API remain
+/// stable; the value is only consulted to read legacy locations.
+pub fn personas_dir(root: &str, _skill_path: &str) -> PathBuf {
+    Path::new(root).join(DOT_CARETTA_PERSONAS_DIR)
 }
 
-fn fallback_personas_data_dir(root: &Path) -> PathBuf {
-    let preferred = root.join(DOT_CARETTA_USER_PERSONAS_PERSONAS_DIR);
-    let legacy = root.join(LEGACY_ASSETS_USER_PERSONAS_PERSONAS_DIR);
-    if preferred.exists() {
-        preferred
-    } else if legacy.exists() {
-        legacy
-    } else {
-        preferred
+/// Directories that may contain previously-saved personas, in priority order:
+/// 1. The canonical `<root>/.caretta/personas/` location used for new writes.
+/// 2. The legacy `.caretta/skills/user-personas/personas/` directory used by
+///    older builds that nested personas under the skill tree.
+/// 3. The upstream `assets/skills/user-personas/personas/` directory.
+/// 4. The `personas/` directory adjacent to the resolved `SKILL.md`, which
+///    may point at the materialized app-data copy when no repo-local skill
+///    exists.
+fn persona_read_dirs(root: &str, skill_path: &str) -> Vec<PathBuf> {
+    let root_path = Path::new(root);
+    let mut dirs: Vec<PathBuf> = vec![
+        root_path.join(DOT_CARETTA_PERSONAS_DIR),
+        root_path.join(DOT_CARETTA_USER_PERSONAS_PERSONAS_DIR),
+        root_path.join(LEGACY_ASSETS_USER_PERSONAS_PERSONAS_DIR),
+    ];
+    if let Some(parent) = resolve_skill_path(root, skill_path).parent() {
+        let adjacent = parent.join("personas");
+        if !dirs.iter().any(|existing| existing == &adjacent) {
+            dirs.push(adjacent);
+        }
     }
+    dirs
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -100,22 +118,31 @@ pub fn load_personas(_root: &str, _skill_path: &str) -> Result<Vec<PersonaSummar
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_personas(root: &str, skill_path: &str) -> Result<Vec<PersonaSummary>, String> {
-    let dir = personas_dir(root, skill_path);
-    if !dir.exists() {
-        return Ok(Vec::new());
-    }
+    use std::collections::HashSet;
 
     let mut personas = Vec::new();
-    let entries =
-        std::fs::read_dir(&dir).map_err(|e| format!("Failed to read {}: {e}", dir.display()))?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+    let mut seen_file_names: HashSet<String> = HashSet::new();
+    for dir in persona_read_dirs(root, skill_path) {
+        if !dir.exists() {
             continue;
         }
-        match load_persona_summary_from_path(&path) {
-            Ok(persona) => personas.push(persona),
-            Err(err) => tracing::warn!("Skipping persona {}: {err}", path.display()),
+        let entries = std::fs::read_dir(&dir)
+            .map_err(|e| format!("Failed to read {}: {e}", dir.display()))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            match load_persona_summary_from_path(&path) {
+                Ok(persona) => {
+                    // Personas in higher-priority dirs (canonical `.caretta/personas/`)
+                    // shadow same-named files from legacy fallback locations.
+                    if seen_file_names.insert(persona.file_name.clone()) {
+                        personas.push(persona);
+                    }
+                }
+                Err(err) => tracing::warn!("Skipping persona {}: {err}", path.display()),
+            }
         }
     }
 
@@ -182,9 +209,14 @@ pub fn load_persona_form(
     skill_path: &str,
     file_name: &str,
 ) -> Result<PersonaForm, String> {
-    let dir = personas_dir(root, skill_path);
     let safe_file_name = safe_json_file_name(file_name, "persona");
-    let path = dir.join(&safe_file_name);
+    // Look in the canonical `.caretta/personas/` dir first, then fall back to
+    // legacy locations so personas saved by older builds remain editable.
+    let path = persona_read_dirs(root, skill_path)
+        .into_iter()
+        .map(|dir| dir.join(&safe_file_name))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| personas_dir(root, skill_path).join(&safe_file_name));
     let content =
         std::fs::read_to_string(&path).map_err(|e| format!("Failed to read persona: {e}"))?;
     let value: Value =
@@ -249,10 +281,17 @@ pub fn save_persona(root: &str, skill_path: &str, form: &PersonaForm) -> Result<
         None => unique_json_file_name(&dir, &requested_file_name),
     };
 
-    let existing_path = form
-        .original_file_name
-        .as_ref()
-        .map(|name| dir.join(safe_json_file_name(name, "persona")));
+    // Resolve the existing persona file by searching the canonical save dir
+    // first and then the legacy read dirs. This lets a persona originally
+    // saved in a legacy location migrate to `<root>/.caretta/personas/` on
+    // the next save without losing unrelated `other_facts` entries.
+    let existing_path = form.original_file_name.as_ref().and_then(|name| {
+        let original = safe_json_file_name(name, "persona");
+        persona_read_dirs(root, skill_path)
+            .into_iter()
+            .map(|d| d.join(&original))
+            .find(|candidate| candidate.is_file())
+    });
     let target_path = dir.join(&file_name);
 
     let mut document = existing_path
@@ -326,9 +365,29 @@ pub fn delete_persona(_root: &str, _skill_path: &str, _file_name: &str) -> Resul
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn delete_persona(root: &str, skill_path: &str, file_name: &str) -> Result<(), String> {
-    let dir = personas_dir(root, skill_path);
-    let path = dir.join(safe_json_file_name(file_name, "persona"));
-    std::fs::remove_file(&path).map_err(|e| format!("Failed to delete {}: {e}", path.display()))
+    let safe = safe_json_file_name(file_name, "persona");
+    // Remove the persona from the canonical save dir as well as any legacy
+    // locations so it does not silently reappear from a fallback directory
+    // after deletion.
+    let mut removed_any = false;
+    let mut last_err: Option<String> = None;
+    for dir in persona_read_dirs(root, skill_path) {
+        let path = dir.join(&safe);
+        if !path.is_file() {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => removed_any = true,
+            Err(e) => last_err = Some(format!("Failed to delete {}: {e}", path.display())),
+        }
+    }
+    if removed_any {
+        Ok(())
+    } else if let Some(err) = last_err {
+        Err(err)
+    } else {
+        Err(format!("Persona not found: {safe}"))
+    }
 }
 
 pub fn generate_persona_from_notes(notes: &str, sequence: usize) -> PersonaForm {
@@ -1037,6 +1096,31 @@ mod tests {
     }
 
     #[test]
+    fn personas_dir_is_relative_to_root_dot_caretta() {
+        // The Persona Studio must always save personas under
+        // `<root>/.caretta/personas/`, regardless of where the resolved
+        // SKILL.md happens to live (including absolute paths that point at
+        // the materialized app-data copy, e.g. macOS
+        // `~/Library/Application Support/caretta/skills/...`). This
+        // guarantees personas stay inside the project tree alongside the
+        // Discovery workspace.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_str().unwrap();
+
+        let from_relative = personas_dir(root, "assets/skills/user-personas/SKILL.md");
+        let from_absolute = personas_dir(
+            root,
+            "/Users/example/Library/Application Support/caretta/skills/user-personas/SKILL.md",
+        );
+        let from_empty = personas_dir(root, "");
+
+        let expected = dir.path().join(".caretta").join("personas");
+        assert_eq!(from_relative, expected);
+        assert_eq!(from_absolute, expected);
+        assert_eq!(from_empty, expected);
+    }
+
+    #[test]
     fn save_and_load_persona_roundtrip() {
         let dir = tempfile::tempdir().unwrap();
         write_skill(dir.path());
@@ -1060,6 +1144,23 @@ mod tests {
         let saved = save_persona(root, skill, &form).unwrap();
         assert_eq!(saved, "research-ops.json");
 
+        // The file must land in `<root>/.caretta/personas/`, *not* next to the
+        // SKILL.md (`assets/skills/user-personas/personas/`).
+        let canonical = dir.path().join(".caretta/personas/research-ops.json");
+        assert!(
+            canonical.is_file(),
+            "expected persona at {}",
+            canonical.display()
+        );
+        let legacy = dir
+            .path()
+            .join("assets/skills/user-personas/personas/research-ops.json");
+        assert!(
+            !legacy.exists(),
+            "persona must not be written to the legacy SKILL-adjacent dir: {}",
+            legacy.display()
+        );
+
         let loaded = load_persona_form(root, skill, &saved).unwrap();
         assert_eq!(loaded.name, "Riley Chen");
         assert_eq!(loaded.title, "Research Ops Lead");
@@ -1080,11 +1181,15 @@ mod tests {
         write_skill(dir.path());
         let root = dir.path().to_str().unwrap();
         let skill = "assets/skills/user-personas/SKILL.md";
-        let persona_path = dir
+        // Seed a persona in the legacy SKILL-adjacent location so we can
+        // verify that the next save migrates the document to
+        // `<root>/.caretta/personas/` while still preserving unrelated
+        // `other_facts` entries.
+        let legacy_path = dir
             .path()
             .join("assets/skills/user-personas/personas/operator.json");
         std::fs::write(
-            &persona_path,
+            &legacy_path,
             serde_json::to_string_pretty(&json!({
                 "type": "TinyPerson",
                 "persona": {
@@ -1103,10 +1208,18 @@ mod tests {
         form.jobs_to_be_done = "New job".to_string();
         save_persona(root, skill, &form).unwrap();
 
-        let saved = std::fs::read_to_string(persona_path).unwrap();
+        let canonical_path = dir.path().join(".caretta/personas/operator.json");
+        let saved = std::fs::read_to_string(&canonical_path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", canonical_path.display()));
         assert!(saved.contains("current_stack: Kubernetes"));
         assert!(saved.contains("jobs_to_be_done: New job"));
         assert!(!saved.contains("jobs_to_be_done: Old job"));
+        // The legacy copy is removed so the persona has a single source of
+        // truth after migration.
+        assert!(
+            !legacy_path.exists(),
+            "legacy persona should be removed after migration to .caretta/personas"
+        );
     }
 
     #[test]
@@ -1121,7 +1234,40 @@ mod tests {
             ..PersonaForm::default()
         };
         let saved = save_persona(root, skill, &form).unwrap();
+        assert!(
+            dir.path()
+                .join(".caretta/personas/delete-me.json")
+                .is_file()
+        );
         delete_persona(root, skill, &saved).unwrap();
+        assert!(load_personas(root, skill).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_persona_also_clears_legacy_locations() {
+        let dir = tempfile::tempdir().unwrap();
+        write_skill(dir.path());
+        let root = dir.path().to_str().unwrap();
+        let skill = "assets/skills/user-personas/SKILL.md";
+
+        let legacy = dir
+            .path()
+            .join("assets/skills/user-personas/personas/legacy.json");
+        std::fs::write(
+            &legacy,
+            serde_json::to_string_pretty(&json!({
+                "type": "TinyPerson",
+                "persona": { "name": "Legacy" }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        delete_persona(root, skill, "legacy.json").unwrap();
+        assert!(
+            !legacy.exists(),
+            "delete must remove the persona from legacy fallback locations"
+        );
         assert!(load_personas(root, skill).unwrap().is_empty());
     }
 }
