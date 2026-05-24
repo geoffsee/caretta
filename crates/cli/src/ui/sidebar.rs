@@ -171,6 +171,7 @@ pub fn Sidebar(
     feedback_text: Signal<String>,
     auto_merge_enabled: Signal<bool>,
     settings_status: Signal<Option<String>>,
+    installer_status: Signal<Option<String>>,
     refresh_tracker: EventHandler<MouseEvent>,
     start_work: EventHandler<u32>,
     start_single_issue: EventHandler<u32>,
@@ -182,6 +183,7 @@ pub fn Sidebar(
     on_workspace_change: EventHandler<Option<String>>,
     on_start_workflow: EventHandler<String>,
     save_settings: EventHandler<MouseEvent>,
+    install_github_app: EventHandler<MouseEvent>,
     stop_work: EventHandler<MouseEvent>,
     submit_feedback: EventHandler<MouseEvent>,
     on_auto_merge: EventHandler<MouseEvent>,
@@ -355,6 +357,21 @@ pub fn Sidebar(
                             }
                         }
                         if config.read().bot_settings.mode == BotAuthMode::GitHubApp {
+                            div { class: "installer-row",
+                                button {
+                                    class: "btn btn-sm btn-action",
+                                    r#type: "button",
+                                    disabled: working,
+                                    onclick: move |evt| install_github_app.call(evt),
+                                    "Install GitHub App via Manifest Flow"
+                                }
+                                div { class: "advanced-hint",
+                                    "Spins up a local server, opens GitHub's App registration page, and writes credentials to ~/.config/caretta and ./.env.github-app. Copy the resulting IDs below."
+                                }
+                                if let Some(status) = installer_status.read().clone() {
+                                    div { class: "installer-status", "{status}" }
+                                }
+                            }
                             label { class: "advanced-field",
                                 span { class: "control-label", "App ID" }
                                 input {

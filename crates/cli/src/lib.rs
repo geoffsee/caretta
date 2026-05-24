@@ -621,6 +621,7 @@ fn App() -> Element {
     let mut chat_agent_buf = use_signal(String::new);
     let discovery_workspace = use_signal(|| load_discovery_workspace(&config.read().root));
     let mut settings_status = use_signal(|| None::<String>);
+    let mut installer_status = use_signal(|| None::<String>);
     let root_sig = use_signal(|| config.read().root.clone());
     let persona_skill_path_sig = use_signal(|| config.read().skill_paths.user_personas.clone());
     let mut all_files = use_signal(Vec::<String>::new);
@@ -1230,6 +1231,73 @@ fn App() -> Element {
         info!("Configuration saving not available in web mode");
     };
 
+    // ── Embedded GitHub-App installer ──
+    // Spins up the vendored `caretta-github-app-installer` Bun script through
+    // the embedded agent runtime, opens GitHub's manifest-flow page, and
+    // surfaces progress through `installer_status`. Desktop-only; the web
+    // build cannot spawn local processes.
+    #[cfg(not(target_arch = "wasm32"))]
+    let install_github_app = move |_: MouseEvent| {
+        use agent::github_app_installer::{InstallerOptions, run_installer_blocking};
+
+        if installer_status
+            .peek()
+            .as_deref()
+            .map(|s| s.starts_with("Running"))
+            .unwrap_or(false)
+        {
+            return;
+        }
+
+        let cfg = config.read().clone();
+        let opts = InstallerOptions {
+            port: None,
+            app_name: None,
+            owner: None,
+            webhook_url: None,
+            // Write `.env.github-app` next to the repo the user is operating
+            // on so the existing `source .env.github-app && caretta` workflow
+            // keeps working.
+            working_dir: Some(std::path::PathBuf::from(&cfg.root)),
+        };
+
+        installer_status.set(Some(
+            "Running GitHub App installer — finish the manifest flow in your browser…".into(),
+        ));
+        spawn(async move {
+            let outcome = tokio::task::spawn_blocking(move || run_installer_blocking(&opts)).await;
+            match outcome {
+                Ok(Ok(out)) if out.success => installer_status.set(Some(format!(
+                    "GitHub App registered. Credentials written to {}/.env.github-app and ~/.config/caretta.",
+                    out.working_dir.display()
+                ))),
+                Ok(Ok(out)) => {
+                    let snippet = out
+                        .stderr
+                        .lines()
+                        .rev()
+                        .find(|line| !line.trim().is_empty())
+                        .unwrap_or("(no stderr)");
+                    installer_status.set(Some(format!(
+                        "Installer exited with code {:?}: {snippet}",
+                        out.exit_code
+                    )));
+                }
+                Ok(Err(err)) => {
+                    installer_status.set(Some(format!("Installer failed: {err}")));
+                }
+                Err(err) => {
+                    installer_status.set(Some(format!("Installer task panicked: {err}")));
+                }
+            }
+        });
+    };
+
+    #[cfg(target_arch = "wasm32")]
+    let install_github_app = move |_: MouseEvent| {
+        info!("GitHub App installer is not available in web mode");
+    };
+
     #[cfg(not(target_arch = "wasm32"))]
     let submit_feedback = move |_: MouseEvent| {
         let fb = feedback_text.read().clone();
@@ -1536,6 +1604,7 @@ fn App() -> Element {
                     feedback_text,
                     auto_merge_enabled,
                     settings_status,
+                    installer_status,
                     refresh_tracker,
                     start_work,
                     start_single_issue,
@@ -1547,6 +1616,7 @@ fn App() -> Element {
                     on_workspace_change,
                     on_start_workflow,
                     save_settings,
+                    install_github_app,
                     stop_work,
                     submit_feedback,
                     on_auto_merge,

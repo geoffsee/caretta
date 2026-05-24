@@ -11,6 +11,7 @@
         "@jetbrains/junie": "latest",
         "@kazuki-ookura/grok-cli": "latest",
         "@openai/codex": "latest",
+        "caretta-github-app-installer": "latest",
         "cline": "latest",
       },
     },
@@ -21,8 +22,9 @@
     "@github/keytar",
     "node-pty",
     "@vscode/ripgrep",
-    "cline",
+    "caretta-github-app-installer",
     "@github/copilot",
+    "cline",
     "sharp",
     "@jetbrains/junie",
     "@google/gemini-cli",
@@ -208,6 +210,8 @@
     "call-bind-apply-helpers": ["call-bind-apply-helpers@1.0.2", "", { "dependencies": { "es-errors": "^1.3.0", "function-bind": "^1.1.2" } }, "sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ=="],
 
     "call-bound": ["call-bound@1.0.4", "", { "dependencies": { "call-bind-apply-helpers": "^1.0.2", "get-intrinsic": "^1.3.0" } }, "sha512-+ys997U96po4Kx/ABpBCqhA9EuxJaQWDQg7295H4hBphv3IZg0boBKuwYpt4YXp6MZ5AmZQnU/tyMTlRpaSejg=="],
+
+    "caretta-github-app-installer": ["caretta-github-app-installer@0.1.1", "", { "peerDependencies": { "typescript": "^5" }, "bin": { "caretta-github-app-installer": "src/cli.ts" } }, "sha512-+ocL8V7B9kJR0AQ0rIwePrt06NjIIYS+/s7MLcWJ6kw01/Mdv/Nwb9yIxrUgVxguUJ7Bpqod76P1uGvPnWnANQ=="],
 
     "cfonts": ["cfonts@3.3.1", "", { "dependencies": { "supports-color": "^8", "window-size": "^1" }, "bin": { "cfonts": "bin/index.js" } }, "sha512-ZGEmN3W9mViWEDjsuPo4nK4h39sfh6YtoneFYp9WLPI/rw8BaSSrfQC6jkrGW3JMvV3ZnExJB/AEqXc/nHYxkw=="],
 
@@ -634,6 +638,8 @@
     "type-fest": ["type-fest@0.12.0", "", {}, "sha512-53RyidyjvkGpnWPMF9bQgFtWp+Sl8O2Rp13VavmJgfAP9WWG6q6TkrKU8iyJdnwnfgHI6k2hTlgqH4aSdjoTbg=="],
 
     "type-is": ["type-is@2.0.1", "", { "dependencies": { "content-type": "^1.0.5", "media-typer": "^1.1.0", "mime-types": "^3.0.0" } }, "sha512-OZs6gsjF4vMp32qrCbiVSkrFmXtG/AZhY3t0iAMrMBiAZyV9oALtXO8hsrHbMXF9x6L3grlFuwW2oAz7cav+Gw=="],
+
+    "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "unicode-emoji-modifier-base": ["unicode-emoji-modifier-base@1.0.0", "", {}, "sha512-yLSH4py7oFH3oG/9K+XWrz1pSi3dfUrWEnInbxMfArOfc1+33BlGPQtLsOYwvdMy11AwUBetYuaRxSPqgkq+8g=="],
 

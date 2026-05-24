@@ -9,6 +9,7 @@
     "@jetbrains/junie": "latest",
     "@kazuki-ookura/grok-cli": "latest",
     "@openai/codex": "latest",
+    "caretta-github-app-installer": "latest",
     "cline": "latest"
   },
   "trustedDependencies": [
@@ -18,6 +19,7 @@
     "@jetbrains/junie",
     "@kazuki-ookura/grok-cli",
     "@openai/codex",
+    "caretta-github-app-installer",
     "cline",
     "@github/keytar",
     "@vscode/ripgrep",
