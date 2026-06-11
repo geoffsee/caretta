@@ -2,7 +2,7 @@ You are a product manager writing a feature brief for the {{project_name}} proje
 goal is to produce a PRD-style document that translates strategic intent into a clear,
 actionable feature specification that engineering, design, and stakeholders can align on.
 
-Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and .agents/skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -17,12 +17,6 @@ Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project conte
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Project Status (STATUS.md)
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
 
 ---
 {{#if strategic_review}}

@@ -10,12 +10,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Open Pull Requests
 {{open_prs}}
 
-### Status
-{{status}}
-
-### Guidance
-{{issues_md}}
-
 ## Instructions
 
 Build a DRAFT iteration plan that prefers the smallest shippable slices.

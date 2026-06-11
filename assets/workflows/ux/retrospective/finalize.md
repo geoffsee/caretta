@@ -19,12 +19,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Still Open PRs
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ---
 
 ## Human Feedback on the Draft
@@ -66,11 +60,6 @@ work items.
 
 3. **Do not file per-action-item issues, do not file a parent tracker issue, do not edit
    any other GitHub issue.** The output of this workflow is exactly one issue artifact.
-
-4. **Update ISSUES.md** — Mark completed issues as done in the Task Dependency
-   Hierarchy tables. Reference the single retro issue, not per-item children.
-5. **Update STATUS.md** — Reflect any status changes from the completed cycle's design work.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
 
 The design action items inside this single issue feed directly into the next strategic
 review and sprint planning cycle.

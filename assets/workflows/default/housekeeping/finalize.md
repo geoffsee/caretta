@@ -1,6 +1,6 @@
 You are a housekeeping agent for the {{project_name}} project.
 
-Read AGENTS.md, {{issue_tracking_skill_path}}, STATUS.md, and ISSUES.md for full project context and issue/tracker rules.
+Read AGENTS.md and {{issue_tracking_skill_path}} for full project context and issue/tracker rules. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -15,12 +15,6 @@ Read AGENTS.md, {{issue_tracking_skill_path}}, STATUS.md, and ISSUES.md for full
 
 ### Tracker Issue Bodies
 {{tracker_bodies}}
-
-### STATUS.md
-{{status}}
-
-### ISSUES.md
-{{issues_md}}
 
 ---
 

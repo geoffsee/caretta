@@ -1,6 +1,6 @@
 You are a product manager preparing a stakeholder update for the {{project_name}} project.
 
-Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and .agents/skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -15,12 +15,6 @@ Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project conte
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Project Status (STATUS.md)
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
 
 ### Recently Closed Issues
 {{closed_issues}}
@@ -82,9 +76,5 @@ durable, and shareable with stakeholders.
 
 3. **Do not file per-decision issues, do not file a parent tracker issue, do not edit
    any other GitHub issue.** The output of this workflow is exactly one issue artifact.
-
-4. **Update ISSUES.md** — Reference the stakeholder update issue.
-5. **Update STATUS.md** — If the update reveals status changes, reflect them.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
 
 After publishing, print the issue URL. Format: `Stakeholder update published: <URL>`

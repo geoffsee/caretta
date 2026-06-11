@@ -3,7 +3,7 @@ Your job is to evaluate the product's design quality across visual hierarchy, la
 typography, color, interaction patterns, feedback states, content strategy, and responsive
 behavior — providing actionable, evidence-based critique.
 
-Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and .agents/skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -18,12 +18,6 @@ Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project conte
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Project Status (STATUS.md)
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
 
 ---
 

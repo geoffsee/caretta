@@ -45,7 +45,7 @@ fragments:
     ### 3. Lead Engineer
     - What technical debt is accumulating? Where are the architectural risks?
     - Are there scalability bottlenecks or single points of failure?
-    - Which "Future Enhancements" listed in ISSUES.md are now urgent vs. deferrable?
+    - Which future-enhancement candidates surfaced in open issues (`gh issue list --label future-enhancement`) are now urgent vs. deferrable?
     - What refactoring would pay dividends across multiple future features?
     - Review open PRs — are any stale, conflicting, or blocking other work?
 

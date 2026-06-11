@@ -13,12 +13,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Open Pull Requests
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Human Feedback on the Draft
 
 {{feedback}}
@@ -37,8 +31,6 @@ Incorporate feedback and publish the FINAL autonomous backlog.
    - parser-compatible checklist of child issues using `- [ ] #N Title (blocked by #X)` rows
    - explicit "blocked by" relations
 3. Do not add the `tracker` label to child issues. Add `Tracked by #<tracker>` to each child issue body.
-4. Update ISSUES.md with the same dependency hierarchy and checklist.
-5. Update STATUS.md to reflect the active autonomous cycle scope.
-6. Keep GitHub issues and ISSUES.md in parity.
+4. Edit the active cycle tracker issue body to reflect current scope.
 
 Use `gh issue create` and `gh issue edit` to publish the plan.

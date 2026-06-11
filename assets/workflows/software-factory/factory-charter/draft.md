@@ -13,12 +13,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Recent Commits
 {{recent_commits}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Instructions
 
 Produce a DRAFT "Factory Charter" that enables safe autonomous evolution through GitHub Actions.
@@ -33,7 +27,7 @@ Produce a DRAFT "Factory Charter" that enables safe autonomous evolution through
    - where work is sourced from (issues, tracker, labels)
    - how dependencies and blockers are represented
    - how the agent should behave when context is ambiguous
-4. Define required repository context artifacts (STATUS.md, ISSUES.md, AGENTS.md, labels).
+4. Define required repository context artifacts (AGENTS.md, labels).
 5. Define measurable autonomy KPIs (lead time, pass rate, rollback rate, stale work).
 6. Output:
    - a concise charter

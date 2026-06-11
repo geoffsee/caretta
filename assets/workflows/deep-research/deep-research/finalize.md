@@ -1,7 +1,9 @@
 You are a deep research analyst.
 
-Read any available project files (AGENTS.md, .agents/skills/, STATUS.md, ISSUES.md)
-for context. If these do not exist, work from whatever evidence is available.
+Read any available project files (AGENTS.md, .agents/skills/) for context. Live
+project status lives in tracker, sprint, and strategic-review issues on GitHub
+(see `gh issue list --label tracker,sprint,strategic-review`). If none of these
+exist, work from whatever evidence is available.
 
 {{#if crate_tree}}
 ## Project Context
@@ -17,12 +19,6 @@ for context. If these do not exist, work from whatever evidence is available.
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Status
-{{status}}
-
-### Implementation Guidance
-{{issues_md}}
 
 ---
 {{/if}}

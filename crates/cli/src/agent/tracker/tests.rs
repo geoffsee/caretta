@@ -735,8 +735,7 @@ fn build_prompt_contains_issue_number_and_body() {
     assert!(p.contains("Implement LRU cache"));
     assert!(p.contains("fn main() {}"));
     assert!(p.contains("Codebase Snapshot"));
-    assert!(p.contains("ISSUES.md"));
-    assert!(p.contains("STATUS.md"));
+    assert!(p.contains("Do NOT edit the parent tracker, sprint, or strategic-review issue bodies"));
     assert!(p.contains("Do NOT modify `.github/**`"));
     assert!(p.contains("Do NOT commit"));
     // No tracker section when tracker body is empty
@@ -785,17 +784,9 @@ fn build_prompt_no_tracker_section_when_body_empty() {
 
 #[test]
 fn sprint_draft_does_not_create_issues() {
-    let p = build_sprint_planning_draft_prompt(
-        "test-project",
-        "[issues]",
-        "[prs]",
-        "[status]",
-        "[issues_md]",
-    );
+    let p = build_sprint_planning_draft_prompt("test-project", "[issues]", "[prs]");
     assert!(p.contains("[issues]"));
     assert!(p.contains("[prs]"));
-    assert!(p.contains("[status]"));
-    assert!(p.contains("[issues_md]"));
     assert!(p.contains("Dependency Hierarchy"));
     assert!(p.contains("DRAFT"));
     assert!(!p.contains("gh issue create"));
@@ -803,17 +794,9 @@ fn sprint_draft_does_not_create_issues() {
 
 #[test]
 fn sprint_finalize_includes_feedback_and_creates_issues() {
-    let p = build_sprint_planning_finalize_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[s]",
-        "[m]",
-        "focus on DX",
-    );
+    let p = build_sprint_planning_finalize_prompt("test-project", "[i]", "[p]", "focus on DX");
     assert!(p.contains("focus on DX"));
     assert!(p.contains("gh issue create"));
-    assert!(p.contains("ISSUES.md"));
     assert!(!p.contains("DRAFT"));
     assert!(p.contains("Do not create `sprint`, `tracker`, or child issues"));
     assert!(p.contains(".github/workflows/**"));
@@ -821,7 +804,7 @@ fn sprint_finalize_includes_feedback_and_creates_issues() {
 
 #[test]
 fn sprint_finalize_creates_tracker_with_labels() {
-    let p = build_sprint_planning_finalize_prompt("test-project", "[i]", "[p]", "[s]", "[m]", "fb");
+    let p = build_sprint_planning_finalize_prompt("test-project", "[i]", "[p]", "fb");
     assert!(p.contains("--label \"sprint,tracker\""));
     assert!(p.contains("Tracked by #<tracker>"));
 }
@@ -835,8 +818,6 @@ fn strategic_draft_contains_all_perspectives() {
         "[issues]",
         "[prs]",
         "[commits]",
-        "[status]",
-        "[issues_md]",
         "[crates]",
         "",
     );
@@ -855,16 +836,12 @@ fn strategic_draft_includes_all_context() {
         "ISSUES_JSON",
         "PRS_JSON",
         "abc123 commit",
-        "STATUS_CONTENT",
-        "ISSUES_MD",
         "CRATE_LIST",
         "",
     );
     assert!(p.contains("ISSUES_JSON"));
     assert!(p.contains("PRS_JSON"));
     assert!(p.contains("abc123 commit"));
-    assert!(p.contains("STATUS_CONTENT"));
-    assert!(p.contains("ISSUES_MD"));
     assert!(p.contains("CRATE_LIST"));
 }
 
@@ -875,8 +852,6 @@ fn strategic_draft_includes_report_synthesis_when_present() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "Top priority: fix auth. Velocity: steady.",
     );
@@ -886,16 +861,7 @@ fn strategic_draft_includes_report_synthesis_when_present() {
 
 #[test]
 fn strategic_draft_omits_synthesis_when_empty() {
-    let p = build_strategic_review_draft_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[c]",
-        "[s]",
-        "[m]",
-        "[t]",
-        "",
-    );
+    let p = build_strategic_review_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]", "");
     assert!(!p.contains("Prior Report Synthesis"));
 }
 
@@ -906,8 +872,6 @@ fn strategic_finalize_includes_feedback_and_creates_single_issue() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "",
         "skip OIDC, focus on CLI",
@@ -930,8 +894,6 @@ fn strategic_finalize_does_not_emit_tracker_layout() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "",
         "fb",
@@ -945,16 +907,7 @@ fn strategic_finalize_does_not_emit_tracker_layout() {
 
 #[test]
 fn strategic_draft_sets_single_issue_expectation() {
-    let p = build_strategic_review_draft_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[c]",
-        "[s]",
-        "[m]",
-        "[t]",
-        "",
-    );
+    let p = build_strategic_review_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]", "");
     // The draft must tell the agent up front that finalize publishes one issue, not
     // many — otherwise it shapes the recommended path forward around per-item issues.
     assert!(p.contains("**exactly one** GitHub issue"));
@@ -968,8 +921,6 @@ fn strategic_finalize_includes_report_synthesis() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "synthesis content here",
         "my feedback",
@@ -983,7 +934,7 @@ fn strategic_finalize_includes_report_synthesis() {
 
 #[test]
 fn ideation_draft_is_divergent_draft() {
-    let p = build_ideation_draft_prompt("test-project", "[i]", "[p]", "[c]", "[s]", "[m]", "[t]");
+    let p = build_ideation_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]");
     assert!(p.contains("DRAFT"));
     assert!(p.contains("Capability ideas"));
     assert!(p.contains("Foundational ideas"));
@@ -1000,15 +951,11 @@ fn ideation_draft_includes_all_context() {
         "ISSUES_JSON",
         "PRS_JSON",
         "abc123 commit",
-        "STATUS_CONTENT",
-        "ISSUES_MD",
         "CRATE_LIST",
     );
     assert!(p.contains("ISSUES_JSON"));
     assert!(p.contains("PRS_JSON"));
     assert!(p.contains("abc123 commit"));
-    assert!(p.contains("STATUS_CONTENT"));
-    assert!(p.contains("ISSUES_MD"));
     assert!(p.contains("CRATE_LIST"));
 }
 
@@ -1019,8 +966,6 @@ fn ideation_finalize_includes_feedback_and_creates_issue() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "keep ideas 1-5, drop the rest",
         false,
@@ -1039,8 +984,6 @@ fn ideation_finalize_dry_run_includes_dry_run_note() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "feedback",
         true,
@@ -1055,17 +998,7 @@ fn ideation_finalize_dry_run_includes_dry_run_note() {
 #[test]
 fn report_draft_is_draft_not_final() {
     let sp = crate::agent::types::SkillPaths::default();
-    let p = build_report_draft_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[c]",
-        "[s]",
-        "[m]",
-        "[t]",
-        "",
-        &sp,
-    );
+    let p = build_report_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]", "", &sp);
     assert!(p.contains("DRAFT"));
     assert!(p.contains("Executive Summary"));
     assert!(p.contains("Risk Assessment"));
@@ -1080,8 +1013,6 @@ fn report_draft_includes_ideation_when_present() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "Add WebSocket support idea",
         &sp,
@@ -1093,17 +1024,7 @@ fn report_draft_includes_ideation_when_present() {
 #[test]
 fn report_draft_includes_persona_lens() {
     let sp = crate::agent::types::SkillPaths::default();
-    let p = build_report_draft_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[c]",
-        "[s]",
-        "[m]",
-        "[t]",
-        "",
-        &sp,
-    );
+    let p = build_report_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]", "", &sp);
     assert!(p.contains(&sp.user_personas));
     assert!(p.contains("Synthesis Lens"));
     assert!(p.contains("Do NOT conflate it with other skills"));
@@ -1123,17 +1044,7 @@ fn report_draft_includes_persona_lens_with_custom_skill_path() {
         user_personas: "/custom/skills/prefixed-user-personas/SKILL.md".into(),
         issue_tracking: "/custom/skills/prefixed-issue-tracking/SKILL.md".into(),
     };
-    let p = build_report_draft_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[c]",
-        "[s]",
-        "[m]",
-        "[t]",
-        "",
-        &sp,
-    );
+    let p = build_report_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]", "", &sp);
     assert!(p.contains("/custom/skills/prefixed-user-personas/SKILL.md"));
     assert!(!p.contains("user-personas/SKILL.md\n"));
 }
@@ -1141,17 +1052,7 @@ fn report_draft_includes_persona_lens_with_custom_skill_path() {
 #[test]
 fn report_draft_omits_ideation_when_empty() {
     let sp = crate::agent::types::SkillPaths::default();
-    let p = build_report_draft_prompt(
-        "test-project",
-        "[i]",
-        "[p]",
-        "[c]",
-        "[s]",
-        "[m]",
-        "[t]",
-        "",
-        &sp,
-    );
+    let p = build_report_draft_prompt("test-project", "[i]", "[p]", "[c]", "[t]", "", &sp);
     assert!(!p.contains("Prior Ideation"));
 }
 
@@ -1163,8 +1064,6 @@ fn report_finalize_includes_feedback_and_synthesis() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "",
         "add more detail on blockers",
@@ -1188,8 +1087,6 @@ fn report_finalize_includes_persona_lens_and_synthesis_attribution() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "",
         "feedback",
@@ -1216,8 +1113,6 @@ fn report_finalize_dry_run_includes_dry_run_note() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "",
         "feedback",
@@ -1237,8 +1132,6 @@ fn report_finalize_includes_ideation_when_present() {
         "[i]",
         "[p]",
         "[c]",
-        "[s]",
-        "[m]",
         "[t]",
         "ideation content here",
         "my feedback",
@@ -1261,8 +1154,6 @@ fn retro_draft_contains_all_sections() {
         "[merged]",
         "[open_i]",
         "[open_p]",
-        "[status]",
-        "[issues_md]",
     );
     assert!(p.contains("What shipped"));
     assert!(p.contains("What went well"));
@@ -1282,16 +1173,12 @@ fn retro_draft_includes_all_context() {
         "MERGED",
         "OPEN_I",
         "OPEN_P",
-        "STATUS",
-        "ISSUES_MD",
     );
     assert!(p.contains("COMMITS"));
     assert!(p.contains("CLOSED"));
     assert!(p.contains("MERGED"));
     assert!(p.contains("OPEN_I"));
     assert!(p.contains("OPEN_P"));
-    assert!(p.contains("STATUS"));
-    assert!(p.contains("ISSUES_MD"));
 }
 
 #[test]
@@ -1303,14 +1190,11 @@ fn retro_finalize_includes_feedback_and_creates_single_issue() {
         "[m]",
         "[oi]",
         "[op]",
-        "[s]",
-        "[im]",
         "error messages need work",
     );
     assert!(p.contains("error messages need work"));
     assert!(p.contains("gh issue create"));
     assert!(p.contains("gh issue edit"));
-    assert!(p.contains("ISSUES.md"));
     assert!(!p.contains("DRAFT"));
     // Single-issue contract: exactly one retrospective issue, edited in place on
     // subsequent runs. No per-action-item children, no parent tracker.
@@ -1321,16 +1205,7 @@ fn retro_finalize_includes_feedback_and_creates_single_issue() {
 
 #[test]
 fn retro_draft_sets_single_issue_expectation() {
-    let p = build_retrospective_draft_prompt(
-        "test-project",
-        "[c]",
-        "[cl]",
-        "[m]",
-        "[oi]",
-        "[op]",
-        "[s]",
-        "[im]",
-    );
+    let p = build_retrospective_draft_prompt("test-project", "[c]", "[cl]", "[m]", "[oi]", "[op]");
     // The draft must tell the agent up front that finalize publishes one issue,
     // not many — otherwise it shapes the draft around per-item issues.
     assert!(p.contains("**exactly one** GitHub issue"));
@@ -2230,15 +2105,10 @@ fn refresh_agents_prompt_limits_scope_and_requires_summary_block() {
 fn refresh_docs_prompt_limits_scope_and_requires_summary_block() {
     let prompt = build_refresh_docs_prompt(
         "test-project",
-        &[
-            "README.md".to_string(),
-            "STATUS.md".to_string(),
-            "docs/ARCHITECTURE.md".to_string(),
-        ],
+        &["README.md".to_string(), "docs/ARCHITECTURE.md".to_string()],
     );
     assert!(prompt.contains("test-project"));
     assert!(prompt.contains("README.md"));
-    assert!(prompt.contains("STATUS.md"));
     assert!(prompt.contains("docs/ARCHITECTURE.md"));
     assert!(prompt.contains("Do NOT edit source code"));
     assert!(prompt.contains("REFRESH_DOCS_SUMMARY_BEGIN"));
@@ -2298,8 +2168,6 @@ fn housekeeping_draft_prompt_contains_all_sweep_categories() {
         "[]",
         "master\nagent/issue-1",
         "- [ ] #1 task",
-        "| Feature | ✅ |",
-        "# ISSUES",
     );
     assert!(prompt.contains("Tracker Drift"));
     assert!(prompt.contains("Stale Issues"));
@@ -2307,7 +2175,6 @@ fn housekeeping_draft_prompt_contains_all_sweep_categories() {
     assert!(prompt.contains("Orphaned Local Branches"));
     assert!(prompt.contains("Generated / Orphaned Files"));
     assert!(prompt.contains("Label Taxonomy Drift"));
-    assert!(prompt.contains("ISSUES.md / STATUS.md Drift"));
     assert!(prompt.contains("READ-ONLY audit"));
     assert!(prompt.contains("Do NOT modify anything"));
 }
@@ -2320,8 +2187,6 @@ fn housekeeping_draft_prompt_includes_context() {
         "[{\"number\":10}]",
         "master\nagent/issue-42",
         "- [ ] #42 task",
-        "status content",
-        "issues content",
     );
     assert!(prompt.contains("[{\"number\":42}]"));
     assert!(prompt.contains("agent/issue-42"));
@@ -2335,8 +2200,6 @@ fn housekeeping_finalize_prompt_contains_feedback() {
         "[]",
         "[]",
         "master",
-        "",
-        "",
         "",
         "Fix tracker drift only, skip everything else",
     );

@@ -256,13 +256,11 @@ pub fn build_sprint_planning_draft_prompt(
     project_name: &str,
     open_issues: &str,
     open_prs: &str,
-    status: &str,
-    issues_md: &str,
 ) -> String {
     format!(
         r#"You are a sprint planning assistant for the {project_name} project.
 
-Read AGENTS.md and skills/ for project conventions.
+Read AGENTS.md and skills/ for project conventions. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Current State
 
@@ -271,12 +269,6 @@ Read AGENTS.md and skills/ for project conventions.
 
 ### Open Pull Requests
 {open_prs}
-
-### Project Status
-{status}
-
-### Implementation Guidance (ISSUES.md)
-{issues_md}
 
 ## Instructions
 
@@ -313,14 +305,12 @@ pub fn build_sprint_planning_finalize_prompt(
     project_name: &str,
     open_issues: &str,
     open_prs: &str,
-    status: &str,
-    issues_md: &str,
     feedback: &str,
 ) -> String {
     format!(
         r#"You are a sprint planning assistant for the {project_name} project.
 
-Read AGENTS.md and skills/ for project conventions.
+Read AGENTS.md and skills/ for project conventions. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Current State
 
@@ -329,12 +319,6 @@ Read AGENTS.md and skills/ for project conventions.
 
 ### Open Pull Requests
 {open_prs}
-
-### Project Status
-{status}
-
-### Implementation Guidance (ISSUES.md)
-{issues_md}
 
 ## Human Feedback on the Draft
 
@@ -370,10 +354,7 @@ Incorporate the feedback above and produce the FINAL sprint plan:
 
    - A checklist with `- [ ] #N Title (blocked by #X, #Y)` entries for each item.
 4. Edit each child issue to add `Tracked by #<tracker>` in the body using
-   `gh issue edit <child> --body "..."`.
-5. Update ISSUES.md to add the new sprint's Task Dependency Hierarchy section. Keep existing completed sections intact.
-6. Update STATUS.md if the sprint scope changes the status of any tracked feature.
-7. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW."#
+   `gh issue edit <child> --body "..."`."#
     )
 }
 
@@ -381,8 +362,6 @@ fn strategic_review_context(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
 ) -> String {
     format!(
@@ -398,13 +377,7 @@ fn strategic_review_context(
 {open_issues}
 
 ### Open Pull Requests
-{open_prs}
-
-### Project Status (STATUS.md)
-{status}
-
-### Implementation Guidance (ISSUES.md)
-{issues_md}"#
+{open_prs}"#
     )
 }
 
@@ -425,7 +398,7 @@ const STRATEGIC_PERSPECTIVES: &str = r#"## Conduct the review from each perspect
 ### 3. Lead Engineer
 - What technical debt is accumulating? Where are the architectural risks?
 - Are there scalability bottlenecks or single points of failure?
-- Which "Future Enhancements" listed in ISSUES.md are now urgent vs. deferrable?
+- Which future-enhancement candidates (`gh issue list --label future-enhancement`) are now urgent vs. deferrable?
 - What refactoring would pay dividends across multiple future features?
 - Review open PRs — are any stale, conflicting, or blocking other work?
 
@@ -435,25 +408,15 @@ const STRATEGIC_PERSPECTIVES: &str = r#"## Conduct the review from each perspect
 - Are logs, status output, and diagnostics actionable?
 - What documentation or examples are missing?"#;
 
-#[allow(clippy::too_many_arguments)]
 pub fn build_strategic_review_draft_prompt(
     project_name: &str,
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     report_synthesis: &str,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let synthesis_section = if report_synthesis.trim().is_empty() {
         String::new()
     } else {
@@ -477,7 +440,7 @@ issues so they link back via `Depends On #<synthesis>`.
 multi-perspective analysis, role-playing the viewpoints that typically drive a product
 forward, then synthesise a unified recommendation.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -519,20 +482,11 @@ pub fn build_strategic_review_finalize_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     report_synthesis: &str,
     feedback: &str,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let synthesis_section = if report_synthesis.trim().is_empty() {
         String::new()
     } else {
@@ -552,7 +506,7 @@ The single strategic-review issue body MUST include
     format!(
         r#"You are a strategic review board for the {project_name} project.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -603,12 +557,6 @@ must not percolate into sprint planning as discrete tickets.
    If the agent harness suggests a multi-issue tracker layout, ignore it — that pattern
    is reserved for Sprint Planning.
 
-4. **Update ISSUES.md** — Reference the single strategic-review issue. Do NOT add a
-   per-recommendation Task Dependency Hierarchy here — that lives in sprint planning.
-5. **Update STATUS.md** — If any new capability is being tracked, add or update the
-   relevant rows.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
-
 This output closes the feedback loop: sprint planning will read this single issue's
 "Recommended Path Forward" section and turn the items it picks into trackable sprint
 issues at that stage."#,
@@ -641,19 +589,10 @@ pub fn build_roadmapper_draft_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     strategic_review: &str,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let strategic_section = if strategic_review.trim().is_empty() {
         String::new()
     } else {
@@ -674,7 +613,7 @@ open `strategic-review` GitHub issue). Use it as the primary input for the Roadm
         r#"You are the Roadmapper for the {project_name} project. Your goal is to transform strategic
 intent into a structured, long-term roadmap.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -712,20 +651,11 @@ pub fn build_roadmapper_finalize_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     strategic_review: &str,
     feedback: &str,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let strategic_section = if strategic_review.trim().is_empty() {
         String::new()
     } else {
@@ -742,7 +672,7 @@ pub fn build_roadmapper_finalize_prompt(
     format!(
         r#"You are the Roadmapper for the {project_name} project.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -804,24 +734,15 @@ pub fn build_ideation_draft_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     format!(
         r#"You are an ideation partner for the {project_name} project. Your job is to generate
 a wide, varied set of raw ideas — not to evaluate, prioritise, or structure them.
 Aim for quantity and variety over quality.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -865,20 +786,11 @@ pub fn build_ideation_finalize_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     feedback: &str,
     dry_run: bool,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let dry_run_note = if dry_run {
         "\n\n**DRY RUN MODE**: Do NOT actually run any `gh` commands. Instead, print the \
          exact commands you WOULD run (gh issue list, gh issue close, gh issue create) \
@@ -889,7 +801,7 @@ pub fn build_ideation_finalize_prompt(
     format!(
         r#"You are an ideation partner for the {project_name} project.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -983,20 +895,11 @@ pub fn build_report_draft_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     ideation: &str,
     skill_paths: &crate::agent::types::SkillPaths,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let ideation_section = if ideation.trim().is_empty() {
         String::new()
     } else {
@@ -1020,7 +923,7 @@ your filtering rationale in the Executive Summary or Recommended Next Actions.
         r#"You are a project analyst for the {project_name} project. Produce a concise
 **Strategic Report** summarising current state, progress, and recommended next actions.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -1076,22 +979,13 @@ pub fn build_report_finalize_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     ideation: &str,
     feedback: &str,
     dry_run: bool,
     skill_paths: &crate::agent::types::SkillPaths,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let dry_run_note = if dry_run {
         "\n\n**DRY RUN MODE**: Do NOT actually run any `gh` commands. Instead, print the \
          exact commands you WOULD run (gh issue list, gh issue close, gh issue create) \
@@ -1119,7 +1013,7 @@ which were kept and which were filtered out, and why.
     format!(
         r#"You are a project analyst for the {project_name} project.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -1210,13 +1104,11 @@ pub fn build_retrospective_draft_prompt(
     merged_prs: &str,
     open_issues: &str,
     open_prs: &str,
-    status: &str,
-    issues_md: &str,
 ) -> String {
     format!(
         r#"You are a sprint retrospective facilitator for the {project_name} project.
 
-Read AGENTS.md and skills/ for project conventions.
+Read AGENTS.md and skills/ for project conventions. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## What Happened This Cycle
 
@@ -1234,12 +1126,6 @@ Read AGENTS.md and skills/ for project conventions.
 
 ### Still Open PRs
 {open_prs}
-
-### Project Status
-{status}
-
-### Implementation Guidance (ISSUES.md)
-{issues_md}
 
 ---
 
@@ -1293,14 +1179,12 @@ pub fn build_retrospective_finalize_prompt(
     merged_prs: &str,
     open_issues: &str,
     open_prs: &str,
-    status: &str,
-    issues_md: &str,
     feedback: &str,
 ) -> String {
     format!(
         r#"You are a sprint retrospective facilitator for the {project_name} project.
 
-Read AGENTS.md and skills/ for project conventions.
+Read AGENTS.md and skills/ for project conventions. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## What Happened This Cycle
 
@@ -1318,12 +1202,6 @@ Read AGENTS.md and skills/ for project conventions.
 
 ### Still Open PRs
 {open_prs}
-
-### Project Status
-{status}
-
-### Implementation Guidance (ISSUES.md)
-{issues_md}
 
 ---
 
@@ -1368,11 +1246,6 @@ percolate into sprint planning as discrete tickets.
    If the agent harness suggests a multi-issue tracker layout, ignore it — that pattern
    is reserved for Strategic Review and Sprint Planning.
 
-4. **Update ISSUES.md** — Mark completed issues as ✅ Done in the Task Dependency
-   Hierarchy tables. Reference the single retro issue, not per-item children.
-5. **Update STATUS.md** — Reflect any status changes from the completed sprint work.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
-
 The action items inside this single issue feed directly into the next strategic review
 and sprint planning cycle."#,
         project_name = project_name,
@@ -1381,8 +1254,6 @@ and sprint planning cycle."#,
         merged_prs = merged_prs,
         open_issues = open_issues,
         open_prs = open_prs,
-        status = status,
-        issues_md = issues_md,
         feedback = feedback,
         retro_label = labels::RETROSPECTIVE,
         tracker_label = labels::TRACKER,
@@ -1835,7 +1706,7 @@ Read AGENTS.md and the listed skill files before making any edits.
 You may edit ONLY the following existing agent-facing files:
 {file_list}
 
-Do NOT edit source code, tests, Cargo manifests, README files, STATUS.md, ISSUES.md, or any
+Do NOT edit source code, tests, Cargo manifests, README files, or any
 other project files. Do NOT create new skills from scratch.
 
 ## Refresh Objective
@@ -1917,8 +1788,7 @@ At a minimum, verify:
 - referenced crates, binaries, and scripts still exist with the described shapes
 - code snippets and command examples still compile / run
 - feature lists and architectural descriptions match the current node types and crate layout
-- STATUS.md and ISSUES.md reflect the current state of trackers and open work
-  (tracker parity: every documented tracker should match what `gh issue list --label tracker` returns)
+- tracker parity: every documented tracker should match what `gh issue list --label tracker` returns
 - the documented Dev UI workflow inventory matches the actual shipped workflows in
   `crates/dev/src/agent/types.rs::Workflow` and the sidebar buttons in
   `crates/dev/src/ui/sidebar.rs` — no missing workflows, no leftover renamed names
@@ -1964,8 +1834,6 @@ fn housekeeping_context(
     open_prs: &str,
     local_branches: &str,
     tracker_bodies: &str,
-    status: &str,
-    issues_md: &str,
 ) -> String {
     format!(
         r#"## Project Context
@@ -1980,39 +1848,23 @@ fn housekeeping_context(
 {local_branches}
 
 ### Tracker Issue Bodies
-{tracker_bodies}
-
-### STATUS.md
-{status}
-
-### ISSUES.md
-{issues_md}"#
+{tracker_bodies}"#
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn build_housekeeping_draft_prompt(
     project_name: &str,
     open_issues: &str,
     open_prs: &str,
     local_branches: &str,
     tracker_bodies: &str,
-    status: &str,
-    issues_md: &str,
 ) -> String {
-    let context = housekeeping_context(
-        open_issues,
-        open_prs,
-        local_branches,
-        tracker_bodies,
-        status,
-        issues_md,
-    );
+    let context = housekeeping_context(open_issues, open_prs, local_branches, tracker_bodies);
     format!(
         r#"You are a housekeeping agent for the {project_name} project. Your job is to audit
 the project for orphaned, stale, and drifted artifacts and produce a structured report.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -2021,7 +1873,7 @@ Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
 ## Sweep Categories
 
 Run ALL of the following sweeps. For each finding, report:
-- **Kind**: the sweep category (1-7)
+- **Kind**: the sweep category (1-6)
 - **Target**: the specific artifact (issue/PR/branch/file/label)
 - **Age**: how long since last activity
 - **Suggested action**: what to do about it
@@ -2081,13 +1933,6 @@ Run ALL of the following sweeps. For each finding, report:
 - Labels present in the repo but not referenced anywhere in the codebase. Surface for review.
 - Labels with zero open issues attached and last applied >90 days ago.
 
-### 7. ISSUES.md / STATUS.md Drift
-
-- Entries in `ISSUES.md` Task Dependency Hierarchy tables whose status disagrees with
-  the actual GitHub issue state (e.g. table says 🔴 Not Started but issue is closed).
-- `STATUS.md` rows referencing capabilities whose tracking issue is closed without the
-  row being updated.
-
 ---
 
 ## Output Format
@@ -2120,29 +1965,19 @@ to gather data for the report."#
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn build_housekeeping_finalize_prompt(
     project_name: &str,
     open_issues: &str,
     open_prs: &str,
     local_branches: &str,
     tracker_bodies: &str,
-    status: &str,
-    issues_md: &str,
     feedback: &str,
 ) -> String {
-    let context = housekeeping_context(
-        open_issues,
-        open_prs,
-        local_branches,
-        tracker_bodies,
-        status,
-        issues_md,
-    );
+    let context = housekeeping_context(open_issues, open_prs, local_branches, tracker_bodies);
     format!(
         r#"You are a housekeeping agent for the {project_name} project.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -2230,24 +2065,15 @@ pub fn build_interview_draft_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     format!(
         r#"You are an interview facilitator for a software project. Your job is to conduct
 a structured discovery interview with the project maintainer to surface the gap
 between what currently exists and what the user intends.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -2295,19 +2121,10 @@ pub fn build_interview_followup_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     prior_answers: &[String],
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let answers_section: String = prior_answers
         .iter()
         .enumerate()
@@ -2318,7 +2135,7 @@ pub fn build_interview_followup_prompt(
         r#"You are an interview facilitator for a software project, conducting round {round}
 of a structured discovery interview.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 
@@ -2365,19 +2182,10 @@ pub fn build_interview_summary_prompt(
     open_issues: &str,
     open_prs: &str,
     recent_commits: &str,
-    status: &str,
-    issues_md: &str,
     crate_tree: &str,
     all_answers: &[String],
 ) -> String {
-    let context = strategic_review_context(
-        open_issues,
-        open_prs,
-        recent_commits,
-        status,
-        issues_md,
-        crate_tree,
-    );
+    let context = strategic_review_context(open_issues, open_prs, recent_commits, crate_tree);
     let answers_section: String = all_answers
         .iter()
         .enumerate()
@@ -2388,7 +2196,7 @@ pub fn build_interview_summary_prompt(
         r#"You are an interview facilitator for a software project. You have completed a
 multi-round discovery interview. Now generate the structured summary.
 
-Read AGENTS.md, skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 {context}
 

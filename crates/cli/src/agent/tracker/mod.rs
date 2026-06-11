@@ -161,7 +161,7 @@ pub fn parse_pending(body: &str) -> Vec<PendingIssue> {
     let mut seen = HashSet::new();
     for line in body.lines() {
         let lower = line.to_lowercase();
-        // Support Markdown checkboxes and the table status markers from ISSUES.md (🟡, 🔴)
+        // Support Markdown checkboxes and the table status markers (🟡, 🔴) used in tracker issue bodies
         let is_pending = lower.contains("[ ]") || lower.contains("🟡") || lower.contains("🔴");
         if !is_pending {
             continue;
@@ -479,7 +479,7 @@ reference — avoid re-reading files that are already included below.
 - Implement the changes described above.
 - Validate your changes using the test/build/format commands documented in AGENTS.md.
 - Keep idle memory under 10MB — no unnecessary allocations.
-- Do NOT update shared tracker/status files such as ISSUES.md or STATUS.md from an issue implementation branch; serialized planning, retrospective, and housekeeping workflows own those edits.
+- Do NOT edit the parent tracker, sprint, or strategic-review issue bodies on GitHub from an implementation branch; serialized planning, retrospective, and housekeeping workflows own those edits via `gh issue edit`.
 - Do NOT modify `.github/**`, especially `.github/workflows/**`, from a sprint/tracker issue branch. If this issue or its parent tracker requires `.github/**` changes, stop and comment that the work is blocked by the immutable CI control-plane policy.
 - Do NOT commit changes — the calling script handles commits.{tracker_instruction}"#
     )

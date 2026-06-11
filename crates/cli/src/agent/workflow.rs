@@ -404,13 +404,9 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
         "sprint" => {
             let open_issues = gh_open_issues(50);
             let open_prs = open_prs_json();
-            let status = read_project_file(&cfg.root, "STATUS.md");
-            let issues_md = read_project_file(&cfg.root, "ISSUES.md");
             serde_json::json!({
                 "open_issues": open_issues,
                 "open_prs": open_prs,
-                "status": status,
-                "issues_md": issues_md,
             })
         }
         "strategic" => {
@@ -419,15 +415,11 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
             let recent_commits = cmd_stdout("git", &["log", "--oneline", "--no-decorate", "-30"])
                 .unwrap_or_default();
             let crate_tree = list_crates_dir(&cfg.root);
-            let status = read_project_file(&cfg.root, "STATUS.md");
-            let issues_md = read_project_file(&cfg.root, "ISSUES.md");
             serde_json::json!({
                 "open_issues": open_issues,
                 "open_prs": open_prs,
                 "recent_commits": recent_commits,
                 "crate_tree": crate_tree,
-                "status": status,
-                "issues_md": issues_md,
             })
         }
         "retro" => {
@@ -441,16 +433,12 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
                     .unwrap_or_else(|_| "[]".to_string());
             let open_issues = gh_open_issues(50);
             let open_prs = open_prs_json();
-            let status = read_project_file(&cfg.root, "STATUS.md");
-            let issues_md = read_project_file(&cfg.root, "ISSUES.md");
             serde_json::json!({
                 "recent_commits": recent_commits,
                 "closed_issues": closed_issues,
                 "merged_prs": merged_prs,
                 "open_issues": open_issues,
                 "open_prs": open_prs,
-                "status": status,
-                "issues_md": issues_md,
             })
         }
         "housekeeping" => {
@@ -469,15 +457,11 @@ pub fn gather_context_as_json(cfg: &Config, gatherer: &str) -> serde_json::Value
                     t.number, t.title, body
                 ));
             }
-            let status = read_project_file(&cfg.root, "STATUS.md");
-            let issues_md = read_project_file(&cfg.root, "ISSUES.md");
             serde_json::json!({
                 "open_issues": open_issues,
                 "open_prs": open_prs,
                 "local_branches": local_branches,
                 "tracker_bodies": tracker_bodies,
-                "status": status,
-                "issues_md": issues_md,
             })
         }
         "discovery" => {
@@ -514,10 +498,6 @@ fn gh_open_issues(limit: u32) -> String {
 fn open_prs_json() -> String {
     let prs = list_open_prs();
     serde_json::to_string_pretty(&prs).unwrap_or_else(|_| "[]".to_string())
-}
-
-fn read_project_file(root: &str, name: &str) -> String {
-    std::fs::read_to_string(format!("{root}/{name}")).unwrap_or_default()
 }
 
 fn read_discovery_context(root: &str) -> String {

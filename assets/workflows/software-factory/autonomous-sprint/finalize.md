@@ -10,12 +10,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Open Pull Requests
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Human Feedback on the Draft
 
 {{feedback}}
@@ -33,8 +27,7 @@ Incorporate feedback and publish the FINAL autonomous sprint execution plan.
    - layer-specific validation gates
    - explicit fallback/rollback rules
 3. Ensure each active child issue includes clear acceptance criteria and test requirements.
-4. Update ISSUES.md to match the tracker's finalized hierarchy and checklist.
-5. Update STATUS.md with current sprint objective, risk notes, and expected completion window.
-6. Keep tracker, child issues, and local docs in parity.
+4. Edit the active sprint tracker issue body (`gh issue edit <tracker>`) to record the sprint objective, risk notes, and expected completion window.
+5. Keep tracker and child issues in parity.
 
-Use `gh issue edit` and local file updates to persist the final plan.
+Use `gh issue edit` to persist the final plan.

@@ -19,9 +19,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Open PRs
 {{open_prs}}
 
-### Status
-{{status}}
-
 ## Output
 
 Produce a draft retrospective with these sections:

@@ -41,7 +41,7 @@ $ caretta fix-pr 1337
 # Continuously work issues from a tracker issue
 $ caretta loop 7
 
-# Sweep open issues, PRs, local branches, tracker bodies, STATUS.md, and ISSUES.md
+# Sweep open issues, PRs, local branches, and tracker bodies
 $ caretta housekeeping
 
 # Refresh root-level project docs against the current state of the code

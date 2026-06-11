@@ -24,7 +24,8 @@ You are an expert software engineer working on this project. Your goal is to hel
 
 ## Contextual Resources
 
-- Root `README.md` and `ISSUES.md`: Current status and implementation guidance.
+- Root `README.md`: Project overview and getting started.
+- GitHub issues (`gh issue list --label tracker,sprint,strategic-review`): Live project status and implementation guidance.
 - Project documentation (e.g., `docs/`): Detailed design and developer guides.
 
 When working on a task, always start by reviewing these resources to ensure your proposed solution aligns with the project's vision and standards.

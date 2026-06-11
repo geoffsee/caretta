@@ -22,17 +22,10 @@ pub fn run_interview_draft(cfg: &Config) {
         answers.clear();
     }
 
-    let (open_issues, open_prs, recent_commits, crate_tree, status, issues_md) =
-        gather_strategic_context_base(cfg);
+    let (open_issues, open_prs, recent_commits, crate_tree) = gather_strategic_context_base(cfg);
 
-    let prompt = build_interview_draft_prompt(
-        &open_issues,
-        &open_prs,
-        &recent_commits,
-        &status,
-        &issues_md,
-        &crate_tree,
-    );
+    let prompt =
+        build_interview_draft_prompt(&open_issues, &open_prs, &recent_commits, &crate_tree);
 
     if cfg.dry_run {
         log_resolved_agent_launch(cfg, &[]);
@@ -70,8 +63,7 @@ pub fn run_interview_respond(cfg: &Config, answer: &str) {
 
     let round = answers.len(); // 1-indexed (1 = first follow-up, etc.)
 
-    let (open_issues, open_prs, recent_commits, crate_tree, status, issues_md) =
-        gather_strategic_context_base(cfg);
+    let (open_issues, open_prs, recent_commits, crate_tree) = gather_strategic_context_base(cfg);
 
     if round <= INTERVIEW_MAX_FOLLOWUP_ROUNDS {
         // Follow-up round.
@@ -83,8 +75,6 @@ pub fn run_interview_respond(cfg: &Config, answer: &str) {
             &open_issues,
             &open_prs,
             &recent_commits,
-            &status,
-            &issues_md,
             &crate_tree,
             &answers,
         );
@@ -119,8 +109,6 @@ pub fn run_interview_respond(cfg: &Config, answer: &str) {
             &open_issues,
             &open_prs,
             &recent_commits,
-            &status,
-            &issues_md,
             &crate_tree,
             &answers,
         );

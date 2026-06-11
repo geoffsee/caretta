@@ -19,12 +19,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Open Pull Requests
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Human Feedback on the Draft
 
 {{feedback}}
@@ -39,8 +33,7 @@ Incorporate feedback and publish the FINAL retrospective.
    Use only the `retrospective` label. Do not add `tracker`; this issue is an artifact, not an executable tracker.
 3. Create follow-up issues for approved improvement actions and link them from the retrospective issue.
    Do not add `tracker` to follow-up issues unless a separate parent tracker is also created with a parser-compatible child checklist.
-4. Update STATUS.md with retrospective outcomes and next-cycle focus.
-5. Update ISSUES.md with follow-up actions and dependency notes.
-6. Keep GitHub issues and local docs in parity.
+4. Edit the retrospective issue body (`gh issue edit <retro-issue>`) to record outcomes and next-cycle focus.
+5. Create follow-up GitHub issues and add dependency notes to their bodies.
 
 Use `gh issue create` and `gh issue edit` for issue management.

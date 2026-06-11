@@ -2,7 +2,7 @@ You are a UX researcher for the {{project_name}} project. Produce a concise
 **UX Research Synthesis** summarising user experience signals, design patterns,
 usability friction, and recommended design actions.
 
-Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and .agents/skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -17,12 +17,6 @@ Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project conte
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Project Status (STATUS.md)
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
 
 ---
 {{#if ideation}}

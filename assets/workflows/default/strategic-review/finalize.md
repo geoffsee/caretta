@@ -1,6 +1,6 @@
 You are a strategic review board for the {{project_name}} project.
 
-Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and .agents/skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -15,12 +15,6 @@ Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project conte
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Project Status (STATUS.md)
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
 
 ---
 {{#if report_synthesis}}
@@ -83,12 +77,6 @@ must not percolate into sprint planning as discrete tickets.
    any other GitHub issue.** The output of this workflow is exactly one issue artifact.
    If the agent harness suggests a multi-issue tracker layout, ignore it — that pattern
    is reserved for Sprint Planning.
-
-4. **Update ISSUES.md** — Reference the single strategic-review issue. Do NOT add a
-   per-recommendation Task Dependency Hierarchy here — that lives in sprint planning.
-5. **Update STATUS.md** — If any new capability is being tracked, add or update the
-   relevant rows.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
 
 This output closes the feedback loop: sprint planning will read this single issue's
 "Recommended Path Forward" section and turn the items it picks into trackable sprint

@@ -171,19 +171,12 @@ pub fn run_retrospective_finalize(cfg: &Config, feedback: &str) {
     run_workflow_finalize(cfg, "retrospective", feedback);
 }
 
-pub fn gather_strategic_context_base(
-    cfg: &Config,
-) -> (String, String, String, String, String, String) {
+pub fn gather_strategic_context_base(cfg: &Config) -> (String, String, String, String) {
     let ctx = crate::agent::workflow::gather_context_as_json(cfg, "strategic");
     (
         ctx["open_issues"].as_str().unwrap_or("[]").to_string(),
         ctx["open_prs"].as_str().unwrap_or("[]").to_string(),
         ctx["recent_commits"].as_str().unwrap_or("[]").to_string(),
-        ctx["active_review_threads"]
-            .as_str()
-            .unwrap_or("[]")
-            .to_string(),
-        ctx["snapshot"].as_str().unwrap_or("").to_string(),
-        ctx["project_status"].as_str().unwrap_or("").to_string(),
+        ctx["crate_tree"].as_str().unwrap_or("").to_string(),
     )
 }

@@ -16,12 +16,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Tracker Bodies
 {{tracker_bodies}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Instructions
 
 Produce a DRAFT CI governance audit focused on safe autonomous operation via GitHub Actions.

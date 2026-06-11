@@ -10,12 +10,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Open Pull Requests
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Human Feedback on the Draft
 
 The human reviewed the draft sprint plan and provided this feedback:
@@ -51,6 +45,4 @@ Incorporate the feedback above and produce the FINAL sprint plan:
    - A checklist with `- [ ] #N Title (blocked by #X, #Y)` entries for each item.
 4. Edit each child issue to add `Tracked by #<tracker>` in the body using
    `gh issue edit <child> --body "..."`.
-5. Update ISSUES.md to add the new sprint's Task Dependency Hierarchy section. Keep existing completed sections intact.
-6. Update STATUS.md if the sprint scope changes the status of any tracked feature.
-7. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
+5. Update the new sprint tracker issue body (`gh issue edit <tracker> --body "..."`) so it contains the Task Dependency Hierarchy table and checklist. Keep prior trackers' bodies untouched.

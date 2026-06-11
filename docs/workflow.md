@@ -178,7 +178,7 @@ configured persona skill.
 
 Click **Strategic Review** in the ACTIONS section.
 
-**Draft phase** -- The agent reads the full project state (open issues, open PRs, recent commits, STATUS.md, ISSUES.md, crate layout) and analyses it from four perspectives:
+**Draft phase** -- The agent reads the full project state (open issues, open PRs, recent commits, crate layout) and analyses it from four perspectives:
 
 - **Product Stakeholder** -- what capabilities are missing, what would unlock adoption
 - **Business Analyst** -- untracked requirements, missing user stories, acceptance criteria gaps
@@ -290,7 +290,7 @@ Outside the lifecycle loop, two one-shot hygiene actions keep the project's writ
 | Action | Scope | Reads as ground truth | Never edits |
 |---|---|---|---|
 | **Refresh Docs** (sidebar button) | Root project Markdown files discovered at run time, such as `README.md` | The current repo: crate layout, shipped workflows, tracker state | Agent-facing guidance (`AGENTS.md`, skills, vendor agent files), source code, tests, manifests |
-| **Refresh Agents** (sidebar button) | Materialized `AGENTS.md` and skill `SKILL.md` files under the caretta app-data assets directory, project-local preset skills, plus optional vendor files (`CLAUDE.md`, `CLINE.md`, `GEMINI.md`, `COPILOT.md`, `GROK.md`, `JUNIE.md`, `XAI.md`) | The current repo: actual file paths, scripts, ops, macros, crate names | `README.md`, `STATUS.md`, `ISSUES.md`, `docs/**`, source code, tests, manifests |
+| **Refresh Agents** (sidebar button) | Materialized `AGENTS.md` and skill `SKILL.md` files under the caretta app-data assets directory, project-local preset skills, plus optional vendor files (`CLAUDE.md`, `CLINE.md`, `GEMINI.md`, `COPILOT.md`, `GROK.md`, `JUNIE.md`, `XAI.md`) | The current repo: actual file paths, scripts, ops, macros, crate names | `README.md`, `docs/**`, source code, tests, manifests |
 
 Each action enumerates its in-scope file set, runs the agent against a prompt that forbids touching out-of-scope files, then opens a PR scoped to its own file set. No-op runs (no drift detected) exit cleanly without opening a PR. Both support `--dry-run`.
 

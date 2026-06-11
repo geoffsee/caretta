@@ -16,12 +16,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Tracker Bodies
 {{tracker_bodies}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Human Feedback on the Draft
 
 {{feedback}}
@@ -41,8 +35,7 @@ Incorporate feedback and produce the FINAL CI governance hardening plan.
    - completion criteria
    - parser-compatible checklist of child issues using `- [ ] #N Title (blocked by #X)` rows
 3. Do not add the `tracker` label to child issues. Add `Tracked by #<tracker>` to each child issue body.
-4. Update ISSUES.md with the same remediation plan and dependency structure.
-5. Update STATUS.md with key governance risks and mitigation status.
-6. Ensure issue tracker and local docs remain in parity.
+4. Capture the remediation plan in the relevant tracker/security issue body via `gh issue edit`.
+5. Record governance risks and mitigation status in the active governance tracker issue body.
 
 Use `gh issue create` / `gh issue edit` for GitHub updates.

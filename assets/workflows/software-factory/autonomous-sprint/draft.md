@@ -10,12 +10,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Open Pull Requests
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Instructions
 
 Produce a DRAFT execution plan for the next autonomous sprint run on GitHub Actions.

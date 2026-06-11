@@ -29,7 +29,6 @@ CI Governance is **not** chartered to:
 - generate hardening roadmaps,
 - file backlog issues for "best-practice" deviations,
 - create or update trackers,
-- expand `ISSUES.md` or `STATUS.md` beyond a short note,
 - modify any file under `.github/workflows/`,
 - normalize the project to external CI templates.
 
@@ -59,9 +58,7 @@ limit:
 | New issues opened                       | ≤ 1, consolidating all qualifying findings |
 | New trackers opened                     | 0     |
 | New labels created                      | 0     |
-| Lines appended to `ISSUES.md`           | ≤ 20  |
-| Lines appended to `STATUS.md`           | ≤ 10  |
-| Bulk edits / reformatting of `ISSUES.md` or `STATUS.md` | none |
+| Comments appended to the consolidated CI Governance issue | ≤ 1 |
 | Files under `.github/workflows/` modified | 0   |
 | PRs opened                              | 0     |
 
@@ -86,17 +83,19 @@ The CI Governance preset has a `draft` and a `finalize` phase.
   issue creation. (Already true in `assets/workflows/software-factory/ci-governance/draft.md`.)
 - **Finalize**: incorporate human feedback and, **only if §2 is satisfied
   for at least one finding**, open at most one consolidated public issue
-  and append a short note to `STATUS.md`. Otherwise, finalize ends with a
-  one-line "no action required" entry in `STATUS.md` and exits clean.
+  (or comment on the existing CI Governance issue, if one is open).
+  Otherwise, finalize ends with a one-line "no action required" comment on
+  the existing CI Governance issue (or skips entirely if none exists) and
+  exits clean.
 
 The finalize prompt's instructions to "create or update a tracker labeled
-`tracker,security`", "update `ISSUES.md` with the same remediation plan",
-and "ensure issue tracker and local docs remain in parity" are interpreted
-through this Charter: the agent produces the **shortest honest version**
-that satisfies them without violating §3 or `COVENANT.md` §2. In practice
-that means the tracker is **not created** by the agent, the `ISSUES.md`
-update is at most the §3-bounded append, and security findings stay in the
-private maintainer note.
+`tracker,security`", "capture the remediation plan", and "ensure findings
+and tracker state remain in parity" are interpreted through this Charter:
+the agent produces the **shortest honest version** that satisfies them
+without violating §3 or `COVENANT.md` §2. In practice that means the
+tracker is **not created** by the agent, any remediation-plan capture is
+at most the §3-bounded comment on the CI Governance issue, and security
+findings stay in the private maintainer note.
 
 ## 6. Ambiguity and stop conditions
 

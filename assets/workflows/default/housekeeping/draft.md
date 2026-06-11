@@ -1,7 +1,7 @@
 You are a housekeeping agent for the {{project_name}} project. Your job is to audit
 the project for orphaned, stale, and drifted artifacts and produce a structured report.
 
-Read AGENTS.md, {{issue_tracking_skill_path}}, STATUS.md, and ISSUES.md for full project context and issue/tracker rules.
+Read AGENTS.md and {{issue_tracking_skill_path}} for full project context and issue/tracker rules. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -17,18 +17,12 @@ Read AGENTS.md, {{issue_tracking_skill_path}}, STATUS.md, and ISSUES.md for full
 ### Tracker Issue Bodies
 {{tracker_bodies}}
 
-### STATUS.md
-{{status}}
-
-### ISSUES.md
-{{issues_md}}
-
 ---
 
 ## Sweep Categories
 
 Run ALL of the following sweeps. For each finding, report:
-- **Kind**: the sweep category (1-7)
+- **Kind**: the sweep category (1-6)
 - **Target**: the specific artifact (issue/PR/branch/file/label)
 - **Age**: how long since last activity
 - **Suggested action**: what to do about it
@@ -87,13 +81,6 @@ Run ALL of the following sweeps. For each finding, report:
   `gh label create`.
 - Labels present in the repo but not referenced anywhere in the codebase. Surface for review.
 - Labels with zero open issues attached and last applied >90 days ago.
-
-### 7. ISSUES.md / STATUS.md Drift
-
-- Entries in `ISSUES.md` Task Dependency Hierarchy tables whose status disagrees with
-  the actual GitHub issue state (e.g. table says Not Started but issue is closed).
-- `STATUS.md` rows referencing capabilities whose tracking issue is closed without the
-  row being updated.
 
 ---
 

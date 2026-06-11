@@ -10,12 +10,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Open Pull Requests
 {{open_prs}}
 
-### Status
-{{status}}
-
-### Guidance
-{{issues_md}}
-
 ## Instructions
 
 Produce a DRAFT estimation review for the next iteration.

@@ -238,9 +238,9 @@ mod tests {
             .status()
             .unwrap();
         fs::write(root.join("README.md"), "# Initial\n").unwrap();
-        fs::write(root.join("STATUS.md"), "# Status\n").unwrap();
+        fs::write(root.join("CHANGELOG.md"), "# Status\n").unwrap();
         std::process::Command::new("git")
-            .args(["add", "README.md", "STATUS.md"])
+            .args(["add", "README.md", "CHANGELOG.md"])
             .current_dir(root)
             .status()
             .unwrap();
@@ -258,12 +258,12 @@ mod tests {
         let root = dir.path();
 
         fs::write(root.join("README.md"), "edit 1\n").unwrap();
-        fs::write(root.join("STATUS.md"), "edit 2\n").unwrap();
+        fs::write(root.join("CHANGELOG.md"), "edit 2\n").unwrap();
 
         let doc_files = ["README.md".to_string()];
         let scoped = git_status_porcelain_scoped(Some(root), &doc_files);
         assert!(scoped.contains("README.md"), "got: {scoped:?}");
-        assert!(!scoped.contains("STATUS.md"), "got: {scoped:?}");
+        assert!(!scoped.contains("CHANGELOG.md"), "got: {scoped:?}");
     }
 
     #[test]
@@ -287,7 +287,7 @@ mod tests {
             .status()
             .unwrap();
 
-        let doc_files = ["README.md".to_string(), "STATUS.md".to_string()];
+        let doc_files = ["README.md".to_string(), "CHANGELOG.md".to_string()];
         assert!(git_commit_paths(
             Some(root),
             "refresh project docs",

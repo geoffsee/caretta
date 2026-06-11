@@ -13,12 +13,6 @@ Read AGENTS.md and {{issue_tracking_skill_path}} for project conventions and iss
 ### Recent Commits
 {{recent_commits}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Human Feedback on the Draft
 
 {{feedback}}
@@ -34,9 +28,7 @@ Incorporate feedback and produce the FINAL Factory Charter.
    - the final charter
    - the non-negotiable safety checklist
    - readiness gaps and remediation plan
-4. Update STATUS.md with a short "Software Factory Charter" section.
-5. Update ISSUES.md with a "Software Factory Setup Backlog" section listing
-   actionable next steps.
-6. Ensure ISSUES.md and the strategic-review issue are in parity.
+4. Open or update a `factory-charter` labelled issue (`gh issue list --label factory-charter` to find it; `gh issue create --label factory-charter` if none) capturing the charter.
+5. Create the setup-backlog items as labelled GitHub issues (`gh issue create --label factory-setup`) and link them from the factory-charter issue body.
 
 Operate directly with `gh` commands when writing or updating the issue.

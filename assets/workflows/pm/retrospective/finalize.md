@@ -19,12 +19,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Still Open PRs
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ---
 
 ## Human Feedback on the Draft
@@ -67,11 +61,6 @@ percolate into sprint planning as discrete tickets.
    any other GitHub issue.** The output of this workflow is exactly one issue artifact.
    If the agent harness suggests a multi-issue tracker layout, ignore it — that pattern
    is reserved for Strategic Review and Sprint Planning.
-
-4. **Update ISSUES.md** — Mark completed issues as done in the Task Dependency
-   Hierarchy tables. Reference the single retro issue, not per-item children.
-5. **Update STATUS.md** — Reflect any status changes from the completed sprint work.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
 
 The action items inside this single issue feed directly into the next strategic review
 and sprint planning cycle.

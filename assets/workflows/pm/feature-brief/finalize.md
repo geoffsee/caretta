@@ -1,6 +1,6 @@
 You are a product manager writing a feature brief for the {{project_name}} project.
 
-Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project context.
+Read AGENTS.md and .agents/skills/ for full project context. Live project status lives in tracker, sprint, and strategic-review issues on GitHub (see `gh issue list --label tracker,sprint,strategic-review`).
 
 ## Project Context
 
@@ -15,12 +15,6 @@ Read AGENTS.md, .agents/skills/, STATUS.md, and ISSUES.md for full project conte
 
 ### Open Pull Requests
 {{open_prs}}
-
-### Project Status (STATUS.md)
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
 
 ---
 {{#if strategic_review}}
@@ -89,10 +83,5 @@ durable, and consumable by downstream workflows (Sprint Planning, Engineering).
 3. **Do not file per-requirement issues, do not file a parent tracker issue, do not edit
    any other GitHub issue.** The output of this workflow is exactly one issue artifact.
    Sprint planning will decompose the brief into trackable sprint issues at that stage.
-
-4. **Update ISSUES.md** — Reference the feature brief issue.
-5. **Update STATUS.md** — If the brief introduces a new capability to track, add or
-   update the relevant rows.
-6. CRITICAL: ISSUES.md and GitHub issues must remain in parity. Update them NOW.
 
 After publishing, print the issue URL. Format: `Feature brief published: <URL>`

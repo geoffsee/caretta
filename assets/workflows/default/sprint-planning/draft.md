@@ -10,12 +10,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Open Pull Requests
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ## Instructions
 
 Produce a DRAFT sprint plan for the next development cycle:

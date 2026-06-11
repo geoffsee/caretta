@@ -21,12 +21,6 @@ Read AGENTS.md and .agents/skills/ for project conventions.
 ### Still Open PRs
 {{open_prs}}
 
-### Project Status
-{{status}}
-
-### Implementation Guidance (ISSUES.md)
-{{issues_md}}
-
 ---
 
 ## Conduct the UX retrospective:
