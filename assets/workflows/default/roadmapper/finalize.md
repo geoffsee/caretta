@@ -46,6 +46,12 @@ issues; phases and initiatives belong as sections inside this single issue's bod
 separate trackable work items. Sprint planning consumes its own workflow; the roadmap must
 not percolate into sprint planning as discrete tickets.
 
+**Persona boundary.** Do NOT include "update / refresh / refine / maintain user personas"
+as a roadmap initiative under any phase, even if the feedback asks for it. Persona
+synthesis is owned by the UX preset's `persona-synthesis` workflow; the roadmap may
+reference personas as an input lens but must not schedule persona-update work as an
+initiative.
+
 1. **Find or create the roadmap issue.** Run
    `gh issue list --state open --label "roadmap" --json number,title --limit 5`
    to see if an open roadmap issue already exists.

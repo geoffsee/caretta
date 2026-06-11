@@ -54,6 +54,11 @@ The finalized roadmap will be published as **exactly one** GitHub issue carrying
 propose a parent-tracker / child-issue layout; phases and initiatives live inside the
 body of that one issue, not as separate trackable work items.
 
+**Persona boundary.** Do NOT include "update / refresh / refine / maintain user personas"
+as a roadmap initiative under any phase. Persona synthesis is owned by the UX preset's
+`persona-synthesis` workflow; the roadmap may reference personas as an input lens but must
+not schedule persona-update work as an initiative.
+
 This is a DRAFT for human review. Do NOT create or edit any GitHub issues yet.
 The human will review the roadmap, adjust timelines, and refine initiatives.
 Present the output clearly so they can give targeted feedback.

@@ -54,6 +54,12 @@ After completing all four perspectives, produce:
    - Brief rationale
 3. **Risks & Watch Items** — Anything that could derail progress if ignored.
 
+**Persona boundary.** Do NOT include "update / refresh / refine / maintain user personas"
+as a Recommended Path Forward item. Persona synthesis is owned by the UX preset's
+`persona-synthesis` workflow and must not appear here as a candidate work item for sprint
+planning to pick up. If the analysis surfaces persona gaps, note them only in **Risks &
+Watch Items** as a signal — do not promote them into the path forward.
+
 The finalized strategic review will be published as **exactly one** GitHub issue carrying
 the `strategic-review` label — a single living strategic-direction artifact. Do not
 propose a parent-tracker / child-issue layout; the recommended path forward lives as a

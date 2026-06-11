@@ -30,6 +30,7 @@ Produce a DRAFT sprint plan for the next development cycle:
 1. **Analyse** — Review the strategic-review recommendations, open issues, open PRs, and completed work. Identify what is ready, what is blocked, and what has open review work.
 2. **Prioritise** — Rank work items by impact and urgency. Consider dependencies.
 2a. **Control-plane boundary** — Exclude any work item that requires changes under `.github/`, especially `.github/workflows/**`. Do not include those items in a sprint plan, tracker checklist, or child issue; list them separately as manual control-plane follow-up.
+2b. **Persona boundary** — Never plan to create, update, refresh, refine, or maintain user personas. Persona synthesis is owned by the UX preset's `persona-synthesis` workflow and is out of scope for sprint planning. Do not propose persona work as a sprint item, tracker checklist entry, or child issue, even if the strategic review or open issues surface persona gaps — those signals stay in the strategic-review artifact and are picked up by `persona-synthesis`, not here.
 3. **Dependencies** — Identify dependencies between work items. Assign each item a Layer number (0 = no dependencies, 1 = depends on layer-0 items, etc.). Items in the same layer can run in parallel.
 4. **Group** — Organise items into a coherent sprint with clear goals.
 5. **Estimate** — Provide rough sizing (S/M/L) for each item.

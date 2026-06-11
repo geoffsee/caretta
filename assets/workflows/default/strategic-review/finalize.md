@@ -44,6 +44,12 @@ The human reviewed the draft strategic analysis and provided this feedback:
 Incorporate the feedback above. Adjust the recommended path forward — reprioritise,
 add, remove, or reshape work items as directed.
 
+**Persona boundary.** Do NOT include "update / refresh / refine / maintain user personas"
+as a Recommended Path Forward item, even if the feedback asks for it. Persona synthesis is
+owned by the UX preset's `persona-synthesis` workflow and must not appear here as a
+candidate work item for sprint planning to pick up. If persona gaps surface, note them
+only in **Risks & Watch Items** as a signal.
+
 Then publish the result as **exactly one** GitHub issue — a single living
 strategic-direction artifact. Do NOT create child or recommendation issues; the
 recommended path forward belongs as a section inside this single issue's body, not as

@@ -35,6 +35,11 @@ Incorporate the feedback above and produce the FINAL sprint plan:
 1a. Exclude any work item that requires changes under `.github/`, especially `.github/workflows/**`.
    Do not create `sprint`, `tracker`, or child issues for those items. Record them only as manual
    control-plane follow-up outside the executable sprint scope.
+1b. Never plan to create, update, refresh, refine, or maintain user personas. Persona synthesis
+   is owned by the UX preset's `persona-synthesis` workflow and is out of scope for sprint
+   planning. Do not create `sprint`, `tracker`, or child issues for persona work, even if the
+   feedback or strategic-review recommendations mention persona gaps — drop those items from the
+   sprint silently; they are picked up by `persona-synthesis`, not here.
 2. Create GitHub issues for each work item using `gh issue create --title "..." --body "..."`.
    Do NOT include `Tracked by #<tracker>` yet — the tracker doesn't exist until step 3.
    The back-reference will be added by `gh issue edit` in step 4.
