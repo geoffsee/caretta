@@ -1,5 +1,6 @@
 use crate::agent::types::{AgentEvent, EVENT_SENDER};
 use regex::Regex;
+use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;
 use std::process::{self, Command, Stdio};
@@ -67,6 +68,13 @@ static PRIVATE_KEY_BLOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?-----END [A-Z0-9 ]*PRIVATE KEY-----"#)
         .expect("valid private key block regex")
 });
+static EMAIL_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"#).expect("valid email regex")
+});
+static UUID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"#)
+        .expect("valid uuid regex")
+});
 
 #[derive(Default)]
 struct RuntimeRedactionConfig {
@@ -101,8 +109,9 @@ pub fn sanitize_log_message(msg: &str) -> String {
 }
 
 fn sanitize_log_message_with_cfg(msg: &str, cfg: Option<&RuntimeRedactionConfig>) -> String {
+    let out = sanitize_json_if_detected(msg, cfg).unwrap_or_else(|| msg.to_string());
     let out = PRIVATE_KEY_BLOCK_RE
-        .replace_all(msg, "[REDACTED_PRIVATE_KEY]")
+        .replace_all(&out, "[REDACTED_PRIVATE_KEY]")
         .into_owned();
     let out = KV_QUOTED_SECRET_RE
         .replace_all(&out, |caps: &regex::Captures<'_>| {
@@ -150,6 +159,7 @@ fn sanitize_log_message_with_cfg(msg: &str, cfg: Option<&RuntimeRedactionConfig>
     let out = AWS_ACCESS_KEY_ID_RE
         .replace_all(&out, "[REDACTED_AWS_ACCESS_KEY_ID]")
         .into_owned();
+    let out = redact_sensitive_plain_text(out);
     if let Some(cfg) = cfg {
         cfg.denylist_regexes.iter().fold(out, |acc, re| {
             re.replace_all(&acc, "[REDACTED_CUSTOM]").into_owned()
@@ -157,6 +167,133 @@ fn sanitize_log_message_with_cfg(msg: &str, cfg: Option<&RuntimeRedactionConfig>
     } else {
         out
     }
+}
+
+fn sanitize_json_if_detected(msg: &str, cfg: Option<&RuntimeRedactionConfig>) -> Option<String> {
+    let trimmed = msg.trim();
+    let (json_start, json_end) = if trimmed.starts_with('{') || trimmed.starts_with('[') {
+        (0, trimmed.len().saturating_sub(1))
+    } else {
+        let start = trimmed.find('{').or_else(|| trimmed.find('['))?;
+        let end = trimmed
+            .rfind('}')
+            .or_else(|| trimmed.rfind(']'))
+            .filter(|end| *end > start)?;
+        (start, end)
+    };
+    if json_start > json_end {
+        return None;
+    }
+    let candidate = &trimmed[json_start..=json_end];
+    let Ok(value) = serde_json::from_str::<Value>(candidate) else {
+        return None;
+    };
+    let value = sanitize_json_value(value, None, cfg);
+    let redacted = serde_json::to_string(&value).ok()?;
+    if json_start == 0 && json_end + 1 == trimmed.len() {
+        return Some(redacted);
+    }
+    let mut out = String::with_capacity(trimmed.len());
+    out.push_str(&trimmed[..json_start]);
+    out.push_str(&redacted);
+    if json_end + 1 < trimmed.len() {
+        out.push_str(&trimmed[json_end + 1..]);
+    }
+    Some(out)
+}
+
+fn sanitize_json_value(
+    value: Value,
+    parent: Option<&str>,
+    cfg: Option<&RuntimeRedactionConfig>,
+) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut out = serde_json::Map::with_capacity(map.len());
+            for (key, child_value) in map {
+                let should_redact = should_redact_json_key(&key, parent, cfg);
+                let next = if should_redact {
+                    Value::String("[REDACTED]".to_string())
+                } else {
+                    sanitize_json_value(child_value, Some(&key), cfg)
+                };
+                out.insert(key, next);
+            }
+            Value::Object(out)
+        }
+        Value::Array(values) => Value::Array(
+            values
+                .into_iter()
+                .map(|value| sanitize_json_value(value, parent, cfg))
+                .collect(),
+        ),
+        Value::String(value) => Value::String(redact_sensitive_string(value)),
+        _ => value,
+    }
+}
+
+fn should_redact_json_key(
+    key: &str,
+    parent: Option<&str>,
+    cfg: Option<&RuntimeRedactionConfig>,
+) -> bool {
+    let key_lc = key.to_ascii_lowercase();
+    if cfg.is_some_and(|c| c.allowlist_keys.contains(&key_lc)) {
+        return false;
+    }
+    if matches!(
+        key_lc.as_str(),
+        "email"
+            | "login"
+            | "username"
+            | "account"
+            | "account_id"
+            | "user_id"
+            | "session"
+            | "session_id"
+            | "thread"
+            | "thread_id"
+            | "auth"
+            | "authorization"
+            | "access_token"
+            | "id_token"
+            | "refresh_token"
+    ) {
+        return true;
+    }
+    if key_lc.ends_with("_id")
+        && (key_lc.contains("session")
+            || key_lc.contains("thread")
+            || key_lc.contains("account")
+            || key_lc.contains("user")
+            || key_lc.contains("actor")
+            || key_lc.contains("owner"))
+    {
+        return true;
+    }
+    if key_lc == "id" {
+        let Some(parent) = parent.map(|p| p.to_ascii_lowercase()) else {
+            return false;
+        };
+        matches!(
+            parent.as_str(),
+            "thread" | "session" | "account" | "user" | "actor" | "author" | "owner"
+        )
+    } else {
+        false
+    }
+}
+
+fn redact_sensitive_string(input: String) -> String {
+    let out = EMAIL_RE
+        .replace_all(&input, "[REDACTED_EMAIL]")
+        .into_owned();
+    UUID_RE.replace_all(&out, "[REDACTED_UUID]").into_owned()
+}
+
+fn redact_sensitive_plain_text(msg: String) -> String {
+    let out = EMAIL_RE.replace_all(&msg, "[REDACTED_EMAIL]").into_owned();
+    UUID_RE.replace_all(&out, "[REDACTED_UUID]").into_owned()
 }
 
 /// Run a command, return trimmed stdout or None on failure.
@@ -346,6 +483,28 @@ mod tests {
         let out = sanitize_log_message(input);
         assert!(!out.contains("abc123"));
         assert!(out.contains("[REDACTED_PRIVATE_KEY]"));
+    }
+
+    #[test]
+    fn redacts_codex_json_session_metadata() {
+        let _guard = lock_redaction_tests();
+        reset_redaction_config();
+        let input = r#"codex: {"type":"thread.started","thread_id":"thread_abc123","account":{"id":"acc_987","email":"alice@example.com","name":"Alice"}}"#;
+        let out = sanitize_log_message(input);
+        assert!(!out.contains("thread_abc123"));
+        assert!(!out.contains("alice@example.com"));
+        assert!(out.contains(r#""thread_id":"[REDACTED]""#));
+        assert!(out.contains(r#""account":"[REDACTED]""#));
+    }
+
+    #[test]
+    fn redacts_email_in_plain_text() {
+        let _guard = lock_redaction_tests();
+        reset_redaction_config();
+        let input = "codex: signed in as alice@example.com for session review";
+        let out = sanitize_log_message(input);
+        assert!(!out.contains("alice@example.com"));
+        assert!(out.contains("[REDACTED_EMAIL]"));
     }
 
     #[test]
