@@ -8,6 +8,7 @@ pub use crate::agent::cmd::{
     cmd_capture, cmd_run, cmd_run_in, cmd_stdout, cmd_stdout_or_die, count_tokens, die,
     has_command, list_all_files, log,
 };
+pub use crate::agent::deploy::run_deploy;
 pub use crate::agent::interview::{run_interview_draft, run_interview_respond};
 pub use crate::agent::issue::{
     commit_with_retries, preflight, run_loop, run_single_issue, run_tracker_matrix, work_on_issue,
@@ -75,4 +76,11 @@ pub fn action_visual_regression(
     _ctx: &mut crate::agent::actions::ActionContext,
 ) -> Result<(), String> {
     run_visual_regression(cfg)
+}
+
+pub fn action_deploy(
+    cfg: &Config,
+    _ctx: &mut crate::agent::actions::ActionContext,
+) -> Result<(), String> {
+    run_deploy(cfg)
 }

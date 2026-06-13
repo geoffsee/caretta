@@ -655,6 +655,21 @@ pub struct VisualRegressionConfig {
     pub screenshots_dir: String,
 }
 
+/// Project-specific deploy command and contextual metadata.
+///
+/// `command` is argv-style (program followed by args). `environment` and `url`
+/// are retained as workflow context only; the runner does not transform them
+/// into environment variables or append them as arguments.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeployConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub environment: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub url: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: Agent,
@@ -676,6 +691,8 @@ pub struct Config {
     pub test: TestCommands,
     #[serde(default)]
     pub visual_regression: VisualRegressionConfig,
+    #[serde(default)]
+    pub deploy: DeployConfig,
     /// Optional context workspace name. When `Some(name)`, the agent resolves
     /// presets, workflows, skills, discovery-framing, and personas first from
     /// `<root>/.caretta/workspaces/<name>/...` before falling back to the
@@ -788,6 +805,7 @@ impl fmt::Debug for Config {
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
             .field("visual_regression", &self.visual_regression)
+            .field("deploy", &self.deploy)
             .field("workspace", &self.workspace)
             .finish()
     }
@@ -867,6 +885,8 @@ pub struct DevConfig {
     pub test: TestCommands,
     #[serde(default, skip_serializing_if = "is_default")]
     pub visual_regression: VisualRegressionConfig,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub deploy: DeployConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -992,7 +1012,9 @@ pub use agent_common::{AgentCliAdapter, AgentCliCommand, AgentInvocation};
 
 #[cfg(test)]
 mod agent_binary_tests {
-    use super::{Agent, DevConfig, ModelPricing, PricingConfig, VisualRegressionConfig};
+    use super::{
+        Agent, DeployConfig, DevConfig, ModelPricing, PricingConfig, VisualRegressionConfig,
+    };
     use std::collections::HashMap;
 
     #[test]
@@ -1081,5 +1103,41 @@ screenshots_dir = "tests/visual/screenshots"
         assert!(toml.contains(r#"command = ["bun", "x", "playwright", "test", "tests/visual"]"#));
         assert!(toml.contains(r#"base_url = "http://localhost:5173""#));
         assert!(toml.contains(r#"screenshots_dir = "tests/visual/screenshots""#));
+    }
+
+    #[test]
+    fn deploy_config_deserializes_from_toml() {
+        let cfg: DevConfig = toml::from_str(
+            r#"
+[deploy]
+command = ["./scripts/deploy.sh", "staging"]
+environment = "staging"
+url = "https://staging.example.com"
+"#,
+        )
+        .expect("deploy config should parse");
+
+        assert_eq!(cfg.deploy.command, ["./scripts/deploy.sh", "staging"]);
+        assert_eq!(cfg.deploy.environment, "staging");
+        assert_eq!(cfg.deploy.url, "https://staging.example.com");
+    }
+
+    #[test]
+    fn deploy_config_serializes_when_present() {
+        let cfg = DevConfig {
+            deploy: DeployConfig {
+                command: vec!["./scripts/deploy.sh".to_string(), "staging".to_string()],
+                environment: "staging".to_string(),
+                url: "https://staging.example.com".to_string(),
+            },
+            ..DevConfig::default()
+        };
+
+        let toml = toml::to_string(&cfg).expect("deploy config should serialize");
+
+        assert!(toml.contains("[deploy]"));
+        assert!(toml.contains(r#"command = ["./scripts/deploy.sh", "staging"]"#));
+        assert!(toml.contains(r#"environment = "staging""#));
+        assert!(toml.contains(r#"url = "https://staging.example.com""#));
     }
 }

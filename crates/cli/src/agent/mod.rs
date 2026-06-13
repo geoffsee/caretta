@@ -8,6 +8,7 @@ pub mod cli;
 pub mod cmd;
 pub mod config_store;
 pub mod conflicts;
+pub mod deploy;
 pub mod fix_pr;
 pub mod gh;
 pub mod github_app_installer;

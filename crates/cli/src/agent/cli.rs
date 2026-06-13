@@ -33,6 +33,7 @@ pub fn parse_args() -> Config {
         bot_credentials: None,
         test: Default::default(),
         visual_regression: Default::default(),
+        deploy: Default::default(),
         workspace: None,
     }
 }
@@ -63,6 +64,7 @@ pub fn parse_args() -> Config {
     let pricing = dev_cfg.pricing;
     let test = dev_cfg.test;
     let visual_regression = dev_cfg.visual_regression;
+    let deploy = dev_cfg.deploy;
 
     Config {
         agent: Agent::Claude, // Default, will be overridden by CLI
@@ -85,6 +87,7 @@ pub fn parse_args() -> Config {
         bot_credentials,
         test,
         visual_regression,
+        deploy,
         workspace: None,
     }
 }

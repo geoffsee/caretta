@@ -492,6 +492,7 @@ mod tests {
             bot_credentials: None,
             test: TestCommands::default(),
             visual_regression: Default::default(),
+            deploy: Default::default(),
             workspace: None,
         };
         let report = run_self_test(&cfg);

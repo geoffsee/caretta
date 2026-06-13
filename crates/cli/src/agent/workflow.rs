@@ -621,6 +621,7 @@ mod tests {
                 ("review", "Security Code Review"),
                 ("review", "Visual Regression"),
                 ("review", "Retrospective"),
+                ("maintenance", "Deploy"),
                 ("maintenance", "Housekeeping"),
                 ("maintenance", "Refresh Agents"),
                 ("maintenance", "Refresh Docs"),

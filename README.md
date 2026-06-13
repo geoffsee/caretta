@@ -152,6 +152,15 @@ paths = [
 command = ["bun", "x", "playwright", "test", "tests/visual"]
 base_url = "http://localhost:5173"
 screenshots_dir = "tests/visual/screenshots"
+
+# ── Deploy command ───────────────────────────────────────────────────────
+# `command` is run exactly as configured from the repo root. `environment`
+# and `url` are kept as Caretta context fields for continuity across workflows;
+# they are not injected into the child process.
+[deploy]
+command = ["./scripts/deploy.sh"]
+environment = "staging"
+url = "https://staging.example.com"
 ```
 
 `user_personas` also controls the Personas Studio storage location: persona JSON

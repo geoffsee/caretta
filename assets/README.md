@@ -129,6 +129,8 @@ fragments:                            # reusable text blocks, included via {{> n
 | `security-scan` | review | one-shot |
 | `security-review` | review | one-shot |
 | `visual-regression` | review | one-shot |
+| `deploy` | maintenance | one-shot |
+| `deploy` | maintenance | one-shot |
 | `retrospective` | review | two-phase |
 | `housekeeping` | maintenance | two-phase |
 | `refresh-agents` | maintenance | one-shot |

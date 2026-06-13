@@ -1,0 +1,14 @@
+name: Deploy
+id: deploy
+description: Run the configured deploy command for the target environment
+pattern: one_shot
+context: none
+runner: deploy
+
+ui:
+  category: maintenance
+  order: 55
+  visible: true
+
+depends_on: []
+phases: {}

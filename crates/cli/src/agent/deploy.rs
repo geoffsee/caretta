@@ -3,34 +3,33 @@ use crate::agent::types::{AgentEvent, Config, EVENT_SENDER};
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-const DEFAULT_VISUAL_REGRESSION_COMMAND: &[&str] =
-    &["bun", "x", "playwright", "test", "tests/visual"];
+const DEFAULT_DEPLOY_COMMAND: &[&str] = &["./scripts/deploy.sh"];
 
-pub fn run_visual_regression(cfg: &Config) -> Result<(), String> {
-    let visual = &cfg.visual_regression;
-    let Some((program, args)) = visual.command.split_first() else {
+pub fn run_deploy(cfg: &Config) -> Result<(), String> {
+    let deploy = &cfg.deploy;
+    let Some((program, args)) = deploy.command.split_first() else {
         let guidance = missing_config_guidance();
         log(&guidance);
         notify_done();
         return Err(guidance);
     };
 
-    log("Starting visual regression workflow...");
+    log("Starting deploy workflow...");
     log(&format!(
-        "Visual regression base_url context: {}",
-        context_value(&visual.base_url)
+        "Deploy environment context: {}",
+        context_value(&deploy.environment)
     ));
     log(&format!(
-        "Visual regression screenshots_dir context: {}",
-        context_value(&visual.screenshots_dir)
+        "Deploy url context: {}",
+        context_value(&deploy.url)
     ));
     log(&format!(
-        "Visual regression command: {}",
-        display_command(&visual.command)
+        "Deploy command: {}",
+        display_command(&deploy.command)
     ));
 
     if cfg.dry_run {
-        log("[dry-run] Would run configured visual regression command.");
+        log("[dry-run] Would run configured deploy command.");
         notify_done();
         return Ok(());
     }
@@ -38,28 +37,28 @@ pub fn run_visual_regression(cfg: &Config) -> Result<(), String> {
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
     let (ok, output) = capture_command_in(program, &arg_refs, Path::new(&cfg.root));
     if !output.trim().is_empty() {
-        log(&format!("Visual regression output:\n{}", output.trim_end()));
+        log(&format!("Deploy output:\n{}", output.trim_end()));
     }
 
     if ok {
-        log("Visual regression workflow complete.");
+        log("Deploy workflow complete.");
         notify_done();
         Ok(())
     } else {
-        log("Visual regression command failed.");
+        log("Deploy command failed.");
         notify_done();
-        Err("Visual regression command failed.".to_string())
+        Err("Deploy command failed.".to_string())
     }
 }
 
 fn missing_config_guidance() -> String {
     format!(
-        "No `[visual_regression].command` configured in caretta.toml. Add:\n\n\
-         [visual_regression]\n\
+        "No `[deploy].command` configured in caretta.toml. Add:\n\n\
+         [deploy]\n\
          command = [{}]\n\
-         base_url = \"http://localhost:5173\"\n\
-         screenshots_dir = \"tests/visual/screenshots\"",
-        DEFAULT_VISUAL_REGRESSION_COMMAND
+         environment = \"staging\"\n\
+         url = \"https://staging.example.com\"",
+        DEFAULT_DEPLOY_COMMAND
             .iter()
             .map(|part| format!("\"{part}\""))
             .collect::<Vec<_>>()
@@ -113,7 +112,7 @@ mod tests {
         SkillPaths, TestCommands, VisualRegressionConfig,
     };
 
-    fn test_config(visual_regression: VisualRegressionConfig) -> Config {
+    fn test_config(deploy: DeployConfig) -> Config {
         Config {
             agent: Agent::Claude,
             model: String::new(),
@@ -132,49 +131,49 @@ mod tests {
             bot_settings: BotSettings::default(),
             bot_credentials: None,
             test: TestCommands::default(),
-            visual_regression,
-            deploy: DeployConfig::default(),
+            visual_regression: VisualRegressionConfig::default(),
+            deploy,
             workspace: None,
         }
     }
 
     #[test]
-    fn visual_regression_requires_configured_command() {
-        let cfg = test_config(VisualRegressionConfig::default());
+    fn deploy_requires_configured_command() {
+        let cfg = test_config(DeployConfig::default());
 
-        let err = run_visual_regression(&cfg).expect_err("missing command should fail");
+        let err = run_deploy(&cfg).expect_err("missing command should fail");
 
-        assert!(err.contains("[visual_regression]"));
-        assert!(err.contains("bun"));
+        assert!(err.contains("[deploy]"));
+        assert!(err.contains("deploy.sh"));
     }
 
     #[test]
-    fn visual_regression_dry_run_does_not_spawn_command() {
-        let mut cfg = test_config(VisualRegressionConfig {
-            command: vec!["__caretta_missing_visual_command__".to_string()],
-            base_url: "http://localhost:5173".to_string(),
-            screenshots_dir: "tests/visual/screenshots".to_string(),
+    fn deploy_dry_run_does_not_spawn_command() {
+        let mut cfg = test_config(DeployConfig {
+            command: vec!["__caretta_missing_deploy_command__".to_string()],
+            environment: "staging".to_string(),
+            url: "https://staging.example.com".to_string(),
         });
         cfg.dry_run = true;
 
-        run_visual_regression(&cfg).expect("dry run should not spawn command");
+        run_deploy(&cfg).expect("dry run should not spawn command");
     }
 
     #[test]
-    fn visual_regression_runs_command_from_repo_root() {
+    fn deploy_runs_command_from_repo_root() {
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(dir.path().join("marker.txt"), "ok").expect("write marker");
-        let mut cfg = test_config(VisualRegressionConfig {
+        let mut cfg = test_config(DeployConfig {
             command: vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "test -f marker.txt && printf visual-ok".to_string(),
+                "test -f marker.txt && printf deploy-ok".to_string(),
             ],
-            base_url: String::new(),
-            screenshots_dir: String::new(),
+            environment: String::new(),
+            url: String::new(),
         });
         cfg.root = dir.path().to_string_lossy().into_owned();
 
-        run_visual_regression(&cfg).expect("command should run in configured root");
+        run_deploy(&cfg).expect("command should run in configured root");
     }
 }
