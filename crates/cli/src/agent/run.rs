@@ -425,6 +425,7 @@ fn attach_prompt_stdin(
     prompt: &str,
 ) -> Result<Option<NamedTempFile>, bool> {
     let Some(stdin_prompt) = stdin_prompt else {
+        cmd.stdin(Stdio::null());
         return Ok(None);
     };
 
