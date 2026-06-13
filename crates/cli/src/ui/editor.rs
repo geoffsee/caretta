@@ -1,6 +1,6 @@
 use crate::agent::types::{
-    AgentEvent, ChangedFile, ClaudeEvent, Config, ContentBlock, FileChangeKind, InterviewTurn,
-    PricingConfig, Workflow, should_use_event_model,
+    AgentEvent, ChangedFile, Config, ContentBlock, FileChangeKind, InterviewTurn, PricingConfig,
+    RichAction, Workflow, should_use_event_model,
 };
 use crate::ui::components::EventRow;
 use crate::ui::discovery::{DiscoveryPanel, DiscoveryWorkspace};
@@ -14,7 +14,7 @@ use std::collections::HashMap;
 fn build_tool_names(events: &[AgentEvent]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for ev in events {
-        if let AgentEvent::Claude(ClaudeEvent::Assistant { message }) = ev {
+        if let AgentEvent::Rich(RichAction::Assistant { message }) = ev {
             for block in &message.content {
                 if let ContentBlock::ToolUse { id, name, .. } = block {
                     map.insert(id.clone(), name.clone());
@@ -45,7 +45,7 @@ enum FileViewMode {
 fn find_content_for_path(events: &[AgentEvent], path: &str) -> Option<String> {
     for ev in events.iter().rev() {
         match ev {
-            AgentEvent::Claude(ClaudeEvent::Assistant { message }) => {
+            AgentEvent::Rich(RichAction::Assistant { message }) => {
                 for block in &message.content {
                     if let ContentBlock::ToolUse { name, input, .. } = block
                         && (name == "Write" || name == "Edit")
@@ -56,13 +56,12 @@ fn find_content_for_path(events: &[AgentEvent], path: &str) -> Option<String> {
                     }
                 }
             }
-            AgentEvent::Claude(ClaudeEvent::User { message }) => {
+            AgentEvent::Rich(RichAction::User { message }) => {
                 for block in &message.content {
                     if let ContentBlock::ToolResult { id, content } = block {
                         for ev_inner in events {
-                            if let AgentEvent::Claude(ClaudeEvent::Assistant {
-                                message: msg_inner,
-                            }) = ev_inner
+                            if let AgentEvent::Rich(RichAction::Assistant { message: msg_inner }) =
+                                ev_inner
                             {
                                 for block_inner in &msg_inner.content {
                                     if let ContentBlock::ToolUse {
@@ -126,7 +125,7 @@ pub fn Editor(
             .iter()
             .enumerate()
             .map(|(i, event)| {
-                if let AgentEvent::Claude(ClaudeEvent::System {
+                if let AgentEvent::Rich(RichAction::System {
                     model: Some(model), ..
                 }) = event
                     && should_use_event_model(model, has_configured_model)

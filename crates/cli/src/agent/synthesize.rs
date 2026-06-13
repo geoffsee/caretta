@@ -6,17 +6,16 @@
 //! that we parse into a [`DiscoveryWorkspace`].
 
 use crate::agent::adapter_dispatch::{
-    PromptTransport, caretta_native_command_with_prompt_transport,
+    adapter_for_agent, caretta_native_command_with_prompt_transport,
 };
 use crate::agent::cmd::log;
 use crate::agent::launch::{
     auto_mode_overrides, local_inference_overrides, merged_agent_env, model_selection_overrides,
 };
-use crate::agent::run::{
-    codex_events_from_json_line, native_command, spawn_sanitized_stderr_logger,
-};
-use crate::agent::types::{Agent, AgentEvent, ClaudeEvent, Config, ContentBlock};
+use crate::agent::run::{native_command, spawn_sanitized_stderr_logger};
+use crate::agent::types::{AgentEvent, Config, ContentBlock, RichAction};
 use crate::ui::discovery::DiscoveryWorkspace;
+use agent_common::{AgentCliAdapter, PromptTransport};
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 use std::process::Stdio;
@@ -147,8 +146,12 @@ fn run_agent_capture(cfg: &Config, prompt: &str, cwd: &Path) -> Result<(bool, St
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("Failed to spawn agent `{}`: {err}", spec.command.binary))?;
-    let stderr_log =
-        spawn_sanitized_stderr_logger(&mut child, format!("{} stderr", spec.command.binary));
+    let adapter = adapter_for_agent(cfg.agent);
+    let stderr_log = spawn_sanitized_stderr_logger(
+        &mut child,
+        format!("{} stderr", spec.command.binary),
+        Some(adapter),
+    );
 
     if use_stdin
         && let Some(mut stdin) = child.stdin.take()
@@ -162,12 +165,13 @@ fn run_agent_capture(cfg: &Config, prompt: &str, cwd: &Path) -> Result<(bool, St
     let stdout = child.stdout.take().expect("piped stdout");
     let reader = BufReader::new(stdout);
     let mut text = String::new();
+    let adapter = adapter_for_agent(cfg.agent);
     for line in reader.lines().map_while(Result::ok) {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        append_line_text(trimmed, cfg.agent, &mut text);
+        append_line_text(trimmed, adapter, &mut text);
     }
     let ok = child
         .wait()
@@ -179,32 +183,33 @@ fn run_agent_capture(cfg: &Config, prompt: &str, cwd: &Path) -> Result<(bool, St
     Ok((ok, text))
 }
 
-fn append_line_text(line: &str, agent: Agent, out: &mut String) {
-    // Try Claude-family stream JSON first.
-    if let Ok(ev) = serde_json::from_str::<ClaudeEvent>(line) {
-        accumulate_claude(&ev, out);
-        return;
-    }
-    // Codex emits its own JSON event shape.
-    if matches!(agent, Agent::Codex)
-        && let Some(events) = codex_events_from_json_line(line)
-    {
-        for ev in events {
-            if let AgentEvent::Claude(c) = ev {
-                accumulate_claude(&c, out);
+fn append_line_text(line: &str, adapter: &dyn AgentCliAdapter, out: &mut String) {
+    if let Some(values) = adapter.parse_output_line(line) {
+        for v in values {
+            let ev = if let Ok(ev) = serde_json::from_value::<AgentEvent>(v.clone()) {
+                ev
+            } else if let Ok(rev) = serde_json::from_value::<RichAction>(v) {
+                AgentEvent::Rich(rev)
+            } else {
+                continue;
+            };
+
+            if let AgentEvent::Rich(r) = ev {
+                accumulate_rich(&r, out);
             }
         }
         return;
     }
+
     // Fallback: agents that print raw text get appended verbatim so the JSON
     // extractor can still find their output.
     out.push_str(line);
     out.push('\n');
 }
 
-fn accumulate_claude(ev: &ClaudeEvent, out: &mut String) {
+fn accumulate_rich(ev: &RichAction, out: &mut String) {
     match ev {
-        ClaudeEvent::Assistant { message } => {
+        RichAction::Assistant { message } => {
             for block in &message.content {
                 if let ContentBlock::Text { text } = block {
                     out.push_str(text);
@@ -212,7 +217,7 @@ fn accumulate_claude(ev: &ClaudeEvent, out: &mut String) {
                 }
             }
         }
-        ClaudeEvent::ContentBlockDelta { delta, .. } => {
+        RichAction::ContentBlockDelta { delta, .. } => {
             if let Some(text) = &delta.text {
                 out.push_str(text);
             }

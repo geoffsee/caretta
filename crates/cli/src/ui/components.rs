@@ -1,4 +1,4 @@
-use crate::agent::types::{AgentEvent, ClaudeEvent, ContentBlock, PricingConfig};
+use crate::agent::types::{AgentEvent, ContentBlock, PricingConfig, RichAction};
 use dioxus::prelude::*;
 use std::collections::HashMap;
 
@@ -1787,8 +1787,8 @@ pub fn EventRow(
                 "{msg}"
             }
         },
-        AgentEvent::Claude(ev) => rsx! {
-            ClaudeEventRow { ev, expand_all, tool_names, usage_model, pricing }
+        AgentEvent::Rich(ev) => rsx! {
+            RichActionRow { ev, expand_all, tool_names, usage_model, pricing }
         },
         AgentEvent::Done | AgentEvent::AwaitingFeedback(_) | AgentEvent::TrackerUpdate(_) => {
             rsx! {}
@@ -1797,15 +1797,15 @@ pub fn EventRow(
 }
 
 #[component]
-pub fn ClaudeEventRow(
-    ev: ClaudeEvent,
+pub fn RichActionRow(
+    ev: RichAction,
     expand_all: bool,
     tool_names: HashMap<String, String>,
     usage_model: Option<String>,
     pricing: PricingConfig,
 ) -> Element {
     match ev {
-        ClaudeEvent::System {
+        RichAction::System {
             subtype,
             model,
             description,
@@ -1817,7 +1817,7 @@ pub fn ClaudeEventRow(
                 if let Some(d) = description { div { "{d}" } }
             }
         },
-        ClaudeEvent::Assistant { message } => rsx! {
+        RichAction::Assistant { message } => rsx! {
             div { class: "ev-assistant",
                 div { class: "label", "ASSISTANT" }
                 for block in message.content {
@@ -1825,7 +1825,7 @@ pub fn ClaudeEventRow(
                 }
             }
         },
-        ClaudeEvent::User { message } => {
+        RichAction::User { message } => {
             let is_tool_result = message
                 .content
                 .iter()
@@ -1840,7 +1840,7 @@ pub fn ClaudeEventRow(
                 }
             }
         }
-        ClaudeEvent::Result {
+        RichAction::Result {
             status,
             summary,
             duration_ms,
@@ -1890,7 +1890,7 @@ pub fn ClaudeEventRow(
                 }
             }
         }
-        ClaudeEvent::ContentBlockDelta { .. } => rsx! {
+        RichAction::ContentBlockDelta { .. } => rsx! {
             div { class: "ev-system",
                 div { class: "label", "STREAMING..." }
             }

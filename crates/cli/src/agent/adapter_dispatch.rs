@@ -1,7 +1,7 @@
 //! Dispatches [`cli_common::Agent`] to provider [`agent_common::AgentCliAdapter`] implementations.
 //! All binary names and flag spellings for subprocess construction live in the provider crates.
 
-use agent_common::{AgentCliAdapter, AgentCliCommand};
+use agent_common::{AgentCliAdapter, AgentCliCommand, PromptTransport};
 use claude::{ClaudeWrapper, CursorWrapper};
 use cli_common::Agent;
 use cline::ClineWrapper;
@@ -17,12 +17,6 @@ pub const PROMPT_STDIN_BYTE_THRESHOLD: usize = 64 * 1024;
 pub struct NativeRunCommand {
     pub command: AgentCliCommand,
     pub prompt_transport: PromptTransport,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PromptTransport {
-    Argv,
-    Stdin,
 }
 
 pub fn native_base_command(agent: Agent, prompt: &str) -> AgentCliCommand {
@@ -81,7 +75,11 @@ pub fn caretta_native_command_with_prompt_transport(
     prompt: &str,
     extra_args: &[String],
 ) -> NativeRunCommand {
-    let use_stdin = prompt.len() > PROMPT_STDIN_BYTE_THRESHOLD;
+    let adapter = adapter_for_agent(agent);
+    let transport_pref = adapter.prompt_transport();
+    let use_stdin =
+        prompt.len() > PROMPT_STDIN_BYTE_THRESHOLD || transport_pref == PromptTransport::Stdin;
+
     let mut command = if use_stdin {
         native_stdin_command(agent).unwrap_or_else(|| native_base_command(agent, prompt))
     } else {
@@ -96,6 +94,20 @@ pub fn caretta_native_command_with_prompt_transport(
         } else {
             PromptTransport::Argv
         },
+    }
+}
+
+pub fn adapter_for_agent(agent: Agent) -> &'static dyn AgentCliAdapter {
+    match agent {
+        Agent::Claude => &ClaudeWrapper,
+        Agent::Cursor => &CursorWrapper,
+        Agent::Junie => &JunieWrapper,
+        Agent::Copilot => &CopilotWrapper,
+        Agent::Codex => &CodexWrapper,
+        Agent::Gemini => &GeminiWrapper,
+        Agent::Grok => &GrokWrapper,
+        Agent::Xai => &XaiWrapper,
+        Agent::Cline => &ClineWrapper,
     }
 }
 
@@ -260,6 +272,13 @@ mod tests {
 
         assert_eq!(cmd.command.args, claude_family_native_argv("small"));
         assert_eq!(cmd.prompt_transport, PromptTransport::Argv);
+
+        let cmd = caretta_native_command_with_prompt_transport(Agent::Codex, "small", &[]);
+        assert_eq!(
+            cmd.command.args,
+            vec!["exec".to_string(), "--json".to_string(), "-".to_string()]
+        );
+        assert_eq!(cmd.prompt_transport, PromptTransport::Stdin);
     }
 
     #[test]

@@ -105,9 +105,20 @@ pub struct PendingIssue {
 pub enum AgentEvent {
     Done,
     Log(String),
-    Claude(ClaudeEvent),
+    #[serde(rename = "claude")]
+    Rich(RichAction),
     AwaitingFeedback(Workflow),
     TrackerUpdate(Vec<PendingIssue>),
+}
+
+impl AgentEvent {
+    pub fn is_result(&self) -> bool {
+        matches!(self, AgentEvent::Rich(RichAction::Result { .. }))
+    }
+
+    pub fn is_assistant(&self) -> bool {
+        matches!(self, AgentEvent::Rich(RichAction::Assistant { .. }))
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -179,7 +190,7 @@ impl PricingConfig {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum ClaudeEvent {
+pub enum RichAction {
     System {
         subtype: String,
         #[serde(default)]
@@ -214,6 +225,16 @@ pub enum ClaudeEvent {
         index: u32,
         delta: ContentBlockDelta,
     },
+}
+
+impl RichAction {
+    pub fn is_result(&self) -> bool {
+        matches!(self, RichAction::Result { .. })
+    }
+
+    pub fn is_assistant(&self) -> bool {
+        matches!(self, RichAction::Assistant { .. })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -739,7 +760,7 @@ impl Config {
 
 pub fn latest_event_model(events: &[AgentEvent]) -> Option<String> {
     events.iter().rev().find_map(|event| match event {
-        AgentEvent::Claude(ClaudeEvent::System { model, .. }) => model
+        AgentEvent::Rich(RichAction::System { model, .. }) => model
             .as_ref()
             .filter(|model| !model.trim().is_empty())
             .cloned(),
@@ -773,7 +794,7 @@ pub fn usage_model_for_events(config: &Config, events: &[AgentEvent]) -> Option<
     let has_configured_model = active_model.is_some();
 
     for event in events {
-        if let AgentEvent::Claude(ClaudeEvent::System {
+        if let AgentEvent::Rich(RichAction::System {
             model: Some(model), ..
         }) = event
             && should_use_event_model(model, has_configured_model)

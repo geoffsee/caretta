@@ -1,5 +1,5 @@
 use crate::agent::tracker::TrackerInfo;
-use crate::agent::types::{AgentEvent, ClaudeEvent, Config, should_use_event_model};
+use crate::agent::types::{AgentEvent, Config, RichAction, should_use_event_model};
 use crate::ui::components::{format_cost_usd, format_token_count, format_tokens_per_second};
 use dioxus::prelude::*;
 
@@ -18,12 +18,12 @@ fn summarize_usage(events: &[AgentEvent], config: &Config) -> UsageSummary {
 
     for event in events {
         match event {
-            AgentEvent::Claude(ClaudeEvent::System {
+            AgentEvent::Rich(RichAction::System {
                 model: Some(model), ..
             }) if should_use_event_model(model, has_configured_model) => {
                 active_model = Some(model.trim().to_string());
             }
-            AgentEvent::Claude(ClaudeEvent::Result {
+            AgentEvent::Rich(RichAction::Result {
                 duration_ms,
                 input_tokens,
                 output_tokens,

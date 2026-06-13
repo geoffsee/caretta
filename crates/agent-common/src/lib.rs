@@ -27,7 +27,13 @@ pub enum AgentInvocation {
     Yolo,
 }
 
-pub trait AgentCliAdapter {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptTransport {
+    Argv,
+    Stdin,
+}
+
+pub trait AgentCliAdapter: Send + Sync {
     fn binary(&self) -> &'static str;
 
     fn help_args(&self) -> Vec<String>;
@@ -41,6 +47,11 @@ pub trait AgentCliAdapter {
     /// not `prompt_args`, so the caretta runner matches native `run_agent` argv.
     fn prompt_args(&self, prompt: &str) -> Vec<String> {
         self.caretta_native_run_argv(prompt)
+    }
+
+    /// Appended system prompt guidance for this agent.
+    fn system_prompt(&self) -> Option<&'static str> {
+        None
     }
 
     fn resume_args(&self, session_id: Option<&str>) -> Option<Vec<String>>;
@@ -69,7 +80,7 @@ pub trait AgentCliAdapter {
 
     /// `auto_mode` / permission-bypass flags for the native run argv.
     fn launch_auto_mode(&self) -> Vec<String> {
-        Vec::new()
+        vec![]
     }
 
     /// Local inference (advanced) fragments when base URL is set. `local_model` may be empty.
@@ -80,6 +91,23 @@ pub trait AgentCliAdapter {
         _local_model: &str,
     ) -> (Vec<String>, Vec<(String, String)>) {
         (Vec::new(), Vec::new())
+    }
+
+    /// Preferred prompt transport for the native runner. Defaults to Argv.
+    fn prompt_transport(&self) -> PromptTransport {
+        PromptTransport::Argv
+    }
+
+    /// Parse a single line of stdout into structured JSON events.
+    /// Used by the native runner to handle agent-specific output formats.
+    fn parse_output_line(&self, _line: &str) -> Option<Vec<serde_json::Value>> {
+        None
+    }
+
+    /// Parse a single line of stderr into structured JSON events.
+    /// Used by the native runner to handle agent-specific error conditions or status updates.
+    fn parse_stderr_line(&self, _line: &str) -> Option<Vec<serde_json::Value>> {
+        None
     }
 
     fn command_for(&self, invocation: AgentInvocation) -> Option<AgentCliCommand> {

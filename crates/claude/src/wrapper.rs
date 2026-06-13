@@ -1,4 +1,16 @@
 use agent_common::{AgentCliAdapter, claude_family_native_argv};
+use cli_common::RichAction;
+
+const CARETTA_CLAUDE_SYSTEM_PROMPT: &str = r#"You are caretta's autonomous repository agent.
+
+Follow repository instructions from AGENTS.md, workflow prompts, tracker issues, and local status files when present.
+Treat the user or workflow prompt as the source of task-specific scope.
+When the task implies implementation, carry it through edits, verification, and a concise outcome report.
+Make the smallest coherent code changes that complete the task, and preserve unrelated worktree changes.
+Prefer existing project patterns and tools over new abstractions.
+Run the most relevant verification commands available in the repository, and report failures or blockers plainly.
+If required context is missing or instructions conflict, surface the blocker instead of guessing.
+"#;
 
 fn local_inference_api_key(api_key: &str) -> String {
     let trimmed = api_key.trim();
@@ -30,6 +42,14 @@ fn claude_like_launch_local_inference(
         args.extend(["--model".to_string(), local_model.trim().to_string()]);
     }
     (args, env)
+}
+
+fn claude_family_parse_output_line(line: &str) -> Option<Vec<serde_json::Value>> {
+    if let Ok(ev) = serde_json::from_str::<RichAction>(line) {
+        Some(vec![serde_json::to_value(ev).ok()?])
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -64,6 +84,10 @@ impl AgentCliAdapter for ClaudeWrapper {
         Some(args)
     }
 
+    fn system_prompt(&self) -> Option<&'static str> {
+        Some(CARETTA_CLAUDE_SYSTEM_PROMPT)
+    }
+
     fn output_format_args(&self, format: &str) -> Option<Vec<String>> {
         Some(vec!["--output-format".to_string(), format.to_string()])
     }
@@ -87,6 +111,10 @@ impl AgentCliAdapter for ClaudeWrapper {
         local_model: &str,
     ) -> (Vec<String>, Vec<(String, String)>) {
         claude_like_launch_local_inference(base_url, api_key, local_model)
+    }
+
+    fn parse_output_line(&self, line: &str) -> Option<Vec<serde_json::Value>> {
+        claude_family_parse_output_line(line)
     }
 }
 
@@ -130,6 +158,10 @@ impl AgentCliAdapter for CursorWrapper {
 
     fn launch_auto_mode(&self) -> Vec<String> {
         vec!["--yolo".to_string()]
+    }
+
+    fn parse_output_line(&self, line: &str) -> Option<Vec<serde_json::Value>> {
+        claude_family_parse_output_line(line)
     }
 }
 

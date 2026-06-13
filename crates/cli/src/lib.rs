@@ -54,8 +54,8 @@ use agent::tracker::{
     is_auto_merge_enabled, list_open_prs, open_pr_map_from, parse_pending,
 };
 use agent::types::{
-    AgentEvent, BotAuthMode, ChangedFile, ClaudeEvent, ContentBlock, EVENT_SENDER, FileChangeKind,
-    InterviewTurn, Workflow, save_dev_config,
+    AgentEvent, BotAuthMode, ChangedFile, ContentBlock, EVENT_SENDER, FileChangeKind,
+    InterviewTurn, RichAction, Workflow, save_dev_config,
 };
 use agent::workflow::list_presets_with_workspace;
 use clap::{Parser, Subcommand};
@@ -747,7 +747,7 @@ fn App() -> Element {
                     }
                     // Accumulate agent text into the interview buffer.
                     if *interview_active.peek()
-                        && let AgentEvent::Claude(ClaudeEvent::Assistant { ref message }) = ev
+                        && let AgentEvent::Rich(RichAction::Assistant { ref message }) = ev
                     {
                         for block in &message.content {
                             if let ContentBlock::Text { text } = block {
@@ -761,7 +761,7 @@ fn App() -> Element {
                     }
                     // Accumulate agent text into the chat buffer.
                     if *chat_active.peek()
-                        && let AgentEvent::Claude(ClaudeEvent::Assistant { ref message }) = ev
+                        && let AgentEvent::Rich(RichAction::Assistant { ref message }) = ev
                     {
                         for block in &message.content {
                             if let ContentBlock::Text { text } = block {
@@ -774,7 +774,7 @@ fn App() -> Element {
                         }
                     }
                     // Extract file changes from tool use events
-                    if let AgentEvent::Claude(ClaudeEvent::Assistant { ref message }) = ev {
+                    if let AgentEvent::Rich(RichAction::Assistant { ref message }) = ev {
                         for block in &message.content {
                             if let ContentBlock::ToolUse { name, input, .. } = block {
                                 let (path, kind) = match name.as_str() {
