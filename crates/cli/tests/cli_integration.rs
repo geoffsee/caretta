@@ -896,6 +896,25 @@ fn all_expected_presets_exist() {
     }
 }
 
+#[test]
+fn default_preset_listing_includes_visual_regression() {
+    let out = bin()
+        .args(["presets", "default"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("failed to launch caretta");
+    let combined = combined_output(&out);
+
+    assert!(
+        out.status.success(),
+        "caretta presets default failed:\n{combined}"
+    );
+    assert!(
+        combined.contains("visual_regression"),
+        "default preset should list visual_regression:\n{combined}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // 12. Default workflow coverage — the default preset should have all the
 //     workflows that the CLI subcommands reference
@@ -917,6 +936,7 @@ fn default_preset_covers_all_cli_subcommands() {
         "housekeeping",
         "code-review",
         "security-review",
+        "visual-regression",
         "refresh-agents",
         "refresh-docs",
         "interview",

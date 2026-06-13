@@ -26,6 +26,7 @@ pub mod snapshot;
 pub mod synthesize;
 pub mod tracker;
 pub mod types;
+pub mod visual_regression;
 pub mod workflow;
 pub mod workflows;
 pub mod workspace;

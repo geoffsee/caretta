@@ -1,0 +1,14 @@
+name: Visual Regression
+id: visual_regression
+description: Run the configured visual regression command for UI screenshot coverage
+pattern: one_shot
+context: none
+runner: visual_regression
+
+ui:
+  category: review
+  order: 50
+  visible: true
+
+depends_on: []
+phases: {}

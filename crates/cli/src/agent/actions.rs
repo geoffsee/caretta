@@ -34,6 +34,7 @@ fn action_registry() -> &'static HashMap<&'static str, ActionFn> {
         m.insert("refresh_agents", super::shell::action_refresh_agents);
         m.insert("refresh_docs", super::shell::action_refresh_docs);
         m.insert("auto_merge", super::shell::action_auto_merge);
+        m.insert("visual_regression", super::shell::action_visual_regression);
         m
     })
 }

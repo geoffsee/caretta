@@ -640,6 +640,21 @@ pub struct ScanTargets {
     pub paths: Vec<String>,
 }
 
+/// Project-specific visual regression command and contextual metadata.
+///
+/// `command` is argv-style (program followed by args). `base_url` and
+/// `screenshots_dir` are retained as workflow context only; the runner does not
+/// transform them into environment variables or append them as arguments.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VisualRegressionConfig {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub base_url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub screenshots_dir: String,
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Config {
     pub agent: Agent,
@@ -659,6 +674,8 @@ pub struct Config {
     pub bot_settings: BotSettings,
     pub bot_credentials: Option<BotCredentials>,
     pub test: TestCommands,
+    #[serde(default)]
+    pub visual_regression: VisualRegressionConfig,
     /// Optional context workspace name. When `Some(name)`, the agent resolves
     /// presets, workflows, skills, discovery-framing, and personas first from
     /// `<root>/.caretta/workspaces/<name>/...` before falling back to the
@@ -770,6 +787,7 @@ impl fmt::Debug for Config {
             .field("pricing", &self.pricing)
             .field("bot_settings", &self.bot_settings)
             .field("bot_credentials", &self.bot_credentials)
+            .field("visual_regression", &self.visual_regression)
             .field("workspace", &self.workspace)
             .finish()
     }
@@ -847,6 +865,8 @@ pub struct DevConfig {
     pub agent_models: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub test: TestCommands,
+    #[serde(default, skip_serializing_if = "is_default")]
+    pub visual_regression: VisualRegressionConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -972,7 +992,7 @@ pub use agent_common::{AgentCliAdapter, AgentCliCommand, AgentInvocation};
 
 #[cfg(test)]
 mod agent_binary_tests {
-    use super::{Agent, ModelPricing, PricingConfig};
+    use super::{Agent, DevConfig, ModelPricing, PricingConfig, VisualRegressionConfig};
     use std::collections::HashMap;
 
     #[test]
@@ -1013,5 +1033,53 @@ mod agent_binary_tests {
         assert!(!super::should_use_event_model("codex", true));
         assert!(super::should_use_event_model("gpt-5.2", true));
         assert!(super::should_use_event_model("codex", false));
+    }
+
+    #[test]
+    fn visual_regression_config_deserializes_from_toml() {
+        let cfg: DevConfig = toml::from_str(
+            r#"
+[visual_regression]
+command = ["bun", "x", "playwright", "test", "tests/visual"]
+base_url = "http://localhost:5173"
+screenshots_dir = "tests/visual/screenshots"
+"#,
+        )
+        .expect("visual regression config should parse");
+
+        assert_eq!(
+            cfg.visual_regression.command,
+            ["bun", "x", "playwright", "test", "tests/visual"]
+        );
+        assert_eq!(cfg.visual_regression.base_url, "http://localhost:5173");
+        assert_eq!(
+            cfg.visual_regression.screenshots_dir,
+            "tests/visual/screenshots"
+        );
+    }
+
+    #[test]
+    fn visual_regression_config_serializes_when_present() {
+        let cfg = DevConfig {
+            visual_regression: VisualRegressionConfig {
+                command: vec![
+                    "bun".to_string(),
+                    "x".to_string(),
+                    "playwright".to_string(),
+                    "test".to_string(),
+                    "tests/visual".to_string(),
+                ],
+                base_url: "http://localhost:5173".to_string(),
+                screenshots_dir: "tests/visual/screenshots".to_string(),
+            },
+            ..DevConfig::default()
+        };
+
+        let toml = toml::to_string(&cfg).expect("visual regression config should serialize");
+
+        assert!(toml.contains("[visual_regression]"));
+        assert!(toml.contains(r#"command = ["bun", "x", "playwright", "test", "tests/visual"]"#));
+        assert!(toml.contains(r#"base_url = "http://localhost:5173""#));
+        assert!(toml.contains(r#"screenshots_dir = "tests/visual/screenshots""#));
     }
 }

@@ -22,6 +22,7 @@ pub use crate::agent::review::{
 };
 pub use crate::agent::run::{run_agent, run_agent_with_env};
 pub use crate::agent::snapshot::generate_codebase_snapshot;
+pub use crate::agent::visual_regression::run_visual_regression;
 pub use crate::agent::workflows::{
     run_retrospective_draft, run_retrospective_finalize, run_sprint_planning_draft,
     run_sprint_planning_finalize, run_workflow_draft, run_workflow_finalize,
@@ -67,4 +68,11 @@ pub fn action_auto_merge(
 ) -> Result<(), String> {
     crate::agent::auto_merge::run_auto_merge_stack(cfg, None);
     Ok(())
+}
+
+pub fn action_visual_regression(
+    cfg: &Config,
+    _ctx: &mut crate::agent::actions::ActionContext,
+) -> Result<(), String> {
+    run_visual_regression(cfg)
 }

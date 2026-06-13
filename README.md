@@ -143,6 +143,15 @@ paths = [
     # "src/auth.rs",
     # "src/api/handlers.rs",
 ]
+
+# ── Visual regression command ────────────────────────────────────────────
+# `command` is run exactly as configured from the repo root. `base_url` and
+# `screenshots_dir` are kept as Caretta context fields for continuity across
+# workflows; they are not injected into the child process.
+[visual_regression]
+command = ["bun", "x", "playwright", "test", "tests/visual"]
+base_url = "http://localhost:5173"
+screenshots_dir = "tests/visual/screenshots"
 ```
 
 `user_personas` also controls the Personas Studio storage location: persona JSON
