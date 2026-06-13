@@ -91,15 +91,21 @@ impl AgentCliAdapter for CodexWrapper {
         None
     }
 
-    fn parse_stderr_line(&self, line: &str) -> Option<Vec<serde_json::Value>> {
-        // Ignore non-fatal 403s for background features (like tool suggestions) to reduce noise.
-        if line.contains("failed to load discoverable tool suggestions") {
-            return None;
-        }
+    fn launch_env(&self) -> Vec<(String, String)> {
+        // CI sets RUST_LOG=info for caretta; inherited env makes codex emit verbose OTEL spans.
+        vec![("RUST_LOG".to_string(), "error".to_string())]
+    }
 
-        // Detect total session expiration or Cloudflare blocks that prevent the agent from working.
+    fn should_log_stderr_line(&self, _line: &str) -> bool {
+        // Codex stderr is internal tracing/HTML noise; structured stdout (--json) carries signal.
+        false
+    }
+
+    fn parse_stderr_line(&self, line: &str) -> Option<Vec<serde_json::Value>> {
+        // Detect session expiration or Cloudflare blocks without forwarding raw stderr.
         if line.contains("403 Forbidden")
             || line.contains("Enable JavaScript and cookies to continue")
+            || line.contains("http-equiv=\"refresh\"")
         {
             return Some(vec![serde_json::to_value(AgentEvent::Log(
                 "Codex session expired or blocked by Cloudflare (403 Forbidden). Please re-authenticate by running 'codex login'.".to_string()
@@ -332,5 +338,24 @@ mod tests {
             wrapper.resume_args(Some("thread_123")),
             Some(vec!["resume".to_string(), "thread_123".to_string()])
         );
+    }
+
+    #[test]
+    fn launch_env_caps_codex_rust_log_at_error() {
+        let wrapper = CodexWrapper;
+        assert_eq!(
+            wrapper.launch_env(),
+            vec![("RUST_LOG".to_string(), "error".to_string())]
+        );
+    }
+
+    #[test]
+    fn never_forwards_codex_stderr_to_caretta_logs() {
+        let wrapper = CodexWrapper;
+        assert!(!wrapper.should_log_stderr_line("ERROR codex: auth token expired"));
+        assert!(!wrapper.should_log_stderr_line("<head>"));
+        assert!(!wrapper.should_log_stderr_line(
+            r#"2026-06-13T20:23:32.740217Z  INFO session_loop: codex_otel.trace_safe"#
+        ));
     }
 }

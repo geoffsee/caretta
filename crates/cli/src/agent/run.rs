@@ -77,7 +77,12 @@ pub(crate) fn spawn_sanitized_stderr_logger(
                     }
                 }
             }
-            log(&format!("{label}: {trimmed}"));
+            let should_log = adapter
+                .map(|a| a.should_log_stderr_line(trimmed))
+                .unwrap_or(true);
+            if should_log {
+                log(&format!("{label}: {trimmed}"));
+            }
         }
     }))
 }

@@ -59,6 +59,7 @@ pub fn auto_mode_overrides(cfg: &Config) -> AgentLaunchOverrides {
 pub fn merged_agent_env(cfg: &Config, extra_env: &[(String, String)]) -> Vec<(String, String)> {
     let mut env = local_inference_overrides(cfg).env;
     env.extend(model_selection_overrides(cfg).env);
+    env.extend(adapter_dispatch::launch_env(cfg.agent));
     env.extend(extra_env.iter().cloned());
 
     // #11: Ensure `gh` never uses a pager (e.g. `less`) when the agent

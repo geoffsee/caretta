@@ -110,6 +110,17 @@ pub trait AgentCliAdapter: Send + Sync {
         None
     }
 
+    /// Return false to suppress forwarding a stderr line to caretta logs.
+    fn should_log_stderr_line(&self, _line: &str) -> bool {
+        true
+    }
+
+    /// Environment variables applied when launching the agent subprocess.
+    /// Keys in `extra_env` override these defaults.
+    fn launch_env(&self) -> Vec<(String, String)> {
+        Vec::new()
+    }
+
     fn command_for(&self, invocation: AgentInvocation) -> Option<AgentCliCommand> {
         let args = match invocation {
             AgentInvocation::Help => Some(self.help_args()),

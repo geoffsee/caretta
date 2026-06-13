@@ -177,6 +177,10 @@ pub fn launch_auto_mode(agent: Agent) -> Vec<String> {
     }
 }
 
+pub fn launch_env(agent: Agent) -> Vec<(String, String)> {
+    adapter_for_agent(agent).launch_env()
+}
+
 pub fn launch_local_inference(
     agent: Agent,
     base_url: &str,
@@ -289,5 +293,14 @@ mod tests {
             env,
             vec![("COPILOT_MODEL".to_string(), "grok-3".to_string())]
         );
+    }
+
+    #[test]
+    fn codex_launch_env_caps_rust_log_at_error() {
+        assert_eq!(
+            launch_env(Agent::Codex),
+            vec![("RUST_LOG".to_string(), "error".to_string())]
+        );
+        assert!(launch_env(Agent::Claude).is_empty());
     }
 }
