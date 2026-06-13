@@ -12,7 +12,9 @@ use crate::agent::cmd::log;
 use crate::agent::launch::{
     auto_mode_overrides, local_inference_overrides, merged_agent_env, model_selection_overrides,
 };
-use crate::agent::run::{codex_events_from_json_line, native_command};
+use crate::agent::run::{
+    codex_events_from_json_line, native_command, spawn_sanitized_stderr_logger,
+};
 use crate::agent::types::{Agent, AgentEvent, ClaudeEvent, Config, ContentBlock};
 use crate::ui::discovery::DiscoveryWorkspace;
 use std::io::{BufRead, BufReader, Write};
@@ -140,11 +142,13 @@ fn run_agent_capture(cfg: &Config, prompt: &str, cwd: &Path) -> Result<(bool, St
     if use_stdin {
         cmd.stdin(Stdio::piped());
     }
-    cmd.stdout(Stdio::piped()).stderr(Stdio::inherit());
+    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let mut child = cmd
         .spawn()
         .map_err(|err| format!("Failed to spawn agent `{}`: {err}", spec.command.binary))?;
+    let stderr_log =
+        spawn_sanitized_stderr_logger(&mut child, format!("{} stderr", spec.command.binary));
 
     if use_stdin
         && let Some(mut stdin) = child.stdin.take()
@@ -169,6 +173,9 @@ fn run_agent_capture(cfg: &Config, prompt: &str, cwd: &Path) -> Result<(bool, St
         .wait()
         .map(|status| status.success())
         .map_err(|err| format!("Agent process wait failed: {err}"))?;
+    if let Some(handle) = stderr_log {
+        let _ = handle.join();
+    }
     Ok((ok, text))
 }
 

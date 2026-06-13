@@ -7,7 +7,7 @@ use crate::agent::types::{Agent, AgentEvent, AssistantMessage, ClaudeEvent, Conf
 use agent_runtime::AgentRuntime;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::Instant;
 use tempfile::NamedTempFile;
 
@@ -51,6 +51,24 @@ pub(crate) fn native_command(binary: &str, args: &[String]) -> Command {
 
     cmd.args(args);
     cmd
+}
+
+pub(crate) fn spawn_sanitized_stderr_logger(
+    child: &mut Child,
+    label: impl Into<String>,
+) -> Option<std::thread::JoinHandle<()>> {
+    let stderr = child.stderr.take()?;
+    let label = label.into();
+    Some(std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            log(&format!("{label}: {trimmed}"));
+        }
+    }))
 }
 
 pub fn run_claude_native_with_env(
@@ -115,13 +133,14 @@ fn run_claude_native_with_env_for_prompt_and_stdin(
             Ok(prompt_file) => prompt_file,
             Err(ok) => return ok,
         };
-    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn() {
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(child) => child,
         Err(err) => {
             return handle_agent_spawn_error(binary, &program, err, started_at, prompt);
         }
     };
     set_active_child_pid(Some(child.id()));
+    let stderr_log = spawn_sanitized_stderr_logger(&mut child, format!("{binary} stderr"));
 
     let stdout = child.stdout.take().expect("piped stdout");
     let reader = BufReader::new(stdout);
@@ -149,6 +168,9 @@ fn run_claude_native_with_env_for_prompt_and_stdin(
         }
     }
     let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    if let Some(handle) = stderr_log {
+        let _ = handle.join();
+    }
     set_active_child_pid(None);
     if !saw_result {
         emit_event(estimated_result_event(
@@ -505,13 +527,14 @@ fn run_codex_native_with_env_for_prompt_and_stdin(
             Ok(prompt_file) => prompt_file,
             Err(ok) => return ok,
         };
-    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::inherit()).spawn() {
+    let mut child = match cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn() {
         Ok(child) => child,
         Err(err) => {
             return handle_agent_spawn_error(binary, &program, err, started_at, prompt);
         }
     };
     set_active_child_pid(Some(child.id()));
+    let stderr_log = spawn_sanitized_stderr_logger(&mut child, format!("{binary} stderr"));
 
     let stdout = child.stdout.take().expect("piped stdout");
     let reader = BufReader::new(stdout);
@@ -542,6 +565,9 @@ fn run_codex_native_with_env_for_prompt_and_stdin(
         }
     }
     let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    if let Some(handle) = stderr_log {
+        let _ = handle.join();
+    }
     set_active_child_pid(None);
     if !saw_result {
         emit_event(estimated_result_event(
