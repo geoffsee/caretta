@@ -1974,6 +1974,9 @@ pub fn build_housekeeping_finalize_prompt(
     feedback: &str,
 ) -> String {
     let context = housekeeping_context(open_issues, open_prs, local_branches, tracker_bodies);
+    let ideation_label = labels::IDEATION;
+    let synthesis_label = labels::UXR_SYNTHESIS;
+    let strategic_label = labels::STRATEGIC_REVIEW;
     format!(
         r#"You are a housekeeping agent for the {project_name} project.
 
@@ -2025,16 +2028,19 @@ Execute approved cleanups in this order (lowest-risk first):
 After executing all approved actions, file a `housekeeping` GitHub issue summarising
 what was done:
 
-### Step 1 — Close any prior open housekeeping issues
+### Step 1 — Close any prior open housekeeping, ideation, uxr-synthesis, and strategic-review issues
 
 Run:
 ```
 gh issue list --label housekeeping --state open --json number --jq '.[].number'
+gh issue list --label "{ideation_label}" --state open --json number --jq '.[].number'
+gh issue list --label "{synthesis_label}" --state open --json number --jq '.[].number'
+gh issue list --label "{strategic_label}" --state open --json number --jq '.[].number'
 ```
 
 For each open issue number returned, close it with:
 ```
-gh issue close <NUMBER> --comment "Superseded by the new housekeeping run."
+gh issue close <NUMBER> --comment "Superseded by the new factory cycle run."
 ```
 
 ### Step 2 — Create the new housekeeping issue
