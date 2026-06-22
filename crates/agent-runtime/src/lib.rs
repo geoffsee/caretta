@@ -15,6 +15,7 @@ use tar::Archive;
 
 mod available_models;
 mod bundled_agents;
+mod native_binaries;
 mod utilities;
 
 pub use available_models::{
@@ -22,6 +23,7 @@ pub use available_models::{
     scan_all_clis, scan_available_models, scan_cli,
 };
 pub use bundled_agents::{BundledAgent, SUPPORTED_AGENTS};
+pub use native_binaries::{NATIVE_BINARIES, NativeBinaryInstall};
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/agent_runtime_generated.rs"));
@@ -300,16 +302,15 @@ mod tests {
     use codex::CodexWrapper;
     use copilot::CopilotWrapper;
     use gemini::GeminiWrapper;
-    use grok::GrokWrapper;
     use junie::JunieWrapper;
     use std::process::Stdio;
     use xai::XaiWrapper;
 
     #[test]
-    fn metadata_matches_xai_copilot_proxy() {
+    fn metadata_matches_xai_grok_binary() {
         let xai = agent_metadata(Agent::Xai).expect("xai metadata");
-        assert_eq!(xai.binary, "copilot");
-        assert_eq!(Agent::Xai.binary(), "copilot");
+        assert_eq!(xai.binary, "grok");
+        assert_eq!(Agent::Xai.binary(), "grok");
     }
 
     #[test]
@@ -367,7 +368,6 @@ mod tests {
         assert_version_command(&runtime, CodexWrapper);
         assert_version_command(&runtime, CopilotWrapper);
         assert_version_command(&runtime, GeminiWrapper);
-        assert_version_command(&runtime, GrokWrapper);
         assert_version_command(&runtime, JunieWrapper);
         assert_version_command(&runtime, XaiWrapper);
     }

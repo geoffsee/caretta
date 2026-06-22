@@ -290,7 +290,6 @@ pub enum Agent {
     Codex,
     Copilot,
     Gemini,
-    Grok,
     Junie,
     Xai,
     Cursor,
@@ -304,7 +303,6 @@ impl ValueEnum for Agent {
             Self::Codex,
             Self::Copilot,
             Self::Gemini,
-            Self::Grok,
             Self::Junie,
             Self::Xai,
             Self::Cursor,
@@ -318,7 +316,6 @@ impl ValueEnum for Agent {
             Self::Codex => clap::builder::PossibleValue::new("codex"),
             Self::Copilot => clap::builder::PossibleValue::new("copilot"),
             Self::Gemini => clap::builder::PossibleValue::new("gemini"),
-            Self::Grok => clap::builder::PossibleValue::new("grok"),
             Self::Junie => clap::builder::PossibleValue::new("junie"),
             Self::Xai => clap::builder::PossibleValue::new("xai"),
             Self::Cursor => clap::builder::PossibleValue::new("cursor"),
@@ -335,9 +332,8 @@ impl FromStr for Agent {
             "codex" => Ok(Self::Codex),
             "copilot" => Ok(Self::Copilot),
             "gemini" => Ok(Self::Gemini),
-            "grok" => Ok(Self::Grok),
+            "grok" | "xai" => Ok(Self::Xai),
             "junie" => Ok(Self::Junie),
-            "xai" => Ok(Self::Xai),
             "cursor" => Ok(Self::Cursor),
             _ => Err(format!("Unknown agent: {}", s)),
         }
@@ -356,10 +352,9 @@ impl Agent {
             Agent::Cline => "cline",
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
-            Agent::Gemini => "gemini",
-            Agent::Grok => "grok",
+            Agent::Gemini => "agy",
             Agent::Junie => "junie",
-            Agent::Xai => "copilot", // xAI proxies the copilot CLI
+            Agent::Xai => "grok",
             Agent::Cursor => "cursor",
         }
     }
@@ -371,7 +366,6 @@ impl Agent {
             Agent::Codex => "Co-Authored-By: Codex <noreply@openai.com>",
             Agent::Copilot => "Co-Authored-By: GitHub Copilot <noreply@github.com>",
             Agent::Gemini => "Co-Authored-By: Gemini <noreply@google.com>",
-            Agent::Grok => "Co-Authored-By: Grok <noreply@x.ai>",
             Agent::Junie => "Co-Authored-By: Junie <junie@jetbrains.com>",
             Agent::Xai => "Co-Authored-By: xAI <noreply@x.ai>",
             Agent::Cursor => "Co-Authored-By: Cursor <noreply@cursor.com>",
@@ -387,7 +381,6 @@ impl fmt::Display for Agent {
             Self::Codex => "codex",
             Self::Copilot => "copilot",
             Self::Gemini => "gemini",
-            Self::Grok => "grok",
             Self::Junie => "junie",
             Self::Xai => "xai",
             Self::Cursor => "cursor",
@@ -777,15 +770,7 @@ pub fn should_use_event_model(model: &str, has_configured_model: bool) -> bool {
     !has_configured_model
         || !matches!(
             model,
-            "claude"
-                | "cline"
-                | "codex"
-                | "copilot"
-                | "cursor"
-                | "gemini"
-                | "grok"
-                | "junie"
-                | "xai"
+            "claude" | "cline" | "codex" | "copilot" | "cursor" | "gemini" | "junie" | "xai"
         )
 }
 

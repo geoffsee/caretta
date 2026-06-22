@@ -39,6 +39,7 @@ fi
 cp -R "$ROOT/assets" "$STAGE/assets"
 cp "$ROOT/crates/agent-runtime/package.json" "$STAGE/package.json"
 cp "$ROOT/crates/agent-runtime/bun.lock" "$STAGE/bun.lock"
+cp "$ROOT/crates/agent-runtime/native-binaries.lock.json" "$STAGE/native-binaries.lock.json"
 
 cp -R "$ROOT/crates/cli/src/." "$STAGE/src/"
 cp "$ROOT/crates/agent-common/src/lib.rs" "$STAGE/src/agent_common.rs"
@@ -54,7 +55,7 @@ perl -0pi -e '
   s/pub use agent_common::\{AgentCliAdapter, AgentCliCommand, AgentInvocation\};/pub use crate::agent_common_impl::{AgentCliAdapter, AgentCliCommand, AgentInvocation};/g;
 ' "$STAGE/src/cli_common.rs"
 
-for crate in claude cline codex copilot gemini grok junie xai; do
+for crate in claude cline codex copilot gemini junie xai; do
   mkdir -p "$STAGE/src/$crate"
   cp -R "$ROOT/crates/$crate/src/." "$STAGE/src/$crate/"
   rm -f "$STAGE/src/$crate/main.rs"
@@ -147,7 +148,6 @@ extern crate self as cline;
 extern crate self as codex;
 extern crate self as copilot;
 extern crate self as gemini;
-extern crate self as grok;
 extern crate self as junie;
 extern crate self as xai;
 
@@ -179,10 +179,6 @@ use copilot_impl::*;
 mod gemini_impl;
 use gemini_impl::*;
 
-#[path = "grok/lib.rs"]
-mod grok_impl;
-use grok_impl::*;
-
 #[path = "junie/lib.rs"]
 mod junie_impl;
 use junie_impl::*;
@@ -208,6 +204,9 @@ perl -0pe '
   s/available_models::scan_available_models\(repo_root,/available_models::scan_available_models(\&repo_root,/g;
   s/if stamp_matches\(stamp_path, key\) && manifest_dir\.join\("node_modules"\)\.is_dir\(\) \{\s*return;\s*\}/if manifest_dir.join("node_modules").is_dir() {\n        return;\n    }/s;
 ' "$ROOT/crates/agent-runtime/build.rs" > "$STAGE/build_agent_runtime.rs"
+perl -0pe '
+  s#src/native_binaries\.rs#src/agent_runtime/native_binaries.rs#g;
+' "$ROOT/crates/agent-runtime/build_native_binaries.rs" > "$STAGE/build_native_binaries.rs"
 
 cat > "$STAGE/build.rs" <<'EOF'
 mod cli_build {

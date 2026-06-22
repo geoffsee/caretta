@@ -20,7 +20,7 @@ Pre-built binaries are available for:
 ### Prerequisites
 
 - `gh` CLI authenticated (`gh auth login`)
-- An AI agent on PATH (`claude`, `cline`, `codex`, `copilot`, `cursor`, `gemini`, `grok`, `junie`, or `xai`)
+- An AI agent on PATH (`claude`, `cline`, `codex`, `copilot`, `cursor`, `gemini`, `junie`, or `xai`)
 
 ### Code review and a bot GitHub App
 

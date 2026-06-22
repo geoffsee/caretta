@@ -13,7 +13,7 @@ import { $ } from "bun";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 
-const AGENTS = ["claude", "cline", "codex", "copilot", "gemini", "grok", "junie", "xai"];
+const AGENTS = ["claude", "cline", "codex", "copilot", "gemini", "junie", "xai"];
 const OUTPUT_DIR = "agent_discovery_results";
 const DISCOVER_HELP_BIN = "./scripts/discover-help";
 

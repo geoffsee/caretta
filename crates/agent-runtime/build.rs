@@ -9,6 +9,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use tar::{Builder, EntryType, Header};
 
+#[path = "build_native_binaries.rs"]
+mod build_native_binaries;
+
 #[path = "src/bundled_agents.rs"]
 mod bundled_agents;
 
@@ -22,6 +25,9 @@ fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/available_models.rs");
     println!("cargo:rerun-if-changed=src/bundled_agents.rs");
+    println!("cargo:rerun-if-changed=src/native_binaries.rs");
+    println!("cargo:rerun-if-changed=build_native_binaries.rs");
+    println!("cargo:rerun-if-changed=native-binaries.lock.json");
     println!("cargo:rerun-if-changed=src/utilities.rs");
     // Cache key intentionally tracks ONLY `bun.lock`. We do not re-run when
     // `package.json` changes on its own (a lockfile update will reflect any
@@ -50,6 +56,14 @@ fn main() {
     // cargo run can short-circuit `run_bun_install_if_needed` while leaving
     // the freshly-installed stub binary unrepaired in `node_modules/`.
     ensure_claude_native_binary(&manifest_dir, &bun_path);
+    let target_env = env::var("CARGO_CFG_TARGET_ENV").ok();
+    build_native_binaries::ensure_native_binaries(
+        &manifest_dir,
+        &out_dir,
+        &target_os,
+        &target_arch,
+        target_env.as_deref(),
+    );
 
     available_models::scan_available_models(repo_root, &manifest_dir).unwrap_or_else(|err| {
         panic!(
@@ -193,6 +207,7 @@ fn create_archive(manifest_dir: &Path, archive_path: &Path, bun_path: &Path) -> 
     append_file(&mut archive, manifest_dir, "package.json")?;
     append_file(&mut archive, manifest_dir, "bun.lock")?;
     append_bun_runtime(&mut archive, bun_path)?;
+    build_native_binaries::append_native_binaries(&mut archive, manifest_dir)?;
     archive.append_dir_all("node_modules", manifest_dir.join("node_modules"))?;
     archive.finish()?;
     archive.into_inner()?.finish()?;
@@ -308,6 +323,7 @@ fn install_cache_key(
     // Only the lockfile contributes to the cache key — package.json edits or
     // Bun binary upgrades do not invalidate the bundled runtime on their own.
     hasher.update(file_sha256(manifest_dir.join("bun.lock"))?.as_bytes());
+    hasher.update(file_sha256(manifest_dir.join("native-binaries.lock.json"))?.as_bytes());
     Ok(format!("{:x}", hasher.finalize()))
 }
 

@@ -5,7 +5,7 @@ pub struct GeminiWrapper;
 
 impl AgentCliAdapter for GeminiWrapper {
     fn binary(&self) -> &'static str {
-        "gemini"
+        "agy"
     }
 
     fn help_args(&self) -> Vec<String> {

@@ -8,6 +8,7 @@ dist/*
 /codex-help.txt
 /gemini-help.txt
 node_modules/
+/crates/agent-runtime/bin/
 /.grok
 /.claude
 /scripts/list-models-*.sh

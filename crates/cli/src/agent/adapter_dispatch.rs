@@ -8,7 +8,6 @@ use cline::ClineWrapper;
 use codex::CodexWrapper;
 use copilot::CopilotWrapper;
 use gemini::GeminiWrapper;
-use grok::GrokWrapper;
 use junie::JunieWrapper;
 use xai::XaiWrapper;
 
@@ -44,10 +43,6 @@ pub fn native_base_command(agent: Agent, prompt: &str) -> AgentCliCommand {
         Agent::Gemini => AgentCliCommand {
             binary: GeminiWrapper.binary().to_string(),
             args: GeminiWrapper.caretta_native_run_argv(prompt),
-        },
-        Agent::Grok => AgentCliCommand {
-            binary: GrokWrapper.binary().to_string(),
-            args: GrokWrapper.caretta_native_run_argv(prompt),
         },
         Agent::Xai => AgentCliCommand {
             binary: XaiWrapper.binary().to_string(),
@@ -105,7 +100,6 @@ pub fn adapter_for_agent(agent: Agent) -> &'static dyn AgentCliAdapter {
         Agent::Copilot => &CopilotWrapper,
         Agent::Codex => &CodexWrapper,
         Agent::Gemini => &GeminiWrapper,
-        Agent::Grok => &GrokWrapper,
         Agent::Xai => &XaiWrapper,
         Agent::Cline => &ClineWrapper,
     }
@@ -157,7 +151,6 @@ pub fn launch_model_selection(agent: Agent, model: &str) -> (Vec<String>, Vec<(S
         Agent::Copilot => CopilotWrapper.launch_model_selection(model),
         Agent::Codex => CodexWrapper.launch_model_selection(model),
         Agent::Gemini => GeminiWrapper.launch_model_selection(model),
-        Agent::Grok => GrokWrapper.launch_model_selection(model),
         Agent::Xai => XaiWrapper.launch_model_selection(model),
         Agent::Cline => ClineWrapper.launch_model_selection(model),
     }
@@ -171,7 +164,6 @@ pub fn launch_auto_mode(agent: Agent) -> Vec<String> {
         Agent::Copilot => CopilotWrapper.launch_auto_mode(),
         Agent::Codex => CodexWrapper.launch_auto_mode(),
         Agent::Gemini => GeminiWrapper.launch_auto_mode(),
-        Agent::Grok => GrokWrapper.launch_auto_mode(),
         Agent::Xai => XaiWrapper.launch_auto_mode(),
         Agent::Cline => ClineWrapper.launch_auto_mode(),
     }
@@ -286,13 +278,10 @@ mod tests {
     }
 
     #[test]
-    fn xai_model_selection_uses_env_not_args() {
+    fn xai_model_selection_uses_dash_m() {
         let (args, env) = launch_model_selection(Agent::Xai, "grok-3");
-        assert!(args.is_empty());
-        assert_eq!(
-            env,
-            vec![("COPILOT_MODEL".to_string(), "grok-3".to_string())]
-        );
+        assert_eq!(args, vec!["-m".to_string(), "grok-3".to_string()]);
+        assert!(env.is_empty());
     }
 
     #[test]

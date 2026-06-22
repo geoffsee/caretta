@@ -287,7 +287,7 @@ fn subcommand_help_serve() {
 // ═══════════════════════════════════════════════════════════════════════════
 
 const ALL_AGENTS: &[&str] = &[
-    "claude", "cline", "codex", "copilot", "gemini", "grok", "junie", "xai", "cursor",
+    "claude", "cline", "codex", "copilot", "gemini", "junie", "xai", "cursor",
 ];
 
 #[test]
@@ -1045,9 +1045,9 @@ fn dry_run_output_reflects_selected_agent() {
         // (either in the argv dump or in a log line).
         let lower = combined.to_lowercase();
         let agent_lower = agent.to_lowercase();
-        // xAI uses the copilot CLI; logs still include the xai agent label.
+        // xAI uses the official Grok Build CLI; logs should include the xai agent label.
         let expected_in_output = match *agent {
-            "xai" => lower.contains("xai") || lower.contains("copilot"),
+            "xai" => lower.contains("xai") || lower.contains("grok"),
             _ => lower.contains(&agent_lower),
         };
         assert!(

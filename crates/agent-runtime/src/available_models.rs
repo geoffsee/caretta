@@ -238,8 +238,8 @@ pub fn curate_all(raw: &RawScanResult) -> CuratedModels {
             require_agent_installed: true,
         },
         AgentSpec {
-            agent: "grok",
-            sources: &["grok"],
+            agent: "xai",
+            sources: &["xai"],
             prefixes: &["grok-"],
             primary_prefix: "grok-",
             require_agent_installed: true,
@@ -249,13 +249,6 @@ pub fn curate_all(raw: &RawScanResult) -> CuratedModels {
             sources: &["junie", "claude"],
             prefixes: &["claude-"],
             primary_prefix: "claude-",
-            require_agent_installed: true,
-        },
-        AgentSpec {
-            agent: "xai",
-            sources: &["xai"],
-            prefixes: &["grok-"],
-            primary_prefix: "grok-",
             require_agent_installed: true,
         },
     ];
@@ -766,16 +759,6 @@ mod tests {
     #[test]
     fn xai_is_empty_when_xai_is_not_installed() {
         let mut raw = RawScanResult::new();
-
-        raw.insert(
-            "grok".to_string(),
-            CliScan {
-                installed: true,
-                executable: Some(PathBuf::from("/tmp/grok")),
-                resolved: Some(PathBuf::from("/tmp/grok")),
-                models: vec!["grok-4".to_string()],
-            },
-        );
 
         raw.insert(
             "xai".to_string(),

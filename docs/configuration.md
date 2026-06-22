@@ -8,7 +8,7 @@ caretta [OPTIONS] [COMMAND]
 
 | Flag | Description | Default |
 |---|---|---|
-| `--agent <name>` | AI agent (`claude`, `cline`, `codex`, `copilot`, `cursor`, `gemini`, `grok`, `junie`, `xai`) | `claude` |
+| `--agent <name>` | AI agent (`claude`, `cline`, `codex`, `copilot`, `cursor`, `gemini`, `junie`, `xai`) | `claude` |
 | `--auto` | Unattended mode (skip permission prompts) | off |
 | `--dry-run` | Show what would happen without executing | off |
 | `--preset <name>` | Use a workflow preset for this invocation | `caretta.toml` / `default` |
@@ -111,10 +111,9 @@ credential vault instead of plaintext project files.
 |---|---|---|---|---|
 | Claude | `claude` | `--dangerously-skip-permissions` | stream-json | Default. Full structured event streaming to the UI. |
 | Cline | `cline` | `--no-interactive` | plain | Multi-provider agent. Configure provider with `cline auth`. |
-| Gemini | `gemini` | `--yolo` | stream-json | Full structured event streaming (same parser as Claude). |
-| Grok | `grok` | `--sandbox` | json | xAI's grok-cli. Uses `GROK_API_KEY` (falls back to `XAI_API_KEY`). |
+| Gemini | `agy` | `--yolo` | stream-json | Antigravity CLI (replaces deprecated `gemini` npm CLI). |
+| xAI | `grok` | `--sandbox` | json | Official Grok Build CLI. Uses `XAI_API_KEY`. |
 | Junie | `junie` | `--brave` | json-stream | JetBrains Junie CLI. BYOK via `--provider` + API key flags. |
 | Codex | `codex` | `--dangerously-bypass-approvals-and-sandbox` | JSONL (`exec --json`) | Streams assistant/tool/result events into the same UI timeline. |
 | Copilot | `copilot` | `--yolo` | unknown | GitHub Copilot CLI (standalone binary, not `gh copilot`). |
 | Cursor | `cursor` | `--yolo` | stream-json | Cursor Agent CLI. Supports `--model` and non-interactive `-p`. |
-| xAI | `copilot` | `--yolo` | unknown | Proxies the GitHub Copilot CLI with xAI-compatible BYOK settings via environment variables. |

@@ -249,7 +249,6 @@ pub fn Sidebar(
                             option { value: "codex", "Codex" }
                             option { value: "copilot", "Copilot" }
                             option { value: "gemini", "Gemini" }
-                            option { value: "grok", "Grok" }
                             option { value: "junie", "Junie" }
                             option { value: "xai", "xAI" }
                         }

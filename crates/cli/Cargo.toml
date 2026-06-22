@@ -32,7 +32,6 @@ cline = { package = "caretta-cline", path = "../cline" }
 codex = { package = "caretta-codex", path = "../codex" }
 copilot = { package = "caretta-copilot", path = "../copilot" }
 gemini = { package = "caretta-gemini", path = "../gemini" }
-grok = { package = "caretta-grok", path = "../grok" }
 junie = { package = "caretta-junie", path = "../junie" }
 xai = { package = "caretta-xai", path = "../xai" }
 agent-runtime = { package = "caretta-agent-runtime", path = "../agent-runtime" }

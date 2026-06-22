@@ -5,7 +5,7 @@ pub struct XaiWrapper;
 
 impl AgentCliAdapter for XaiWrapper {
     fn binary(&self) -> &'static str {
-        "copilot"
+        "grok"
     }
 
     fn help_args(&self) -> Vec<String> {
@@ -13,30 +13,24 @@ impl AgentCliAdapter for XaiWrapper {
     }
 
     fn version_args(&self) -> Vec<String> {
+        // `grok version` can require auth in newer releases; `--version` is non-auth.
         vec!["--version".to_string()]
     }
 
     fn model_args(&self, model: &str) -> Option<Vec<String>> {
-        Some(vec!["--model".to_string(), model.to_string()])
+        Some(vec!["-m".to_string(), model.to_string()])
     }
 
     fn prompt_args(&self, prompt: &str) -> Vec<String> {
         vec!["--prompt".to_string(), prompt.to_string()]
     }
 
-    fn resume_args(&self, session_id: Option<&str>) -> Option<Vec<String>> {
-        match session_id {
-            Some(id) => Some(vec![format!("--resume={id}")]),
-            None => Some(vec!["--resume".to_string()]),
-        }
+    fn resume_args(&self, _session_id: Option<&str>) -> Option<Vec<String>> {
+        None
     }
 
-    fn output_format_args(&self, format: &str) -> Option<Vec<String>> {
-        Some(vec!["--output-format".to_string(), format.to_string()])
-    }
-
-    fn yolo_args(&self) -> Option<Vec<String>> {
-        Some(vec!["--yolo".to_string()])
+    fn project_args(&self, project: &str) -> Option<Vec<String>> {
+        Some(vec!["--directory".to_string(), project.to_string()])
     }
 
     fn caretta_native_run_argv(&self, prompt: &str) -> Vec<String> {
@@ -44,20 +38,11 @@ impl AgentCliAdapter for XaiWrapper {
     }
 
     fn launch_model_selection(&self, model: &str) -> (Vec<String>, Vec<(String, String)>) {
-        (
-            Vec::new(),
-            vec![("COPILOT_MODEL".to_string(), model.to_string())],
-        )
+        (vec!["-m".to_string(), model.to_string()], Vec::new())
     }
 
     fn launch_auto_mode(&self) -> Vec<String> {
-        vec!["--yolo".to_string()]
-    }
-}
-
-impl XaiWrapper {
-    pub fn env_overrides_for_xai() -> &'static [(&'static str, &'static str)] {
-        &[("XAI_BASE_URL", "https://api.x.ai/v1")]
+        vec!["--sandbox".to_string()]
     }
 }
 
@@ -67,17 +52,18 @@ mod tests {
     use agent_common::AgentCliAdapter;
 
     #[test]
-    fn uses_copilot_binary_with_xai_flag_mapping() {
+    fn uses_grok_binary_with_xai_adapter() {
         let wrapper = XaiWrapper;
-        assert_eq!(wrapper.binary(), "copilot");
+        assert_eq!(wrapper.binary(), "grok");
+        assert_eq!(
+            wrapper.model_args("grok-4"),
+            Some(vec!["-m".to_string(), "grok-4".to_string()])
+        );
         assert_eq!(
             wrapper.prompt_args("hello"),
             vec!["--prompt".to_string(), "hello".to_string()]
         );
-        assert_eq!(
-            wrapper.resume_args(Some("x1")),
-            Some(vec!["--resume=x1".to_string()])
-        );
+        assert_eq!(wrapper.resume_args(Some("x1")), None);
     }
 
     #[test]
@@ -90,10 +76,8 @@ mod tests {
     }
 
     #[test]
-    fn exposes_xai_specific_env_overrides() {
-        assert_eq!(
-            XaiWrapper::env_overrides_for_xai(),
-            &[("XAI_BASE_URL", "https://api.x.ai/v1")]
-        );
+    fn version_uses_flag() {
+        let wrapper = XaiWrapper;
+        assert_eq!(wrapper.version_args(), vec!["--version".to_string()]);
     }
 }

@@ -45,16 +45,9 @@ pub const SUPPORTED_AGENTS: &[BundledAgent] = &[
     },
     BundledAgent {
         id: "gemini",
-        binary: "gemini",
-        package: Some("@google/gemini-cli"),
-        entrypoint: Some("node_modules/@google/gemini-cli/bundle/gemini.js"),
-        external: false,
-    },
-    BundledAgent {
-        id: "grok",
-        binary: "grok",
-        package: Some("@kazuki-ookura/grok-cli"),
-        entrypoint: Some("node_modules/@kazuki-ookura/grok-cli/dist/index.js"),
+        binary: "agy",
+        package: None,
+        entrypoint: Some("bin/agy"),
         external: false,
     },
     BundledAgent {
@@ -66,9 +59,9 @@ pub const SUPPORTED_AGENTS: &[BundledAgent] = &[
     },
     BundledAgent {
         id: "xai",
-        binary: "copilot",
-        package: Some("@github/copilot"),
-        entrypoint: Some("node_modules/@github/copilot/npm-loader.js"),
+        binary: "grok",
+        package: None,
+        entrypoint: Some("bin/grok"),
         external: false,
     },
 ];

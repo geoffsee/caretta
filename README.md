@@ -63,7 +63,7 @@ $ caretta presets xp
 $ caretta --preset xp ideation
 ```
 
-`--agent` accepts `claude`, `cline`, `codex`, `copilot`, `gemini`, `grok`, `junie`, `xai`, `cursor` (default: `claude`). The matching CLI must be installed and authenticated. `--auto` passes adapter-specific flags that reduce permission prompts and, for two-phase workflows (ideation, housekeeping, sprint-planning, retrospective, etc.), synthesizes stand-in feedback so the draft chains straight into finalize without a human in the loop — without `--auto` the CLI stops after the draft so you can review before any side effects fire. `--dry-run` prints planned prompts and actions without making supported changes. `--preset <name>` swaps the workflow preset for a single invocation (use `caretta presets` to see what's available; `caretta presets <name>` lists the workflows that preset ships with).
+`--agent` accepts `claude`, `cline`, `codex`, `copilot`, `gemini`, `junie`, `xai`, `cursor` (default: `claude`). The matching CLI must be installed and authenticated. `--auto` passes adapter-specific flags that reduce permission prompts and, for two-phase workflows (ideation, housekeeping, sprint-planning, retrospective, etc.), synthesizes stand-in feedback so the draft chains straight into finalize without a human in the loop — without `--auto` the CLI stops after the draft so you can review before any side effects fire. `--dry-run` prints planned prompts and actions without making supported changes. `--preset <name>` swaps the workflow preset for a single invocation (use `caretta presets` to see what's available; `caretta presets <name>` lists the workflows that preset ships with).
 
 ## Desktop UI
 
@@ -185,7 +185,7 @@ A working end-to-end demo lives at [**geoffsee/caretta-hello-world**](https://gi
     # ANTHROPIC_API_KEY:     ${{ secrets.ANTHROPIC_API_KEY }}         # claude (alternative)
     # OPENAI_API_KEY:        ${{ secrets.OPENAI_API_KEY }}            # codex
     # GEMINI_API_KEY:        ${{ secrets.GEMINI_API_KEY }}            # gemini
-    # XAI_API_KEY:           ${{ secrets.XAI_API_KEY }}               # xai / grok
+    # XAI_API_KEY:           ${{ secrets.XAI_API_KEY }}               # xai
     # (cline, copilot, junie, cursor authenticate via their own CLI login flow)
 
     # ── GitHub auth for the `gh` CLI caretta shells out to ──

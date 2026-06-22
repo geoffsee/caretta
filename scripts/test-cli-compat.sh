@@ -34,9 +34,8 @@ agents=(
   "caretta-codex:codex"
   "caretta-copilot:copilot"
   "caretta-gemini:gemini"
-  "caretta-grok:grok"
   "caretta-junie:junie"
-  "caretta-xai:copilot"
+  "caretta-xai:grok"
 )
 
 missing=()

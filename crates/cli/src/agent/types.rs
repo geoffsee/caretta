@@ -57,7 +57,6 @@ impl AgentExt for Agent {
             Agent::Codex => "codex",
             Agent::Copilot => "copilot",
             Agent::Gemini => "gemini",
-            Agent::Grok => "grok",
             Agent::Junie => "junie",
             Agent::Xai => "xai",
             Agent::Cursor => "cursor",
