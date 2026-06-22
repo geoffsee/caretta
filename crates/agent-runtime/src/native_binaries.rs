@@ -57,6 +57,16 @@ pub fn runtime_binary_path(runtime_root: &Path, spec: &NativeBinaryInstall) -> P
 }
 
 #[allow(dead_code)]
+pub fn native_binaries_supported(
+    target_os: &str,
+    target_arch: &str,
+    target_env: Option<&str>,
+) -> bool {
+    antigravity_platform(target_os, target_arch, target_env).is_some()
+        && grok_platform(target_os, target_arch).is_some()
+}
+
+#[allow(dead_code)]
 pub fn antigravity_platform(
     target_os: &str,
     target_arch: &str,
@@ -132,6 +142,20 @@ mod tests {
             antigravity_platform("macos", "aarch64", None),
             Some("darwin_arm64".to_string())
         );
+    }
+
+    #[test]
+    fn native_binaries_are_not_supported_on_windows() {
+        assert!(!native_binaries_supported(
+            "windows",
+            "x86_64",
+            Some("msvc")
+        ));
+        assert_eq!(
+            antigravity_platform("windows", "x86_64", Some("msvc")),
+            None
+        );
+        assert_eq!(grok_platform("windows", "x86_64"), None);
     }
 
     #[test]

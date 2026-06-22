@@ -21,6 +21,13 @@ mod utilities;
 #[path = "src/available_models.rs"]
 mod available_models;
 
+#[derive(Clone, Copy)]
+struct RuntimeTarget<'a> {
+    os: &'a str,
+    arch: &'a str,
+    env: Option<&'a str>,
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=src/available_models.rs");
@@ -57,6 +64,11 @@ fn main() {
     // the freshly-installed stub binary unrepaired in `node_modules/`.
     ensure_claude_native_binary(&manifest_dir, &bun_path);
     let target_env = env::var("CARGO_CFG_TARGET_ENV").ok();
+    let runtime_target = RuntimeTarget {
+        os: &target_os,
+        arch: &target_arch,
+        env: target_env.as_deref(),
+    };
     build_native_binaries::ensure_native_binaries(
         &manifest_dir,
         &out_dir,
@@ -87,6 +99,7 @@ fn main() {
             &archive_stamp,
             &archive_key,
             &archive_sha_file,
+            runtime_target,
         )
         .expect("create/hash agent runtime archive");
 
@@ -173,6 +186,7 @@ fn create_archive_if_needed(
     stamp_path: &Path,
     key: &str,
     sha_path: &Path,
+    target: RuntimeTarget<'_>,
 ) -> io::Result<String> {
     if stamp_matches(stamp_path, key)
         && archive_path.is_file()
@@ -185,13 +199,18 @@ fn create_archive_if_needed(
         }
     }
 
-    let archive_sha256 = create_archive(manifest_dir, archive_path, bun_path)?;
+    let archive_sha256 = create_archive(manifest_dir, archive_path, bun_path, target)?;
     fs::write(sha_path, &archive_sha256)?;
     write_stamp(stamp_path, key)?;
     Ok(archive_sha256)
 }
 
-fn create_archive(manifest_dir: &Path, archive_path: &Path, bun_path: &Path) -> io::Result<String> {
+fn create_archive(
+    manifest_dir: &Path,
+    archive_path: &Path,
+    bun_path: &Path,
+    target: RuntimeTarget<'_>,
+) -> io::Result<String> {
     if let Some(parent) = archive_path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -207,7 +226,13 @@ fn create_archive(manifest_dir: &Path, archive_path: &Path, bun_path: &Path) -> 
     append_file(&mut archive, manifest_dir, "package.json")?;
     append_file(&mut archive, manifest_dir, "bun.lock")?;
     append_bun_runtime(&mut archive, bun_path)?;
-    build_native_binaries::append_native_binaries(&mut archive, manifest_dir)?;
+    build_native_binaries::append_native_binaries(
+        &mut archive,
+        manifest_dir,
+        target.os,
+        target.arch,
+        target.env,
+    )?;
     archive.append_dir_all("node_modules", manifest_dir.join("node_modules"))?;
     archive.finish()?;
     archive.into_inner()?.finish()?;

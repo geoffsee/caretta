@@ -12,7 +12,8 @@ mod native_binaries;
 use native_binaries::{
     GROK_VERSION_LOCK, NATIVE_BINARIES, NativeBinaryLock, antigravity_manifest_url,
     antigravity_platform, grok_artifact_fallback_url, grok_artifact_url, grok_platform,
-    native_binary_by_agent, parse_antigravity_manifest, runtime_binary_path,
+    native_binaries_supported, native_binary_by_agent, parse_antigravity_manifest,
+    runtime_binary_path,
 };
 
 pub fn ensure_native_binaries(
@@ -29,6 +30,14 @@ pub fn ensure_native_binaries(
     let stamp_path = out_dir.join("native_binaries.stamp");
     let key = native_cache_key(&lock_path, target_os, target_arch, target_env)
         .unwrap_or_else(|err| panic!("compute native binary cache key: {err}"));
+
+    if !native_binaries_supported(target_os, target_arch, target_env) {
+        println!(
+            "cargo:warning=Native agent CLI binaries are not available for {target_os}-{target_arch}; skipping Antigravity/Grok CLI bundling"
+        );
+        write_stamp(&stamp_path, &key).expect("write native binaries stamp");
+        return;
+    }
 
     if stamp_matches(&stamp_path, &key) && native_binaries_present(manifest_dir) {
         return;
@@ -249,7 +258,14 @@ fn set_executable(_path: &Path) -> io::Result<()> {
 pub fn append_native_binaries(
     archive: &mut tar::Builder<flate2::write::GzEncoder<File>>,
     manifest_dir: &Path,
+    target_os: &str,
+    target_arch: &str,
+    target_env: Option<&str>,
 ) -> io::Result<()> {
+    if !native_binaries_supported(target_os, target_arch, target_env) {
+        return Ok(());
+    }
+
     for spec in NATIVE_BINARIES {
         let path = runtime_binary_path(manifest_dir, spec);
         if path.is_file() {
