@@ -2,7 +2,9 @@ use crate::agent::adapter_dispatch;
 use crate::agent::cmd::{count_tokens, log};
 use crate::agent::launch::{auto_mode_overrides, merged_agent_env, model_selection_overrides};
 use crate::agent::process::{emit_event, set_active_child_pid, stop_requested};
-use crate::agent::types::{AgentEvent, AssistantMessage, Config, ContentBlock, RichAction};
+use crate::agent::types::{
+    AgentEvent, AssistantMessage, Config, ContentBlock, EVENT_SENDER, RichAction,
+};
 use agent_common::{AgentCliAdapter, PromptTransport};
 use agent_runtime::AgentRuntime;
 use std::io::{BufRead, BufReader, Write};
@@ -127,7 +129,11 @@ fn run_native_agent(
     let program = cmd.get_program().to_string_lossy().to_string();
 
     let mut child = match cmd
-        .stdin(Stdio::piped())
+        .stdin(if stdin_prompt.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -201,6 +207,12 @@ fn run_native_agent(
         let _ = handle.join();
     }
     set_active_child_pid(None);
+    if EVENT_SENDER.get().is_none() {
+        let trimmed = output_text.trim();
+        if !trimmed.is_empty() {
+            log(trimmed);
+        }
+    }
     if !saw_result {
         emit_event(estimated_result_event(
             ok,

@@ -1781,7 +1781,7 @@ pub fn EventRow(
     pricing: PricingConfig,
 ) -> Element {
     match event {
-        AgentEvent::Log(msg) => rsx! {
+        AgentEvent::Log { message: msg } => rsx! {
             div { class: "ev-log",
                 span { class: "tag", "[LOG]" }
                 "{msg}"

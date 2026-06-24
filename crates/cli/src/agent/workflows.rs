@@ -2,8 +2,9 @@ use crate::agent::cmd::{die, log};
 use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::stop_requested;
-use crate::agent::run::run_agent;
+use crate::agent::run::run_agent_with_env_in_dir;
 use crate::agent::types::{AgentEvent, Config, EVENT_SENDER, Workflow};
+use std::path::Path;
 
 /// Inject standard variables that all workflows may need.
 fn inject_common_vars(cfg: &Config, vars: &mut serde_json::Value) {
@@ -57,7 +58,13 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
         return;
     }
 
-    run_agent(cfg, &prompt);
+    let project_root = Path::new(&cfg.root);
+    if !run_agent_with_env_in_dir(cfg, &prompt, &[], project_root) {
+        log(&format!(
+            "{} draft agent exited unsuccessfully; audit output may be incomplete.",
+            wf.name
+        ));
+    }
     if stop_requested() {
         log(&format!("Stop requested. {} draft cancelled.", wf.name));
         if let Some(tx) = EVENT_SENDER.get() {
@@ -137,7 +144,13 @@ pub fn run_workflow_finalize(cfg: &Config, workflow_id: &str, feedback: &str) {
     )
     .unwrap_or_else(|e| die(&format!("Prompt render failed: {e}")));
 
-    run_agent(cfg, &prompt);
+    let project_root = Path::new(&cfg.root);
+    if !run_agent_with_env_in_dir(cfg, &prompt, &[], project_root) {
+        log(&format!(
+            "{} finalization agent exited unsuccessfully; housekeeping actions may be incomplete.",
+            wf.name
+        ));
+    }
     if stop_requested() {
         log(&format!(
             "Stop requested. {} finalization cancelled.",

@@ -107,9 +107,10 @@ impl AgentCliAdapter for CodexWrapper {
             || line.contains("Enable JavaScript and cookies to continue")
             || line.contains("http-equiv=\"refresh\"")
         {
-            return Some(vec![serde_json::to_value(AgentEvent::Log(
-                "Codex session expired or blocked by Cloudflare (403 Forbidden). Please re-authenticate by running 'codex login'.".to_string()
-            )).ok()?]);
+            return Some(vec![serde_json::to_value(AgentEvent::Log {
+                message: "Codex session expired or blocked by Cloudflare (403 Forbidden). Please re-authenticate by running 'codex login'.".to_string(),
+            })
+            .ok()?]);
         }
         None
     }

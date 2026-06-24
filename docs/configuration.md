@@ -112,7 +112,7 @@ credential vault instead of plaintext project files.
 | Claude | `claude` | `--dangerously-skip-permissions` | stream-json | Default. Full structured event streaming to the UI. |
 | Cline | `cline` | `--no-interactive` | plain | Multi-provider agent. Configure provider with `cline auth`. |
 | Gemini | `agy` | `--yolo` | stream-json | Antigravity CLI (replaces deprecated `gemini` npm CLI). |
-| xAI | `grok` | `--sandbox` | json | Official Grok Build CLI. Uses `XAI_API_KEY`. |
+| xAI | `grok` | `--always-approve` | streaming-json | Official Grok Build CLI. Uses `XAI_API_KEY`. |
 | Junie | `junie` | `--brave` | json-stream | JetBrains Junie CLI. BYOK via `--provider` + API key flags. |
 | Codex | `codex` | `--dangerously-bypass-approvals-and-sandbox` | JSONL (`exec --json`) | Streams assistant/tool/result events into the same UI timeline. |
 | Copilot | `copilot` | `--yolo` | unknown | GitHub Copilot CLI (standalone binary, not `gh copilot`). |

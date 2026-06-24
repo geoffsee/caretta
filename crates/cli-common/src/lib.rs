@@ -104,7 +104,9 @@ pub struct PendingIssue {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentEvent {
     Done,
-    Log(String),
+    Log {
+        message: String,
+    },
     #[serde(rename = "claude")]
     Rich(RichAction),
     AwaitingFeedback(Workflow),

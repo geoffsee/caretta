@@ -12,3 +12,5 @@ name = "xai"
 
 [dependencies]
 agent-common = { path = "../agent-common" }
+cli-common = { path = "../cli-common" }
+serde_json = "1"

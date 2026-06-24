@@ -292,4 +292,26 @@ mod tests {
         );
         assert!(launch_env(Agent::Claude).is_empty());
     }
+
+    #[test]
+    fn xai_launch_env_caps_rust_log_at_error() {
+        assert_eq!(
+            launch_env(Agent::Xai),
+            vec![("RUST_LOG".to_string(), "error".to_string())]
+        );
+    }
+
+    #[test]
+    fn xai_native_run_uses_streaming_json() {
+        assert_eq!(
+            native_base_command(Agent::Xai, "audit").args,
+            vec![
+                "-p".to_string(),
+                "audit".to_string(),
+                "--output-format".to_string(),
+                "streaming-json".to_string(),
+                "--no-auto-update".to_string(),
+            ]
+        );
+    }
 }

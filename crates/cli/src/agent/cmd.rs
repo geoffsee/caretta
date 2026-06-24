@@ -39,7 +39,7 @@ pub fn log(msg: &str) {
     let sanitized = sanitize_log_message(msg);
     info!("{sanitized}");
     if let Some(tx) = EVENT_SENDER.get() {
-        let _ = tx.send(AgentEvent::Log(sanitized));
+        let _ = tx.send(AgentEvent::Log { message: sanitized });
     }
 }
 
