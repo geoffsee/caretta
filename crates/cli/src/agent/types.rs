@@ -115,6 +115,7 @@ pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
 
     let file_cfg = DevConfig {
         project_name: Some(cfg.project_name.clone()),
+        geodynamo_url: cfg.geodynamo_url.clone(),
         local_inference,
         security_scan: ScanTargetsFile {
             paths: cfg.scan_targets.paths.clone(),

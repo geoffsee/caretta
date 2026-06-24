@@ -19,6 +19,7 @@ pub fn parse_args() -> Config {
         model: String::new(),
         auto_mode: false,
         dry_run: true,
+        geodynamo_url: None,
         local_inference: Default::default(),
         root: "/".into(),
         project_name: "caretta-web".into(),
@@ -61,6 +62,7 @@ pub fn parse_args() -> Config {
     let bootstrap_agent_files = dev_cfg.bootstrap_agent_files.unwrap_or(true);
     let bootstrap_snapshot = dev_cfg.bootstrap_snapshot.unwrap_or(false);
     let use_subscription = dev_cfg.use_subscription.unwrap_or(false);
+    let geodynamo_url = dev_cfg.geodynamo_url;
     let pricing = dev_cfg.pricing;
     let test = dev_cfg.test;
     let visual_regression = dev_cfg.visual_regression;
@@ -71,6 +73,7 @@ pub fn parse_args() -> Config {
         model: String::new(), // Default, will be overridden after agent is set
         auto_mode: false,     // Default, will be overridden by CLI
         dry_run: false,       // Default, will be overridden by CLI
+        geodynamo_url,
         local_inference,
         root,
         project_name,

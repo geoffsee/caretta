@@ -118,6 +118,7 @@ mod tests {
             model: String::new(),
             auto_mode: false,
             dry_run: false,
+            geodynamo_url: None,
             local_inference: LocalInferenceConfig::default(),
             root: ".".to_string(),
             project_name: "caretta-test".to_string(),

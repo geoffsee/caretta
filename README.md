@@ -98,9 +98,10 @@ caretta reads `caretta.toml` from the repo root on every launch (the legacy file
 ```toml
 # ── Top-level ─────────────────────────────────────────────────────────────
 project_name           = "my-project"   # default: inferred from the repo dir
+geodynamo_url          = "https://geoffsee.github.io/geodynamo/"
 workflow_preset        = "default"      # default: "default"  (run `caretta presets`)
 bootstrap_agent_files  = true           # default: true   — legacy agent-file bootstrap flag
-bootstrap_snapshot     = false          # default: false  — opt-in toak-rs codebase snapshot on launch
+bootstrap_snapshot     = false          # default: false  — opt-in to toak-rs codebase snapshot on launch
 use_subscription       = false          # default: false  — billing hint for adapters that support it
 
 # ── Per-agent default model ───────────────────────────────────────────────
@@ -166,6 +167,10 @@ url = "https://staging.example.com"
 `user_personas` also controls the Personas Studio storage location: persona JSON
 documents live in a `personas/` directory beside the resolved `SKILL.md` (whether
 that path is repo-relative, materialized under app data, or set explicitly in `[skills]`).
+
+`geodynamo_url` is optional. It should point at the geodynamo GitHub Pages project
+root; the autopilot action falls back to this value when its `geodynamo-url`
+input is not set.
 
 CLI flags (`--agent`, `--auto`, `--dry-run`, `--preset`) override matching `caretta.toml` values for that single invocation. Secrets — agent API keys, GitHub bot tokens, GitHub App private keys — are not written to `caretta.toml`; they're stored in the OS keychain by the GUI's settings panel or supplied via env vars (see the [GitHub Actions example](#github-actions) below).
 

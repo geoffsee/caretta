@@ -478,6 +478,7 @@ mod tests {
             model: String::new(),
             auto_mode: false,
             dry_run: true,
+            geodynamo_url: None,
             local_inference: Default::default(),
             root: env!("CARGO_MANIFEST_DIR").to_string(),
             project_name: "caretta-test".to_string(),

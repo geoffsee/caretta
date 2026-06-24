@@ -21,6 +21,7 @@ caretta [OPTIONS] [COMMAND]
 - **Expand All** opens collapsed thinking and tool-result blocks in the event stream.
 - Use **Stop** in the Actions panel to request cancellation of the current run. Active agent subprocesses are terminated, and the loop exits cleanly.
 - Use the **Personas** tab to maintain persistent UXR personas. It reads and writes JSON files in the `personas/` directory beside the configured `[skills].user_personas` path.
+- Set top-level `geodynamo_url = "https://geoffsee.github.io/geodynamo/"` in `caretta.toml` when the project should declare its managing geodynamo Pages root for autopilot factory cycles.
 - Switch themes from the title bar dropdown. 10 built-in: Tokyo Night, Catppuccin Mocha, Dracula, Nord, Gruvbox Dark, Solarized Dark, One Dark Pro, Rose Pine, Synthwave '84, GitHub Dark.
 
 ## Bot Account Setup (Code Review)

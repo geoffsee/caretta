@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt;
 use std::str::FromStr;
+use url::Url;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Workflow {
@@ -692,6 +693,8 @@ pub struct Config {
     pub model: String,
     pub auto_mode: bool,
     pub dry_run: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geodynamo_url: Option<String>,
     pub local_inference: LocalInferenceConfig,
     pub root: String,
     pub project_name: String,
@@ -800,6 +803,7 @@ impl fmt::Debug for Config {
             .field("model", &self.model)
             .field("auto_mode", &self.auto_mode)
             .field("dry_run", &self.dry_run)
+            .field("geodynamo_url", &self.geodynamo_url)
             .field("local_inference", &self.local_inference)
             .field("root", &self.root)
             .field("project_name", &self.project_name)
@@ -866,6 +870,12 @@ pub struct PrAuthor {
 pub struct DevConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_optional_http_url",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub geodynamo_url: Option<String>,
     #[serde(default, skip_serializing_if = "is_default")]
     pub local_inference: LocalInferenceConfigFile,
     #[serde(default)]
@@ -1002,6 +1012,23 @@ fn is_none<T>(opt: &Option<T>) -> bool {
     opt.is_none()
 }
 
+fn deserialize_optional_http_url<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(raw) = Option::<String>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    let url = Url::parse(trimmed).map_err(serde::de::Error::custom)?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        return Err(serde::de::Error::custom(
+            "geodynamo_url must be an absolute http(s) URL",
+        ));
+    }
+    Ok(Some(url.to_string()))
+}
+
 fn is_zero_f64(value: &f64) -> bool {
     *value == 0.0
 }
@@ -1063,6 +1090,34 @@ mod agent_binary_tests {
         assert!(!super::should_use_event_model("codex", true));
         assert!(super::should_use_event_model("gpt-5.2", true));
         assert!(super::should_use_event_model("codex", false));
+    }
+
+    #[test]
+    fn geodynamo_url_absent_defaults_to_none() {
+        let cfg: DevConfig = toml::from_str("").expect("empty config should parse");
+
+        assert_eq!(cfg.geodynamo_url, None);
+    }
+
+    #[test]
+    fn geodynamo_url_deserializes_valid_url() {
+        let cfg: DevConfig = toml::from_str(
+            r#"
+geodynamo_url = "https://geoffsee.github.io/geodynamo/"
+"#,
+        )
+        .expect("geodynamo_url should parse");
+
+        assert_eq!(
+            cfg.geodynamo_url.as_deref(),
+            Some("https://geoffsee.github.io/geodynamo/")
+        );
+    }
+
+    #[test]
+    fn geodynamo_url_rejects_invalid_or_non_string_values() {
+        assert!(toml::from_str::<DevConfig>(r#"geodynamo_url = "not a url""#).is_err());
+        assert!(toml::from_str::<DevConfig>("geodynamo_url = 42").is_err());
     }
 
     #[test]
