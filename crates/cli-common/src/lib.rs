@@ -699,24 +699,17 @@ pub struct DeployConfig {
 /// Configuration for anonymous telemetry collection
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TelemetryConfig {
-    /// Whether telemetry collection is enabled
+    /// Whether telemetry collection is enabled (default: true)
+    /// Users can opt-out by setting this to false, or via environment variables:
+    /// - DO_NOT_TRACK=1
+    /// - CARETTA_NO_TELEMETRY=1
     #[serde(default = "default_telemetry_enabled")]
     pub enabled: bool,
-    /// The endpoint URL for telemetry ingestion
-    #[serde(default = "default_telemetry_endpoint")]
-    pub endpoint: String,
-    /// Application ID for this instance
-    #[serde(default = "default_telemetry_app_id")]
-    pub app_id: String,
 }
 
 impl Default for TelemetryConfig {
     fn default() -> Self {
-        Self {
-            enabled: true,
-            endpoint: "https://telemetry.geoffsee.com/v1/events".to_string(),
-            app_id: "caretta".to_string(),
-        }
+        Self { enabled: true }
     }
 }
 
@@ -724,12 +717,8 @@ fn default_telemetry_enabled() -> bool {
     true
 }
 
-fn default_telemetry_endpoint() -> String {
-    "https://telemetry.geoffsee.com/v1/events".to_string()
-}
-
-fn default_telemetry_app_id() -> String {
-    "caretta".to_string()
+fn is_false(telemetry: &TelemetryConfig) -> bool {
+    !telemetry.enabled
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -764,16 +753,8 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
     /// Telemetry configuration for anonymous usage data collection
-    #[serde(default, skip_serializing_if = "TelemetryConfig::is_default")]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub telemetry: TelemetryConfig,
-}
-
-impl TelemetryConfig {
-    fn is_default(&self) -> bool {
-        self.enabled == default_telemetry_enabled()
-            && self.endpoint == default_telemetry_endpoint()
-            && self.app_id == default_telemetry_app_id()
-    }
 }
 
 /// Project-specific test/format commands run after an agent edit.
@@ -961,7 +942,7 @@ pub struct DevConfig {
     pub visual_regression: VisualRegressionConfig,
     #[serde(default, skip_serializing_if = "is_default")]
     pub deploy: DeployConfig,
-    #[serde(default, skip_serializing_if = "TelemetryConfig::is_default")]
+    #[serde(default, skip_serializing_if = "is_false")]
     pub telemetry: TelemetryConfig,
 }
 

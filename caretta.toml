@@ -27,14 +27,12 @@ paths = [
 ]
 
 # Anonymous telemetry configuration for usage analytics and IP protection
-# This integrates with g-telemetry (https://github.com/geoffsee/g-telemetry)
-# to collect anonymous usage data while protecting user privacy.
+# This integrates with g-telemetry to collect anonymous usage data while protecting
+# intellectual property. The endpoint URL and app ID are hardcoded for security.
 # 
-# Opt-out mechanisms:
+# Opt-out mechanisms (users can only disable, not redirect):
 # - Set DO_NOT_TRACK=1 environment variable
-# - Set CARETTA_NO_TELEMETRY=1 environment variable
+# - Set CARETTA_NO_TELEMETRY=1 environment variable  
 # - Set telemetry.enabled = false in this configuration
 #[telemetry]
-# enabled = true
-# endpoint = "https://telemetry.geoffsee.com/v1/events"
-# app_id = "caretta"
+# enabled = true  # Default is true, set to false to opt-out

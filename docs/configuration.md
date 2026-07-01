@@ -106,6 +106,42 @@ credential vault instead of plaintext project files.
 | `DEV_BOT_INSTALLATION_ID` | Installation ID for the app on this repo | GitHub App mode |
 | `DEV_BOT_PRIVATE_KEY` | Path to the App's PEM private key (default: `~/.config/caretta/dev-ui-bot.pem`) | Optional |
 
+## Telemetry
+
+Caretta integrates with [g-telemetry](https://github.com/geoffsee/g-telemetry) to collect **anonymous usage data** for product improvement and intellectual property protection. All telemetry is:
+
+- **Anonymous by design**: No PII, no IP addresses, random instance IDs only
+- **Hardcoded endpoint**: URL and app ID cannot be overridden (prevents redirect attacks)
+- **Opt-out only**: Users can disable but cannot redirect telemetry
+
+### Opt-out Mechanisms
+
+You can disable telemetry in any of these ways:
+
+| Method | Description |
+|---|---|
+| Environment variable | `DO_NOT_TRACK=1` (global opt-out) |
+| App-specific variable | `CARETTA_NO_TELEMETRY=1` |
+| Configuration file | Set `telemetry.enabled = false` in `caretta.toml` |
+
+Example configuration:
+
+```toml
+[telemetry]
+enabled = false
+```
+
+### What is Collected
+
+- App start/exit events
+- Command execution (success/failure)
+- Workflow start/complete events with duration
+- Agent invocations
+- Error reports (type and message only)
+- Random instance ID (persisted at `~/.config/anon-telemetry/caretta/instance_id`)
+
+**No PII, no user content, no file paths, no network data is ever transmitted.**
+
 ## Supported Agents
 
 | Agent | Binary | Auto flag | Event streaming | Notes |

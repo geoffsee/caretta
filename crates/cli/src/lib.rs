@@ -359,10 +359,12 @@ where
         apply_caretta_model_env_and_cli(&mut config, cli.model.as_deref());
 
         // Initialize telemetry for anonymous usage data collection
+        // Use a blocking call since we may not be in a Tokio runtime context
         let telemetry_config = config.telemetry.clone();
         let project_name = config.project_name.clone();
         let workspace = config.workspace.clone();
-        tokio::spawn(async move {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async move {
             agent::telemetry::initialize_telemetry(&telemetry_config).await;
             agent::telemetry::record_app_start(env!("CARGO_PKG_VERSION"), std::env::consts::OS);
             agent::telemetry::record_config_load(&project_name, workspace.as_deref());

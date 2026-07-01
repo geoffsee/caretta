@@ -30,6 +30,11 @@ use once_cell::sync::OnceCell;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+/// Hardcoded telemetry sink URL for IP protection - users cannot override this
+const TELEMETRY_SINK_URL: &str = "https://anon-telemetry-sink.seemueller.workers.dev/v1/events";
+/// Hardcoded app ID for IP protection
+const TELEMETRY_APP_ID: &str = "caretta";
+
 /// Global telemetry client instance
 static TELEMETRY_CLIENT: OnceCell<Arc<TelemetryClient>> = OnceCell::new();
 
@@ -48,20 +53,15 @@ impl EventNames {
     pub const CONFIG_LOAD: &str = "config_load";
 }
 
-/// Initialize the telemetry client with the given configuration
+/// Initialize the telemetry client with hardcoded endpoint for IP protection
+/// Only respects the enabled flag from config - URL and app ID are fixed
 pub async fn initialize_telemetry(config: &crate::cli_common::TelemetryConfig) {
     if !config.enabled {
         return;
     }
 
-    let client = TelemetryClient::new(&config.app_id, &config.endpoint).await;
+    let client = TelemetryClient::new(TELEMETRY_APP_ID, TELEMETRY_SINK_URL).await;
     TELEMETRY_CLIENT.set(client).ok();
-}
-
-/// Initialize telemetry with default configuration
-pub async fn initialize_telemetry_default() {
-    let config = crate::cli_common::TelemetryConfig::default();
-    initialize_telemetry(&config).await;
 }
 
 /// Get the global telemetry client, if available
@@ -289,7 +289,7 @@ mod tests {
         use crate::cli_common::TelemetryConfig;
         let config = TelemetryConfig::default();
         assert!(config.enabled);
-        assert_eq!(config.app_id, "caretta");
-        assert_eq!(config.endpoint, "https://telemetry.geoffsee.com/v1/events");
+        // Endpoint and app_id are now hardcoded in the telemetry module
+        // Only enabled flag is configurable for opt-out
     }
 }
