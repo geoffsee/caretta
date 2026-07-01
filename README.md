@@ -230,6 +230,9 @@ Expect unexpected breaking changes.
 - [Configuration & Setup](docs/configuration.md) — CLI options, bot account setup for Code Review, supported agents, and general tips.
 - [Architecture](docs/architecture.md) — Project structure and internals.
 
+## License & Revenue Sharing
+caretta is dual-licensed under [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE); individuals, small teams, and organizations under the revenue threshold use it under those terms with no further obligation. Organizations (government or non-government) with **US $500,000+** annual revenue that put a significant portion of the code or product into production are asked to make contact first and share fairly — see [`REVENUE-SHARING.md`](REVENUE-SHARING.md).
+
 ## Contributing
 - Open Issue -> Fork Repo -> Create Pull Request
 
