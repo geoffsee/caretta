@@ -16,9 +16,10 @@ Caretta collects the following **anonymous** data through the [g-telemetry](http
 |---|---|---|
 | **App Metadata** | Version, platform (OS) | Understand usage across different environments |
 | **Instance ID** | Random UUID v4 (persisted locally) | Distinguish unique installations anonymously |
-| **Event Names** | App start, exit, command execution, workflow events | Track feature usage patterns |
-| **Event Properties** | Command names, success/failure, duration | Measure reliability and performance |
+| **Event Names** | App start, exit, command execution, workflow events, autopilot events | Track feature usage patterns |
+| **Event Properties** | Command names, success/failure, duration, repository, dispatch count | Measure reliability and performance |
 | **Agent Info** | Agent type, model, action | Understand which agents are used |
+| **Autopilot Data** | Repository, issues/PRs evaluated, dispatches sent | Monitor autopilot usage |
 | **Error Data** | Error type and message (no stack traces or content) | Identify and fix issues |
 | **Timestamps** | When events occur | Analyze usage patterns over time |
 
@@ -63,12 +64,15 @@ caretta
 ### Method 2: App-Specific Environment Variable
 
 ```sh
-# Disable only for Caretta
+# Disable only for Caretta CLI
 export CARETTA_NO_TELEMETRY=1
 caretta
+
+# Disable only for Caretta Autopilot Action
+export CARETTA_AUTILOOT_NO_TELEMETRY=1
 ```
 
-### Method 3: Configuration File
+### Method 3: Configuration File (CLI only)
 
 Add to your `caretta.toml`:
 
