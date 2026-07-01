@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright (c) 2024-2026 Geoff Seemueller
+# Copyright (c) 2026 Geoff Seemueller
 #
 # Licensed under the MIT License or Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
