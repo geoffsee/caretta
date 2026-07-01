@@ -7,6 +7,7 @@
 // Additionally, this file is subject to the Revenue Sharing Agreement terms
 // as defined in REVENUE-SHARING.md for covered organizations.
 
+use crate::agent::telemetry;
 use crate::agent::types::{AgentEvent, EVENT_SENDER};
 use regex::Regex;
 use serde_json::Value;
@@ -41,6 +42,8 @@ macro_rules! timed {
 
 pub fn die(msg: &str) -> ! {
     eprintln!("ERROR: {msg}");
+    // Track error
+    telemetry::record_error("fatal", msg);
     process::exit(1);
 }
 

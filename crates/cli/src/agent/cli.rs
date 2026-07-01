@@ -101,5 +101,6 @@ pub fn parse_args() -> Config {
         visual_regression,
         deploy,
         workspace: None,
+        telemetry: dev_cfg.telemetry,
     }
 }

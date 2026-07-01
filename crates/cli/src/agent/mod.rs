@@ -34,6 +34,7 @@ pub mod selftest;
 pub mod shell;
 pub mod snapshot;
 pub mod synthesize;
+pub mod telemetry;
 pub mod tracker;
 pub mod types;
 pub mod visual_regression;

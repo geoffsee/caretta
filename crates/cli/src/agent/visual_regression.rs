@@ -145,6 +145,7 @@ mod tests {
             visual_regression,
             deploy: DeployConfig::default(),
             workspace: None,
+            telemetry: cli_common::TelemetryConfig::default(),
         }
     }
 

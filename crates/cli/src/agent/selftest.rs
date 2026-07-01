@@ -504,6 +504,7 @@ mod tests {
             visual_regression: Default::default(),
             deploy: Default::default(),
             workspace: None,
+            telemetry: cli_common::TelemetryConfig::default(),
         };
         let report = run_self_test(&cfg);
         assert_eq!(report.agent, "claude");

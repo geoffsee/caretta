@@ -12,6 +12,7 @@ use crate::agent::issue::preflight;
 use crate::agent::launch::log_resolved_agent_launch;
 use crate::agent::process::stop_requested;
 use crate::agent::run::run_agent_with_env_in_dir;
+use crate::agent::telemetry;
 use crate::agent::types::{AgentEvent, Config, EVENT_SENDER, Workflow};
 use std::path::Path;
 
@@ -43,6 +44,9 @@ pub fn run_workflow_draft(cfg: &Config, workflow_id: &str) {
 
     preflight(cfg);
     log(&phase_cfg.log_start);
+
+    // Track workflow start
+    telemetry::record_workflow_start(workflow_id, &cfg.agent.to_string());
 
     let mut vars = gather_context_as_json(cfg, &wf.context);
     inject_common_vars(cfg, &mut vars);

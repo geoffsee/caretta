@@ -11,6 +11,7 @@ use crate::agent::adapter_dispatch;
 use crate::agent::cmd::{count_tokens, log};
 use crate::agent::launch::{auto_mode_overrides, merged_agent_env, model_selection_overrides};
 use crate::agent::process::{emit_event, set_active_child_pid, stop_requested};
+use crate::agent::telemetry;
 use crate::agent::types::{
     AgentEvent, AssistantMessage, Config, ContentBlock, EVENT_SENDER, RichAction,
 };
@@ -345,6 +346,8 @@ fn append_event_output(ev: &AgentEvent, output: &mut String) {
 }
 
 pub fn run_agent(cfg: &Config, prompt: &str) -> bool {
+    // Track agent invocation
+    telemetry::record_agent_invocation(&cfg.agent.to_string(), &cfg.model, "run");
     run_agent_with_env(cfg, prompt, &[])
 }
 

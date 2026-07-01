@@ -45,6 +45,7 @@ junie = { package = "caretta-junie", path = "../junie" }
 xai = { package = "caretta-xai", path = "../xai" }
 agent-runtime = { package = "caretta-agent-runtime", path = "../agent-runtime" }
 anyhow = "1"
+once_cell = "1.18"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1", features = ["derive"] }
@@ -58,6 +59,7 @@ handlebars = "6"
 serde_yaml = "0.9"
 indexmap = { version = "2", features = ["serde"] }
 tempfile = "3"
+anon-telemetry = { path = "../../../g-telemetry/packages/rust-client" }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dioxus = { version = "0.6", features = ["desktop"] }

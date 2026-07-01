@@ -25,3 +25,16 @@ paths = [
     "crates/cli/src/agent/config_store.rs",
     "crates/cli/src/agent/shell.rs",
 ]
+
+# Anonymous telemetry configuration for usage analytics and IP protection
+# This integrates with g-telemetry (https://github.com/geoffsee/g-telemetry)
+# to collect anonymous usage data while protecting user privacy.
+# 
+# Opt-out mechanisms:
+# - Set DO_NOT_TRACK=1 environment variable
+# - Set CARETTA_NO_TELEMETRY=1 environment variable
+# - Set telemetry.enabled = false in this configuration
+#[telemetry]
+# enabled = true
+# endpoint = "https://telemetry.geoffsee.com/v1/events"
+# app_id = "caretta"

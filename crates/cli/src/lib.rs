@@ -41,6 +41,7 @@ pub mod custom_themes;
 pub mod ui;
 
 pub use agent::types::{Agent, Config, SkillPaths};
+pub use cli_common;
 
 use agent::actions::{ActionContext, lookup_action};
 use agent::auto_merge::{run_auto_merge_stack, run_automerge_queue, run_branch_sync};
@@ -282,8 +283,14 @@ where
         let mut config = parse_args();
         overrides(&mut config);
         CONFIG_OVERRIDE
-            .set(config)
+            .set(config.clone())
             .expect("failed to set CONFIG_OVERRIDE in wasm32");
+
+        // Initialize telemetry for web version
+        agent::telemetry::initialize_telemetry(&config.telemetry).await;
+        agent::telemetry::record_app_start(env!("CARGO_PKG_VERSION"), "web");
+        agent::telemetry::record_ui_launch();
+
         dioxus::launch(App);
     }
 
@@ -350,6 +357,16 @@ where
         );
 
         apply_caretta_model_env_and_cli(&mut config, cli.model.as_deref());
+
+        // Initialize telemetry for anonymous usage data collection
+        let telemetry_config = config.telemetry.clone();
+        let project_name = config.project_name.clone();
+        let workspace = config.workspace.clone();
+        tokio::spawn(async move {
+            agent::telemetry::initialize_telemetry(&telemetry_config).await;
+            agent::telemetry::record_app_start(env!("CARGO_PKG_VERSION"), std::env::consts::OS);
+            agent::telemetry::record_config_load(&project_name, workspace.as_deref());
+        });
 
         // CLI `--preset` wins over caretta.toml and library overrides — fail fast
         // with the available list if the name doesn't match a real preset dir.

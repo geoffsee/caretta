@@ -148,6 +148,7 @@ pub fn save_dev_config(root: &str, cfg: &Config) -> Result<(), String> {
         test: cfg.test.clone(),
         visual_regression: cfg.visual_regression.clone(),
         deploy: cfg.deploy.clone(),
+        telemetry: cfg.telemetry.clone(),
     };
 
     let toml = toml::to_string_pretty(&file_cfg).map_err(|e| e.to_string())?;
