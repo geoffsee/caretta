@@ -1,3 +1,12 @@
+// Copyright (c) 2024-2026 Geoff Seemueller
+//
+// Licensed under the MIT License or Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// See LICENSE-MIT or LICENSE-APACHE for the full license text.
+//
+// Additionally, this file is subject to the Revenue Sharing Agreement terms
+// as defined in REVENUE-SHARING.md for covered organizations.
+
 use crate::agent::tracker::TrackerInfo;
 use crate::agent::types::{AgentEvent, Config, RichAction, should_use_event_model};
 use crate::ui::components::{format_cost_usd, format_token_count, format_tokens_per_second};

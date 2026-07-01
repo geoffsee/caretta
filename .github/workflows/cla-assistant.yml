@@ -1,0 +1,27 @@
+name: "CLA Assistant"
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize]
+  push:
+    branches: [master, main]
+
+jobs:
+  CLA-Assistant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "CLA Assistant"
+        if: (github.event_name == 'pull_request_target' || github.event_name == 'push')
+        uses: contributor-assistant/cla-assistant@v2.3.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Path to the CLA document in your repository
+          CLA_DOCUMENT_PATH: "CLA.md"
+          # Branch to store CLA signatures
+          CLA_BRANCH: "cla-signatures"
+          # Custom message for the CLA check
+          CUSTOM_MESSAGE: "Thank you for your contribution! Please sign the Contributor License Agreement (CLA) before we can accept your pull request. Click the 'Details' link below to sign."
+          # Allow users from specific organizations to be auto-approved
+          ALLOWED_ORGANIZATIONS: ""
+          # Require CLA to be signed by all commit authors
+          REQUIRE_ALL_COMMITTERS_SIGN: true
