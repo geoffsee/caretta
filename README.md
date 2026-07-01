@@ -1,5 +1,5 @@
 # caretta
-Workflow-driven agents
+Caretta is an open, local-first workflow runtime for repo agents: it turns Claude, Codex, Gemini, Copilot, Cline, Junie, Cursor, and other agent CLIs into repeatable software-factory workflows across desktop, web, CLI, and GitHub Actions.
 
 - Desktop
 - Web
