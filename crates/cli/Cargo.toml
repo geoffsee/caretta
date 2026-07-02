@@ -59,7 +59,7 @@ handlebars = "6"
 serde_yaml = "0.9"
 indexmap = { version = "2", features = ["serde"] }
 tempfile = "3"
-anon-telemetry = { path = "../../../g-telemetry/packages/rust-client" }
+anon-telemetry = "0.1.1"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dioxus = { version = "0.6", features = ["desktop"] }
